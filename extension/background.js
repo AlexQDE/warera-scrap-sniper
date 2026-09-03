@@ -4,10 +4,13 @@
 //
 // The key lives in chrome.storage.local (this browser profile, this
 // extension) and is sent only as the x-api-key header to api2.warera.io.
-import { fetchBook } from './lib/api.mjs';
+import { fetchBook, fetchSales } from './lib/api.mjs';
 
 const DEFAULT_INTERVAL_SEC = 30;
 const MIN_INTERVAL_SEC = 10;
+const SALES_TTL_MS = 3 * 60 * 1000;   // one item's fills are re-read at most every 3 minutes
+const SALES_HOURS = 72;
+const SALES_MAX_PAGES = 5;            // 500 fills; a busy common item may not reach 72 h, and says so
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   handle(msg)
@@ -48,6 +51,26 @@ async function handle(msg) {
         return { error: 'key-rejected', message: e.message };
       }
       return { error: e.code ?? 'internal', message: e.message, book };
+    }
+  }
+
+  if (msg?.type === 'sales') {
+    const code = String(msg.itemCode ?? '');
+    if (!/^[a-z0-9]{1,24}$/i.test(code)) return { error: 'bad-item', message: 'no item code' };
+    const storeKey = `sales:${code}`;
+    const got = await chrome.storage.local.get(['settings', storeKey]);
+    const key = String(got.settings?.apiKey ?? '').trim();
+    if (!key) return { error: 'no-key', message: 'no API key set' };
+    const cached = got[storeKey] ?? null;
+    if (!msg.force && cached?.at && Date.now() - Date.parse(cached.at) < SALES_TTL_MS) return { sales: cached };
+    try {
+      const r = await fetchSales(fetch, key, code, { hours: SALES_HOURS, maxPages: SALES_MAX_PAGES });
+      const fresh = { code, hours: SALES_HOURS, fills: r.fills, pages: r.pages, complete: r.complete, at: new Date().toISOString() };
+      await chrome.storage.local.set({ [storeKey]: fresh });
+      return { sales: fresh };
+    } catch (e) {
+      if (e.code === 'key-rejected') return { error: 'key-rejected', message: e.message };
+      return { error: e.code ?? 'internal', message: e.message, sales: cached };
     }
   }
 

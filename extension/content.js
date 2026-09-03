@@ -18,13 +18,17 @@
 
   const { scrapTable } = await import(chrome.runtime.getURL('lib/scraplib.mjs'));
   const dom = await import(chrome.runtime.getURL('lib/dom.mjs'));
+  const { salesStats } = await import(chrome.runtime.getURL('lib/sales.mjs'));
 
   const DEFAULTS = { minMarginPct: 0, intervalSec: 30, collapsed: false };
   const TICK_MS = 5000;
+  const SALES_REFRESH_MS = 3 * 60 * 1000;
 
   const state = {
     settings: { ...DEFAULTS }, book: null, notice: null, error: null, summary: null, busy: false,
     noKey: false, keyRejected: false,
+    sales: null, salesCode: null, salesBusy: false, salesError: null,   // recent fills of the filtered item
+    pickerShowAll: false,                                               // "show all" pressed in the item picker
   };
 
   // ---------- settings (the API key stays in storage and in the background worker, never here) ----------
@@ -69,6 +73,26 @@
     } finally {
       state.busy = false;
     }
+  }
+
+  // ---------- recent fills of the filtered item (asked from the background worker) ----------
+  async function refreshSales(code, force = false) {
+    if (!code || state.salesBusy) return;
+    const fresh = state.salesCode === code && state.sales?.at && Date.now() - Date.parse(state.sales.at) < SALES_REFRESH_MS;
+    if (fresh && !force) return;
+    state.salesBusy = true;
+    try {
+      const r = await chrome.runtime.sendMessage({ type: 'sales', itemCode: code, force });
+      state.salesCode = code;
+      state.sales = r?.sales ?? null;
+      state.salesError = r?.error && r.error !== 'no-key' ? (r.message ?? r.error) : null;
+    } catch (e) {
+      state.salesError = e.message;
+    } finally {
+      state.salesBusy = false;
+    }
+    const bar = document.getElementById('scrap-sniper-bar');
+    if (bar && onMarket()) renderBar(bar, floors());
   }
 
   // ---------- per-rarity floors: scraps x the scrap price (highest buy order), nothing else ----------
@@ -126,6 +150,7 @@
         <div class="ss-caption"></div>
         <div class="ss-floors"></div>
         <div class="ss-summary"></div>
+        <div class="ss-sales"></div>
       </div>`;
     anchor.insertAdjacentElement(notice ? 'afterend' : 'beforebegin', bar);
     bar.querySelector('.ss-setup').addEventListener('click', (e) => {
@@ -209,6 +234,69 @@
       if (state.settings.minMarginPct) summary += `<span class="ss-label">highlighting from ${signed(state.settings.minMarginPct, 0)}% margin</span>`;
     }
     bar.querySelector('.ss-summary').innerHTML = summary;
+    bar.querySelector('.ss-sales').innerHTML = salesHtml(fl);
+  }
+
+  // ---------- recent sales strip: what the filtered item really sold for ----------
+  function salesHtml(fl) {
+    const code = dom.filteredItemCode(location.search);
+    if (!code) return '<span class="ss-muted">Click an item in the grid above to see what it really sold for in the last 72 h.</span>';
+    const label = dom.itemLabel(code);
+    const s = state.sales;
+    if (state.salesCode !== code || !s) {
+      return state.salesError
+        ? `<span class="ss-warn">recent sales of ${label} unavailable: ${state.salesError}</span>`
+        : `<span class="ss-muted">reading recent sales of ${label}…</span>`;
+    }
+    const rarity = dom.rarityFromItemCode(code);
+    const floor = fl && rarity ? fl[rarity].floor : null;
+    const st = salesStats(s.fills, { hours: s.hours ?? 72, floor });
+    if (!st.count) return `<span class="ss-label">sold in ${s.hours ?? 72} h</span> <span class="ss-muted">none: no ${label} changed hands</span>`;
+    const chips = st.recent.map((f) => `<span class="ss-fill${floor != null && f.price <= floor ? ' ss-fill-under' : ''}" title="${new Date(f.at).toLocaleString()}">${fmt(f.price)}</span>`).join('');
+    const span = s.complete ? `${s.hours ?? 72} h` : `${st.spanHours < 1 ? `${Math.round(st.spanHours * 60)} min` : `${st.spanHours.toFixed(1)} h`}`;
+    return `
+      <span class="ss-label">sold in ${span}</span>
+      <span><b>${st.count}</b> ${label}${s.complete ? '' : ` <span class="ss-warn" title="This item trades so often that the last ${st.count} fills do not reach ${s.hours ?? 72} h back; the figures cover ${span}.">(last ${st.count} fills)</span>`}</span>
+      <span>low <b>${fmt(st.low)}</b></span>
+      <span>median <b>${fmt(st.median)}</b></span>
+      <span>high <b>${fmt(st.high)}</b></span>
+      <span>last <b>${fmt(st.last.price)}</b> <span class="ss-muted">${ago(st.last.at)}</span></span>
+      <span>${st.lastHour} in the last hour</span>
+      <span class="${st.underFloor ? 'ss-hits' : 'ss-muted'}">${st.underFloor} at or under scrap value</span>
+      <span class="ss-fills" title="The ten most recent fills, newest first; green ones went at or under the scrap value">${chips}</span>
+      <span class="ss-muted">· read ${ago(s.at)}</span>`;
+  }
+
+  // ---------- the inventory picker behind "New item offer": keep only the filtered item ----------
+  function applyPickerFilter(code) {
+    const dialog = dom.pickerDialog();
+    if (!dialog) { state.pickerShowAll = false; return; }
+    const target = code ? dom.targetFromCode(code) : null;
+    let bar = dialog.querySelector(':scope .ss-pick-bar');
+    if (!target) { bar?.remove(); for (const el of dialog.querySelectorAll('[data-ss-pick]')) delete el.dataset.ssPick; return; }
+    const tiles = dom.pickerTiles(dialog);
+    let kept = 0;
+    for (const t of tiles) {
+      const match = t.slot === target.slot && t.rarity === target.rarity;
+      if (match) kept++;
+      const want = match || state.pickerShowAll ? 'show' : 'hide';
+      if (t.tile.dataset.ssPick !== want) t.tile.dataset.ssPick = want;
+    }
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.className = 'ss-pick-bar';
+      bar.addEventListener('click', (e) => {
+        if (!e.target.closest('.ss-pick-toggle')) return;
+        state.pickerShowAll = !state.pickerShowAll;
+        applyPickerFilter(code);
+      });
+      dialog.prepend(bar);
+    }
+    const label = dom.itemLabel(code);
+    const html = state.pickerShowAll
+      ? `<span>Showing all <b>${tiles.length}</b> items · <b>${kept}</b> ${label} among them</span><button type="button" class="ss-pick-toggle">only ${label}</button>`
+      : `<span>Showing only <b>${kept}</b> ${label} of ${tiles.length} items, to match the market filter</span><button type="button" class="ss-pick-toggle">show all</button>`;
+    if (bar.innerHTML !== html) bar.innerHTML = html;
   }
 
   // ---------- offers ----------
@@ -245,6 +333,8 @@
     const fl = floors();
     const code = dom.filteredItemCode(location.search);
     const fromCode = code ? dom.rarityFromItemCode(code) : null;
+    applyPickerFilter(code);
+    if (code) refreshSales(code);
 
     const rows = dom.offerRows().map((r) => {
       const rarity = fromCode ?? r.rarity;
@@ -280,7 +370,8 @@
 
   // ---------- loop ----------
   let timer = null;
-  const ours = (n) => !!(n?.closest?.('#scrap-sniper-bar, .ss-verdict') || n?.parentElement?.closest?.('#scrap-sniper-bar, .ss-verdict'));
+  const OURS = '#scrap-sniper-bar, .ss-verdict, .ss-pick-bar';
+  const ours = (n) => !!(n?.closest?.(OURS) || n?.parentElement?.closest?.(OURS));
   const schedule = () => { clearTimeout(timer); timer = setTimeout(scan, 250); };
   new MutationObserver((muts) => {
     if (muts.every((m) => ours(m.target))) return;
@@ -288,9 +379,11 @@
   }).observe(document.body, { childList: true, subtree: true, characterData: true });
 
   async function tick() {
+    if (document.hidden) return;              // a hidden tab reads nothing and draws nothing
     if (onMarket()) await refreshBook();
     scan();
   }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
   await tick();
   setInterval(tick, TICK_MS);
 })();

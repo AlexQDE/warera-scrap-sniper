@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { BOOK_URL, KEYLESS_LIMIT, ApiError, fetchBook } from './api.mjs';
+import { BOOK_URL, KEYLESS_LIMIT, ApiError, fetchBook, fetchSales, salesUrl } from './api.mjs';
 
 // The API, probed 2026-09-03: a request with a WRONG key is not refused, it is
 // answered from the keyless bucket (ratelimit-limit 100); an accepted key gets
@@ -64,5 +64,74 @@ describe('fetchBook', () => {
   it('surfaces other HTTP failures with their status', async () => {
     const { fetchImpl } = fake({ status: 503, body: {} });
     await expect(fetchBook(fetchImpl, 'k')).rejects.toMatchObject({ code: 'http', status: 503 });
+  });
+});
+
+// transaction.getPaginatedTransactions with itemCode (documented in openapi.json)
+// and no userId is the global feed of one item's market fills, newest first,
+// 100 per page with a cursor. Probed 2026-09-03: 100 jet fills spanned ~30 h.
+const NOW = Date.parse('2026-09-03T20:00:00.000Z');
+const fill = (hoursAgo, money, code = 'jet') => ({
+  _id: 'x', money, itemCode: code, quantity: 1, transactionType: 'itemMarket',
+  item: { code, state: 100, skills: {} }, createdAt: new Date(NOW - hoursAgo * 3600e3).toISOString(),
+});
+const pagedFake = (pages, { limit = 500 } = {}) => {
+  const calls = [];
+  const fetchImpl = async (url, opts) => {
+    calls.push({ url, opts });
+    const cursor = new URL(url).searchParams.get('input');
+    const idx = Math.min(calls.length - 1, pages.length - 1);
+    const page = pages[idx];
+    return {
+      ok: true, status: 200,
+      headers: new Headers({ 'ratelimit-limit': String(limit), 'ratelimit-remaining': '400', 'ratelimit-reset': '60' }),
+      json: async () => ({ result: { data: { items: page.items, nextCursor: page.next ?? null } } }),
+      _cursorInput: cursor,
+    };
+  };
+  return { fetchImpl, calls };
+};
+
+describe('fetchSales', () => {
+  it('asks for the item code with the key and stops once the window is covered', async () => {
+    const { fetchImpl, calls } = pagedFake([
+      { items: [fill(1, 383.8), fill(20, 390), fill(60, 379.2)], next: 'c2' },
+      { items: [fill(71, 401), fill(80, 350), fill(90, 340)], next: 'c3' },
+    ]);
+    const r = await fetchSales(fetchImpl, 'my-key', 'jet', { hours: 72, now: NOW, maxPages: 5 });
+    expect(calls).toHaveLength(2);
+    expect(calls[0].url).toBe(salesUrl('jet'));
+    expect(calls[0].opts.headers['x-api-key']).toBe('my-key');
+    expect(calls[1].url).toBe(salesUrl('jet', 'c2'));
+    expect(r.fills.map((f) => f.price)).toEqual([383.8, 390, 379.2, 401]);
+    expect(r.fills[0]).toMatchObject({ price: 383.8, state: 100, code: 'jet' });
+    expect(r.pages).toBe(2);
+    expect(r.complete).toBe(true);
+  });
+
+  it('stops at the last page even when the window is not yet covered', async () => {
+    const { fetchImpl, calls } = pagedFake([{ items: [fill(1, 100), fill(2, 101)], next: null }]);
+    const r = await fetchSales(fetchImpl, 'k', 'knife', { hours: 72, now: NOW });
+    expect(calls).toHaveLength(1);
+    expect(r.fills).toHaveLength(2);
+    expect(r.complete).toBe(true);
+  });
+
+  it('caps the pages it will walk and says the window is incomplete', async () => {
+    const page = { items: Array.from({ length: 100 }, (_, i) => fill(i / 100, 10)), next: 'more' };
+    const { fetchImpl, calls } = pagedFake([page, page, page, page]);
+    const r = await fetchSales(fetchImpl, 'k', 'gloves4', { hours: 72, now: NOW, maxPages: 2 });
+    expect(calls).toHaveLength(2);
+    expect(r.fills).toHaveLength(200);
+    expect(r.pages).toBe(2);
+    expect(r.complete).toBe(false);
+  });
+
+  it('refuses without a key and rejects a keyless-bucket answer', async () => {
+    const { fetchImpl, calls } = pagedFake([{ items: [fill(1, 1)], next: null }]);
+    await expect(fetchSales(fetchImpl, '', 'jet', { now: NOW })).rejects.toMatchObject({ code: 'no-key' });
+    expect(calls).toHaveLength(0);
+    const keyless = pagedFake([{ items: [fill(1, 1)], next: null }], { limit: KEYLESS_LIMIT });
+    await expect(fetchSales(keyless.fetchImpl, 'wrong', 'jet', { now: NOW })).rejects.toMatchObject({ code: 'key-rejected' });
   });
 });

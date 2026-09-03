@@ -51,6 +51,31 @@ export function rarityFromItemCode(code) {
   return WEAPON_RARITY[c] ?? null;
 }
 
+const SLOT_RE = /(helmet|chest|gloves|pants|boots|jet|tank|sniper|rifle|gun|knife)$/i;
+
+/** The slot off a skin name: "dieselBoots" -> boots, "winterJet" -> jet; null for avatars, flags, junk. */
+export function slotFromAlt(alt) {
+  const a = String(alt ?? '').trim();
+  if (!isItemImageAlt(a)) return null;
+  const m = SLOT_RE.exec(a);
+  return m ? m[1].toLowerCase() : null;
+}
+
+/** A market item code -> { slot, rarity } (boots5 -> legendary boots, jet -> mythic jet); null for non-gear. */
+export function targetFromCode(code) {
+  const rarity = rarityFromItemCode(code);
+  if (!rarity) return null;
+  const c = String(code);
+  const gear = /^(helmet|chest|boots|gloves|pants)[1-6]$/.exec(c);
+  return { slot: gear ? gear[1] : c, rarity };
+}
+
+/** "boots5" -> "legendary boots", "jet" -> "mythic jet"; unknown codes pass through. */
+export function itemLabel(code) {
+  const t = targetFromCode(code);
+  return t ? `${t.rarity} ${t.slot}` : String(code ?? '');
+}
+
 /** "392.991", "1,234.5", "1.858K" -> number; anything else -> null. */
 export function parsePrice(text) {
   const m = /^\s*([\d,]+(?:\.\d+)?)\s*([KkMm])?\s*$/.exec(String(text ?? ''));
@@ -164,6 +189,29 @@ export function taxNotice(root = document) {
     const t = e.textContent || '';
     return /market tax/i.test(t) && t.length < 240 && e.children.length > 0 && !e.querySelector('button');
   }) ?? null;
+}
+
+/**
+ * The inventory picker that "New item offer" -> "+" opens: a dialog whose text
+ * starts with "Item" and that lists every owned piece as a skin image in a
+ * rarity-bordered tile (450 of them for a full inventory, read 2026-09-03).
+ */
+export function pickerDialog(root = document) {
+  return [...root.querySelectorAll('[role="dialog"]')].find((d) => {
+    const t = (d.textContent || '').trim();
+    return /^Item\b/.test(t) && [...d.querySelectorAll('img')].some((i) => isItemImageAlt(i.getAttribute('alt')));
+  }) ?? null;
+}
+
+/** Every item tile in the picker: { img, tile, slot, rarity }. */
+export function pickerTiles(dialog) {
+  return [...dialog.querySelectorAll('img')]
+    .filter((i) => isItemImageAlt(i.getAttribute('alt')))
+    .map((img) => {
+      const tile = tileOf(img);
+      return { img, tile, slot: slotFromAlt(img.getAttribute('alt')), rarity: rarityFromBorder(tile ? getComputedStyle(tile).borderColor : null) };
+    })
+    .filter((t) => t.tile);
 }
 
 /** ?item=<code> from the current URL, when the list is filtered to one item. */

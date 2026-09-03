@@ -86,6 +86,24 @@
 #scrap-sniper-bar .ss-summary .ss-warn { color: var(--ss-warn); }
 #scrap-sniper-bar .ss-dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: 0; border: 1px solid rgba(255, 255, 255, 0.3); }
 
+/* recent sales strip */
+#scrap-sniper-bar .ss-sales { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; padding-top: 10px; border-top: 1px solid var(--ss-line); color: var(--ss-ink-2); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+#scrap-sniper-bar .ss-fills { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+#scrap-sniper-bar .ss-fill { padding: 1px 7px; border-radius: 999px; background: rgba(255, 255, 255, 0.06); border: 1px solid var(--ss-line); color: var(--ss-ink-2); font-size: 11.5px; }
+#scrap-sniper-bar .ss-fill-under { background: rgba(76, 217, 100, 0.14); border-color: rgba(76, 217, 100, 0.45); color: #9fe3ad; }
+
+/* the inventory picker: tiles that do not match the market filter are hidden */
+[data-ss-pick="hide"] { display: none !important; }
+.ss-pick-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin: 0 0 8px; padding: 6px 10px; border-radius: 8px;
+  background: rgba(76, 217, 100, 0.10); border: 1px solid rgba(76, 217, 100, 0.35);
+  color: #cfeed6; font-family: inherit; font-size: 12px; line-height: 1.35;
+}
+.ss-pick-bar b { color: #fff; font-weight: 700; }
+.ss-pick-toggle { flex: 0 0 auto; font: inherit; font-size: 12px; font-weight: 600; color: #e6e8ee; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+.ss-pick-toggle:hover { background: rgba(255, 255, 255, 0.16); }
+
 /* offers */
 [data-scrap-sniper] { position: relative; }
 [data-scrap-sniper="hit"] {

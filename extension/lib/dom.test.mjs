@@ -1,8 +1,50 @@
 import { describe, it, expect } from 'vitest';
 import {
   rarityFromBorder, rarityFromItemCode, parsePrice, isItemImageAlt, priceFromLines, verdict,
-  closestIndex, fmtQty,
+  closestIndex, fmtQty, slotFromAlt, targetFromCode, itemLabel,
 } from './dom.mjs';
+
+// The inventory picker behind "New item offer" shows every item as a skin
+// image whose name ends in the slot (dieselBoots, miamiHelmet, winterJet) inside
+// a rarity-bordered tile; the market filter puts the item code in the URL.
+describe('slotFromAlt', () => {
+  it('reads the slot off the skin name', () => {
+    expect(slotFromAlt('dieselBoots')).toBe('boots');
+    expect(slotFromAlt('miamiHelmet')).toBe('helmet');
+    expect(slotFromAlt('gsg9Pants')).toBe('pants');
+    expect(slotFromAlt('winterJet')).toBe('jet');
+    expect(slotFromAlt('1kSubRifle')).toBe('rifle');
+    expect(slotFromAlt('miamiKnife')).toBe('knife');
+  });
+
+  it('is null for avatars, flags and unknown names', () => {
+    expect(slotFromAlt('Nijntje avatar')).toBeNull();
+    expect(slotFromAlt('Netherlands flag')).toBeNull();
+    expect(slotFromAlt('')).toBeNull();
+  });
+});
+
+describe('targetFromCode', () => {
+  it('turns a market item code into the slot and rarity the picker should keep', () => {
+    expect(targetFromCode('boots5')).toEqual({ slot: 'boots', rarity: 'legendary' });
+    expect(targetFromCode('helmet1')).toEqual({ slot: 'helmet', rarity: 'common' });
+    expect(targetFromCode('jet')).toEqual({ slot: 'jet', rarity: 'mythic' });
+    expect(targetFromCode('gun')).toEqual({ slot: 'gun', rarity: 'uncommon' });
+  });
+
+  it('is null for anything that is not gear', () => {
+    expect(targetFromCode('scraps')).toBeNull();
+    expect(targetFromCode(null)).toBeNull();
+  });
+});
+
+describe('itemLabel', () => {
+  it('names gear the way a player says it', () => {
+    expect(itemLabel('boots5')).toBe('legendary boots');
+    expect(itemLabel('jet')).toBe('mythic jet');
+    expect(itemLabel('nothing')).toBe('nothing');
+  });
+});
 
 // Border colours read off app.warera.io/market/equipments on 2026-09-03 (grid
 // tiles and offer-row tiles alike, getComputedStyle(...).borderColor).

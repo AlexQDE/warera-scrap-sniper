@@ -28,6 +28,18 @@ It talks to the game's API only with **your own API key**, never without one.
 - a green outline and a **SNIPE** tag when the offer is under its scrap value
 - a gold **closest on page** tag on the offer nearest its scrap value
 
+**Recent sales of the filtered item.** Click an item in the game's grid and
+the toolbar adds what that item really sold for in the last 72 hours: how
+many changed hands, low, median, high, the last fill and how long ago, how
+many went at or under the scrap value, and the ten most recent prices as
+chips (green when at or under the scrap value). Read from the official
+transactions feed with your key.
+
+**A smaller inventory picker.** When the market is filtered to one item and
+you open **New item offer → +**, the picker shows only the pieces of that
+item (say, your legendary boots) instead of your whole inventory, with a
+**show all** button to lift the filter.
+
 **A settings page** behind the toolbar icon: your API key (with a Test button
 that tells you whether the API accepted it), the min margin and how often the
 scrap price is read.
@@ -98,7 +110,10 @@ keyless rate limit), drops the data and tells you the key was not accepted.
 
 The scrap price is read every 30 seconds by default (one request, shared
 between your open tabs; your key allows 500 a minute). Change the interval in
-the settings.
+the settings. The recent sales of the filtered item are read at most every 3
+minutes, up to 5 pages of 100 fills (a busy common item may not reach 72 h in
+500 fills; the strip says "first 500 only" when that happens). A hidden tab
+reads nothing.
 
 ## How the page is read
 
@@ -108,6 +123,8 @@ WarEra does not label offers with their rarity, so the extension reads:
   from the `?item=` code in the URL when the list is filtered to one item
 - **price** from the line just before the BUY button in each row
 - your own listing shows DELETE instead of BUY, so it is skipped
+- in the inventory picker, the **slot** from the skin image's name
+  (`dieselBoots`, `winterJet`) and the rarity from the tile border again
 
 If the game changes its layout, a verdict turns amber ("rarity unreadable")
 instead of guessing. Open an issue with a screenshot and it will be fixed.
@@ -122,7 +139,9 @@ npm test
 - `extension/manifest.json`, `content.js`, `content.css`: the toolbar and the verdicts
 - `extension/background.js`: holds the key, reads the scrap book
 - `extension/popup.html`, `popup.js`: the settings page
-- `extension/lib/api.mjs`: the one API call and the accepted-key check
+- `extension/lib/api.mjs`: the two API calls (scrap book, one item's recent
+  fills) and the accepted-key check
+- `extension/lib/sales.mjs`: the 72-hour sales statistics
 - `extension/lib/ladder.mjs`: the scrap ladder and the dismantle yield
 - `extension/lib/scraplib.mjs`: the per-rarity table, the order-book summary,
   the listing margin
@@ -155,6 +174,14 @@ Ključ ostaje u pregledaču i šalje se samo igrinom API-ju.
 scrap-a, gde je cena najviši kupovni nalog, ono što dobiješ ako scrap prodaš
 odmah), blok na svakoj ponudi poredi tu vrednost sa cenom kakva piše. Zeleni okvir i SNIPE znače da je ponuda ispod scrap vrednosti.
 "Min margin" određuje koliko posto ispod mora da bude.
+
+**Stvarne prodaje:** kad klikneš artikal u mreži, traka pokaže šta se za taj
+artikal stvarno platilo u poslednjih 72 h (broj, najniža, medijana, najviša,
+poslednja, koliko ispod scrap vrednosti, poslednjih deset cena).
+
+**Manji birač:** kad je market filtriran na jedan artikal i otvoriš "New item
+offer" pa "+", birač pokazuje samo te komade iz tvog inventara, sa dugmetom
+"show all" ako hoćeš sve.
 
 ## License
 
