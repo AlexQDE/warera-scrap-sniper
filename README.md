@@ -80,8 +80,11 @@ precision, so you compare 1:1.
 
 Works the same way in Edge, Brave, Opera and other Chromium browsers.
 
-**Updating:** pull or re-download, then click the ↻ (reload) icon on the
-extension's card in `chrome://extensions`. Your settings stay.
+**Updating:** pull or re-download, click the ↻ (reload) icon on the
+extension's card in `chrome://extensions`, **then reload the game page**
+(F5). A page that was open during the update keeps running the old script
+and shows a "Scrap Sniper was updated" notice with a Reload button until you
+do. Your settings stay.
 
 ### Your API key
 

@@ -27,6 +27,7 @@
   const state = {
     settings: { ...DEFAULTS }, book: null, notice: null, error: null, summary: null, busy: false,
     noKey: false, keyRejected: false,
+    stale: false,   // the extension was reloaded or updated under this page: only a page reload brings the new script
     sales: null, salesCode: null, salesBusy: false, salesError: null,   // recent fills of the filtered item
     pickerShowAll: false,                                               // "show all" pressed in the item picker
   };
@@ -57,7 +58,12 @@
 
   // ---------- the scrap book (asked from the background worker) ----------
   const isFresh = (b) => b?.at && Date.now() - Date.parse(b.at) < state.settings.intervalSec * 1000;
+  // Chrome keeps this script alive after the extension is reloaded, but every
+  // chrome.* call then fails with "Extension context invalidated"; the page has
+  // to be reloaded to get the new script. Say so instead of half-working.
+  const invalidated = (e) => /context invalidated/i.test(e?.message ?? '');
   async function refreshBook(force = false) {
+    if (state.stale) return;
     if (!force && isFresh(state.book) && !state.noKey && !state.keyRejected) return;
     state.busy = true;
     try {
@@ -69,6 +75,7 @@
       else if (r.book) state.book = r.book;
       state.error = r.error && !state.noKey && !state.keyRejected ? (r.message ?? r.error) : null;
     } catch (e) {
+      if (invalidated(e)) state.stale = true;
       state.error = e.message;
     } finally {
       state.busy = false;
@@ -77,7 +84,7 @@
 
   // ---------- recent fills of the filtered item (asked from the background worker) ----------
   async function refreshSales(code, force = false) {
-    if (!code || state.salesBusy) return;
+    if (!code || state.salesBusy || state.stale) return;
     const fresh = state.salesCode === code && state.sales?.at && Date.now() - Date.parse(state.sales.at) < SALES_REFRESH_MS;
     if (fresh && !force) return;
     state.salesBusy = true;
@@ -87,6 +94,7 @@
       state.sales = r?.sales ?? null;
       state.salesError = r?.error && r.error !== 'no-key' ? (r.message ?? r.error) : null;
     } catch (e) {
+      if (invalidated(e)) state.stale = true;
       state.salesError = e.message;
     } finally {
       state.salesBusy = false;
@@ -156,7 +164,8 @@
       </div>`;
     anchor.insertAdjacentElement(notice ? 'afterend' : 'beforebegin', bar);
     bar.querySelector('.ss-setup').addEventListener('click', (e) => {
-      if (e.target.closest('.ss-open-settings')) chrome.runtime.sendMessage({ type: 'openSettings' });
+      if (e.target.closest('.ss-reload-page')) { location.reload(); return; }
+      if (e.target.closest('.ss-open-settings')) chrome.runtime.sendMessage({ type: 'openSettings' }).catch(() => { state.stale = true; scan(); });
     });
 
     const input = bar.querySelector('.ss-margin-in');
@@ -186,24 +195,27 @@
   const SETUP_HTML = {
     noKey: `<div><b>Add your WarEra API key to start.</b><div class="ss-muted">Scrap Sniper reads the scrap price only with your own key, never without one. Create the key in the game under your account settings, then paste it into the extension settings.</div></div><button type="button" class="ss-open-settings">Open settings</button>`,
     rejected: `<div><b>The API did not accept this key.</b><div class="ss-muted">It answered as if no key were sent. Check the key for typos in the extension settings, or create a new one in the game.</div></div><button type="button" class="ss-open-settings">Open settings</button>`,
+    stale: `<div><b>Scrap Sniper was updated.</b><div class="ss-muted">This page still runs the old version and can no longer reach the extension. Reload the page to get the new one.</div></div><button type="button" class="ss-reload-page">Reload page</button>`,
   };
 
   function renderBar(bar, fl) {
     const b = state.book ?? {};
     bar.dataset.collapsed = state.settings.collapsed ? '1' : '0';
-    const setup = state.noKey || state.keyRejected;
+    const setup = state.stale || state.noKey || state.keyRejected;
     bar.dataset.setup = setup ? '1' : '0';
     const setupEl = bar.querySelector('.ss-setup');
-    const setupHtml = !setup ? '' : state.noKey ? SETUP_HTML.noKey : SETUP_HTML.rejected;
+    const setupHtml = !setup ? '' : state.stale ? SETUP_HTML.stale : state.noKey ? SETUP_HTML.noKey : SETUP_HTML.rejected;
     if (setupEl.innerHTML !== setupHtml) setupEl.innerHTML = setupHtml;
 
     const live = bar.querySelector('.ss-live');
     const stale = setup || !b.at || Date.now() - Date.parse(b.at) > state.settings.intervalSec * 3000 || !!state.error;
     live.dataset.stale = stale ? '1' : '0';
-    live.querySelector('.ss-live-text').textContent = state.noKey ? 'no API key'
-      : state.keyRejected ? 'key not accepted'
-        : state.error ? `read failed · showing ${ago(b.at)}` : `book ${ago(b.at)}`;
-    live.title = setup ? 'Open the extension settings and add your WarEra API key.'
+    live.querySelector('.ss-live-text').textContent = state.stale ? 'reload the page'
+      : state.noKey ? 'no API key'
+        : state.keyRejected ? 'key not accepted'
+          : state.error ? `read failed · showing ${ago(b.at)}` : `book ${ago(b.at)}`;
+    live.title = state.stale ? 'The extension was reloaded or updated; this page still runs the old script. Reload the page.'
+      : setup ? 'Open the extension settings and add your WarEra API key.'
       : state.error
         ? `The last scrap-book read failed: ${state.error}. The values shown come from the previous read.`
         : `The scrap order book is read every ${state.settings.intervalSec}s with your API key and shared between your tabs.`
@@ -343,7 +355,7 @@
     if (!onMarket()) { clear(); return; }
     const notice = anchorNotice();
     const bar = ensureBar(notice);
-    if (state.noKey || state.keyRejected) {
+    if (state.stale || state.noKey || state.keyRejected) {
       clearVerdicts();
       state.summary = null;
       if (bar) renderBar(bar, null);
