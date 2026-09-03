@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   rarityFromBorder, rarityFromItemCode, parsePrice, isItemImageAlt, priceFromLines, verdict,
-  closestIndex, fmtQty, slotFromAlt, targetFromCode, itemLabel,
+  closestIndex, fmtQty, slotFromAlt, targetFromCode, itemLabel, isPickerText,
 } from './dom.mjs';
 
 // The inventory picker behind "New item offer" shows every item as a skin
@@ -21,6 +21,21 @@ describe('slotFromAlt', () => {
     expect(slotFromAlt('Nijntje avatar')).toBeNull();
     expect(slotFromAlt('Netherlands flag')).toBeNull();
     expect(slotFromAlt('')).toBeNull();
+  });
+});
+
+describe('isPickerText', () => {
+  it('recognises the picker dialog by its textContent, where "Item" runs straight into the first number', () => {
+    // real textContent of the picker on 2026-09-03: no whitespace after the title
+    expect(isPickerText('Item27050%430.5100%15633%148.8100%')).toBe(true);
+    expect(isPickerText('Item\n270\n50%')).toBe(true);
+    expect(isPickerText('  Item')).toBe(true);
+  });
+
+  it('rejects the outer offer dialog and anything else starting with Item-something', () => {
+    expect(isPickerText('New item offerItemPriceWill be displayed')).toBe(false);
+    expect(isPickerText('Items for sale')).toBe(false);
+    expect(isPickerText('')).toBe(false);
   });
 });
 

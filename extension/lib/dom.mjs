@@ -197,10 +197,18 @@ export function taxNotice(root = document) {
  * rarity-bordered tile (450 of them for a full inventory, read 2026-09-03).
  */
 export function pickerDialog(root = document) {
-  return [...root.querySelectorAll('[role="dialog"]')].find((d) => {
-    const t = (d.textContent || '').trim();
-    return /^Item\b/.test(t) && [...d.querySelectorAll('img')].some((i) => isItemImageAlt(i.getAttribute('alt')));
-  }) ?? null;
+  return [...root.querySelectorAll('[role="dialog"]')].find((d) => (
+    isPickerText(d.textContent) && [...d.querySelectorAll('img')].some((i) => isItemImageAlt(i.getAttribute('alt')))
+  )) ?? null;
+}
+
+/**
+ * The picker's textContent is "Item" followed straight by the first tile's
+ * numbers ("Item27050%430.5…"), no whitespace, so a word boundary after "Item"
+ * does not exist there. Accept "Item" followed by anything but a letter.
+ */
+export function isPickerText(text) {
+  return /^Item(?![A-Za-z])/.test(String(text ?? '').trim());
 }
 
 /** Every item tile in the picker: { img, tile, slot, rarity }. */
