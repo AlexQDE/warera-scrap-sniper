@@ -100,26 +100,6 @@ The scrap price is read every 30 seconds by default (one request, shared
 between your open tabs; your key allows 500 a minute). Change the interval in
 the settings.
 
-## Optional: the local dashboard
-
-A page and a terminal table for watching the scrap price through the day
-without the game open, with the same per-rarity table, a listing checker and
-a bid/ask chart. Needs [Node.js](https://nodejs.org) 18 or newer.
-
-```
-npm install
-node dashboard/scrapdash.mjs          # opens on http://127.0.0.1:8765
-node dashboard/scrapdash.mjs --once   # one table in the terminal, then exit
-```
-
-The first run asks for your API key and saves it to a `.env` file next to
-`package.json` (ignored by git) so you never edit a file by hand. Delete
-`.env` to be asked again. The dashboard, like the extension, makes no
-keyless requests.
-
-Flags: `--port 9000`, `--interval 30` (seconds between reads, minimum 5),
-`--once`. History is appended to `data/scrap-ticks.ndjson` (ignored by git).
-
 ## How the page is read
 
 WarEra does not label offers with their rarity, so the extension reads:
@@ -147,7 +127,9 @@ npm test
 - `extension/lib/scraplib.mjs`: the per-rarity table, the order-book summary,
   the listing margin
 - `extension/lib/dom.mjs`: everything that reads the market page
-- `dashboard/`: the optional local server and page
+
+`npm install` is only for running the tests; the extension itself has no
+dependencies and no build step.
 
 ## Fair play and privacy
 
@@ -173,10 +155,6 @@ Ključ ostaje u pregledaču i šalje se samo igrinom API-ju.
 scrap-a, gde je cena najviši kupovni nalog, ono što dobiješ ako scrap prodaš
 odmah), blok na svakoj ponudi poredi tu vrednost sa cenom kakva piše. Zeleni okvir i SNIPE znače da je ponuda ispod scrap vrednosti.
 "Min margin" određuje koliko posto ispod mora da bude.
-
-**Dashboard** (opciono, treba Node 18+): `npm install`, pa
-`node dashboard/scrapdash.mjs`. Pri prvom pokretanju pita za ključ i sam ga
-sačuva u `.env`; ništa se ne kuca ručno u fajlove.
 
 ## License
 

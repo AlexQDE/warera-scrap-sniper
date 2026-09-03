@@ -1,10 +1,10 @@
-// Scrap-value maths shared by the extension and the dashboard.
+// Scrap-value maths behind the Scrap Sniper extension.
 //
-// Pure and import-light on purpose: the extension and the dashboard page load
-// this file straight into the browser as an ES module, so the table on screen
-// and the table in the tests are the same code. The ladder and the durability
-// formula are imported from the audited source (measured on 17.3 million real
-// dismantles - never re-derive them).
+// Pure and import-light on purpose: the extension loads this file straight
+// into the browser as an ES module, so the table on screen and the table in
+// the tests are the same code. The ladder and the durability formula are
+// imported from the audited source (measured on 17.3 million real dismantles
+// - never re-derive them).
 //
 // The rule: scrap value = scraps x the scrap price, nothing else. The scrap
 // price is the HIGHEST BUY ORDER (what the scraps fetch if sold right away);
