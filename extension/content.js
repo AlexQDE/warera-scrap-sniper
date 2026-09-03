@@ -267,21 +267,14 @@
       <span class="ss-muted">· read ${ago(s.at)}</span>`;
   }
 
-  // The game lays the picker's list out 3 tiles wide (max-width 220px) inside a
-  // card more than twice as wide, leaving the right side empty. Let the list use
-  // the card's full width, pinned to the width the card had before we touched it,
-  // so tiles wrap 7 per row and a short filtered list needs no scrolling.
+  // The picker card is shrink-to-fit: the game's list is 3 tiles wide (max-width
+  // 220px) and the card hugs it. Our bar is wider than that, so without care the
+  // bar stretches the card and leaves the right side empty. content.css gives
+  // the list and the bar one shared width (8 tiles a row); this only tags the
+  // list. No measuring, so it cannot pin a width read before layout settled.
   function widenPicker(card) {
     const list = [...card.querySelectorAll('*')].find((x) => /auto|scroll/.test(getComputedStyle(x).overflowY));
-    if (!list) return;
-    if (!card.dataset.ssWidth) card.dataset.ssWidth = String(Math.round(card.getBoundingClientRect().width));
-    const w = Number(card.dataset.ssWidth);
-    if (!(w > 0)) return;
-    const px = `${w}px`;
-    if (list.style.maxWidth !== px) { list.style.maxWidth = px; list.style.width = px; }
-    const inner = list.firstElementChild;
-    const grid = inner ? [...inner.children].find((c) => getComputedStyle(c).display === 'flex') : null;
-    for (const el of [inner, grid]) if (el && el.style.width !== 'auto') el.style.width = 'auto';
+    if (list && list.dataset.ssWide !== '1') list.dataset.ssWide = '1';
   }
 
   // ---------- the inventory picker behind "New item offer": keep only the filtered item ----------
@@ -313,10 +306,10 @@
     widenPicker(dom.pickerCard(dialog));
     const label = dom.itemLabel(code);
     const html = kept === 0
-      ? `<span>No <b>${label}</b> recognised among your <b>${tiles.length}</b> items, so nothing is hidden</span>`
+      ? `<span>No <b>${label}</b> recognised among ${tiles.length} items · nothing hidden</span>`
       : state.pickerShowAll
-        ? `<span>Showing all <b>${tiles.length}</b> items · <b>${kept}</b> ${label} among them</span><button type="button" class="ss-pick-toggle">only ${label}</button>`
-        : `<span>Showing only <b>${kept}</b> ${label} of ${tiles.length} items, to match the market filter</span><button type="button" class="ss-pick-toggle">show all</button>`;
+        ? `<span>All <b>${tiles.length}</b> items · ${kept} ${label}</span><button type="button" class="ss-pick-toggle">only ${label}</button>`
+        : `<span><b>${kept}</b> ${label} of ${tiles.length} items · market filter</span><button type="button" class="ss-pick-toggle">show all</button>`;
     if (bar.innerHTML !== html) bar.innerHTML = html;
   }
 

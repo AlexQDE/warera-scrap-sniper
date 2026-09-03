@@ -94,8 +94,14 @@
 
 /* the inventory picker: tiles that do not match the market filter are hidden */
 [data-ss-pick="hide"] { display: none !important; }
+/* The picker card hugs its content. The game's list is 220px (3 tiles); the bar
+   and the list share one width instead, so tiles wrap 8 a row and nothing is
+   left empty beside them. */
+[data-ss-wide] { max-width: min(480px, 60vw) !important; width: min(480px, 60vw) !important; }
+[data-ss-wide] > *, [data-ss-wide] > * > * { width: auto !important; }
 .ss-pick-bar {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  width: min(480px, 60vw); max-width: 100%; box-sizing: border-box; flex-wrap: wrap;
+  display: flex; align-items: center; justify-content: space-between; gap: 6px 10px;
   margin: 0 0 8px; padding: 6px 10px; border-radius: 8px;
   background: rgba(76, 217, 100, 0.10); border: 1px solid rgba(76, 217, 100, 0.35);
   color: #cfeed6; font-family: inherit; font-size: 12px; line-height: 1.35;
