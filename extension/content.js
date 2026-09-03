@@ -110,6 +110,8 @@
 
   // ---------- formatting ----------
   const onMarket = () => /\/market\/equipments/.test(location.pathname);
+  // The filtered item: the grid's selected tile first (Opera hides the query), the URL as fallback.
+  const currentCode = () => dom.selectedItemCode() ?? dom.filteredItemCode(location.search);
   // Gold amounts carry 3 decimals, the market's own precision (392.991, 1.495), so a floor reads 1:1 against a price.
   const fmt = (v, d = 3) => (v == null ? '–' : Number(v).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }));
   const signed = (v, d = 3) => (v < 0 ? '−' : '+') + fmt(Math.abs(v), d);
@@ -239,7 +241,7 @@
 
   // ---------- recent sales strip: what the filtered item really sold for ----------
   function salesHtml(fl) {
-    const code = dom.filteredItemCode(location.search);
+    const code = currentCode();
     if (!code) return '<span class="ss-muted">Click an item in the grid above to see what it really sold for in the last 72 h.</span>';
     const label = dom.itemLabel(code);
     const s = state.sales;
@@ -345,7 +347,7 @@
       return;
     }
     const fl = floors();
-    const code = dom.filteredItemCode(location.search);
+    const code = currentCode();
     const fromCode = code ? dom.rarityFromItemCode(code) : null;
     applyPickerFilter(code);
     if (code) refreshSales(code);

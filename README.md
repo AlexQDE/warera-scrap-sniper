@@ -78,7 +78,7 @@ precision, so you compare 1:1.
 5. Open WarEra → Market → the equipment tab. The bar appears under the
    "Taxed price" notice.
 
-Works the same way in Edge, Brave and other Chromium browsers.
+Works the same way in Edge, Brave, Opera and other Chromium browsers.
 
 **Updating:** pull or re-download, then click the ↻ (reload) icon on the
 extension's card in `chrome://extensions`. Your settings stay.
@@ -119,8 +119,9 @@ reads nothing.
 
 WarEra does not label offers with their rarity, so the extension reads:
 
-- **rarity** from the border colour of the item tile (six known colours), or
-  from the `?item=` code in the URL when the list is filtered to one item
+- **which item the list is filtered to** from the tile the game marks as
+  selected in its grid (its section gives the slot, its border the rarity);
+  the `?item=` part of the address is only a fallback, because Opera hides it
 - **price** from the line just before the BUY button in each row
 - your own listing shows DELETE instead of BUY, so it is skipped
 - in the inventory picker, the **slot** from the skin image's name

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   rarityFromBorder, rarityFromItemCode, parsePrice, isItemImageAlt, priceFromLines, verdict,
   closestIndex, fmtQty, slotFromAlt, targetFromCode, itemLabel, isPickerText, pickerDecision, pickerDialog,
+  selectedTileIndex, codeFromSelection,
 } from './dom.mjs';
 
 // The inventory picker behind "New item offer" shows every item as a skin
@@ -62,6 +63,40 @@ describe('pickerDialog', () => {
     const outer = fakeDialog({ text: 'New item offerItemPrice', hasBar: false, imgAlt: null });
     const empty = fakeDialog({ text: 'Item', hasBar: false, imgAlt: null });
     expect(pickerDialog(fakeRoot(outer, empty))).toBeNull();
+  });
+});
+
+// The market grid marks the clicked tile with classes no other tile in the grid
+// carries (2 extra hashed classes, read 2026-09-03); the rarity classes repeat
+// once per section, so they are not unique in the grid. Opera hides the ?item=
+// query, so the selection is read from the page and the URL is the fallback.
+describe('selectedTileIndex', () => {
+  it('finds the one tile whose classes appear nowhere else in the grid', () => {
+    const grid = ['base r1', 'base r2', 'base r1', 'base r2 selA selB'];
+    expect(selectedTileIndex(grid)).toBe(3);
+  });
+
+  it('is -1 when nothing is selected or the pick is ambiguous', () => {
+    expect(selectedTileIndex(['base r1', 'base r2', 'base r1', 'base r2'])).toBe(-1);
+    expect(selectedTileIndex(['base x', 'base y'])).toBe(-1);   // two tiles with unique classes
+    expect(selectedTileIndex([])).toBe(-1);
+  });
+});
+
+describe('codeFromSelection', () => {
+  it('turns a grid section and a tile rarity into the item code', () => {
+    expect(codeFromSelection('Pants', 'uncommon')).toBe('pants2');
+    expect(codeFromSelection('Boots', 'legendary')).toBe('boots5');
+    expect(codeFromSelection('Helmets', 'common')).toBe('helmet1');
+    expect(codeFromSelection('Chests', 'mythic')).toBe('chest6');
+    expect(codeFromSelection('Gloves', 'epic')).toBe('gloves4');
+    expect(codeFromSelection('Weapons', 'mythic')).toBe('jet');
+    expect(codeFromSelection('Weapons', 'common')).toBe('knife');
+  });
+
+  it('is null for an unknown section or an unreadable rarity', () => {
+    expect(codeFromSelection('Cases', 'rare')).toBeNull();
+    expect(codeFromSelection('Pants', null)).toBeNull();
   });
 });
 

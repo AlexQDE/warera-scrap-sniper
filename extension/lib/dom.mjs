@@ -245,6 +245,59 @@ export function pickerTiles(dialog) {
     .filter((t) => t.tile);
 }
 
+const SECTION_SLOT = { Weapons: 'weapon', Helmets: 'helmet', Chests: 'chest', Gloves: 'gloves', Pants: 'pants', Boots: 'boots' };
+const WEAPON_BY_RARITY = { common: 'knife', uncommon: 'gun', rare: 'rifle', epic: 'sniper', legendary: 'tank', mythic: 'jet' };
+
+/**
+ * Which tile of the market grid is selected, from the class lists of all its
+ * tiles: the clicked tile carries classes no other tile in the grid has (the
+ * rarity styling repeats once per section, so it never counts). -1 when no
+ * tile is unique, or more than one is.
+ */
+export function selectedTileIndex(classLists) {
+  const counts = new Map();
+  const lists = classLists.map((s) => String(s ?? '').split(/\s+/).filter(Boolean));
+  for (const l of lists) for (const k of l) counts.set(k, (counts.get(k) ?? 0) + 1);
+  const scores = lists.map((l) => l.filter((k) => counts.get(k) === 1).length);
+  const best = Math.max(0, ...scores);
+  if (best === 0) return -1;
+  const winners = scores.map((s, i) => (s === best ? i : -1)).filter((i) => i >= 0);
+  return winners.length === 1 ? winners[0] : -1;
+}
+
+/** A grid section heading ("Pants") and a tile rarity -> the item code ("pants2"). */
+export function codeFromSelection(section, rarity) {
+  const slot = SECTION_SLOT[String(section ?? '').trim()];
+  const tier = RARITIES.indexOf(rarity) + 1;
+  if (!slot || tier === 0) return null;
+  return slot === 'weapon' ? WEAPON_BY_RARITY[rarity] : `${slot}${tier}`;
+}
+
+/** The market grid's 36 tiles as { section, tile, rarity }, in page order. */
+export function gridTiles(root = document) {
+  const grid = [...root.querySelectorAll('div')].find((e) => (e.textContent || '').trim().startsWith('Weapons') && (e.textContent || '').length < 700);
+  if (!grid) return [];
+  const out = [];
+  const heads = [...grid.querySelectorAll('*')].filter((e) => e.children.length === 0 && SECTION_SLOT[(e.textContent || '').trim()]);
+  for (const h of heads) {
+    let c = h.parentElement;
+    while (c && c !== grid && c.querySelectorAll('img').length < 6) c = c.parentElement;
+    if (!c) continue;
+    for (const img of [...c.querySelectorAll('img')].slice(0, 6)) {
+      const tile = tileOf(img);
+      if (tile) out.push({ section: h.textContent.trim(), tile, rarity: rarityFromBorder(getComputedStyle(tile).borderColor) });
+    }
+  }
+  return out;
+}
+
+/** The item code the market is filtered to, read from the grid's selected tile; null when nothing is selected. */
+export function selectedItemCode(root = document) {
+  const tiles = gridTiles(root);
+  const i = selectedTileIndex(tiles.map((t) => t.tile.className));
+  return i < 0 ? null : codeFromSelection(tiles[i].section, tiles[i].rarity);
+}
+
 /** ?item=<code> from the current URL, when the list is filtered to one item. */
 export function filteredItemCode(search) {
   const m = /[?&]item=([A-Za-z0-9]+)/.exec(String(search ?? ''));
