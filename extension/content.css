@@ -1,0 +1,124 @@
+/* Scrap Sniper: a toolbar above the equipment market and a verdict block on
+   every offer. Styled to sit inside the game's dark panel: same tile borders
+   and gradients the game paints per rarity, inherited font family, muted ink. */
+
+#scrap-sniper-bar {
+  --ss-ink: #e6e8ee;
+  --ss-ink-2: #aab0bc;
+  --ss-muted: #7f8794;
+  --ss-line: rgba(255, 255, 255, 0.09);
+  --ss-good: #4cd964;
+  --ss-warn: #ffb648;
+  margin: 0 0 12px;
+  padding: 10px 14px 12px;
+  border: 1px solid var(--ss-line);
+  border-radius: 12px;
+  background: linear-gradient(180deg, #1d2028 0%, #15171c 100%);
+  color: var(--ss-ink);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+}
+#scrap-sniper-bar * { box-sizing: border-box; }
+#scrap-sniper-bar b { color: #fff; font-weight: 700; }
+#scrap-sniper-bar .ss-label { font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ss-muted); }
+
+/* head row */
+#scrap-sniper-bar .ss-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+#scrap-sniper-bar .ss-brand { display: inline-flex; align-items: center; gap: 7px; font-weight: 700; letter-spacing: 0.02em; color: #fff; }
+#scrap-sniper-bar .ss-logo { width: 22px; height: 22px; border-radius: 6px; display: inline-grid; place-items: center; background: linear-gradient(135deg, #4cd964, #1f7a35); color: #06130a; font-size: 13px; }
+#scrap-sniper-bar .ss-live { display: inline-flex; align-items: center; gap: 6px; color: var(--ss-ink-2); font-size: 12px; }
+#scrap-sniper-bar .ss-pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--ss-good); box-shadow: 0 0 0 0 rgba(76, 217, 100, 0.6); animation: ss-pulse 2s infinite; }
+#scrap-sniper-bar .ss-live[data-stale="1"] .ss-pulse { background: var(--ss-warn); animation: none; box-shadow: none; }
+@keyframes ss-pulse { 0% { box-shadow: 0 0 0 0 rgba(76, 217, 100, 0.55); } 70% { box-shadow: 0 0 0 7px rgba(76, 217, 100, 0); } 100% { box-shadow: 0 0 0 0 rgba(76, 217, 100, 0); } }
+#scrap-sniper-bar .ss-grow { flex: 1 1 auto; }
+#scrap-sniper-bar .ss-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--ss-line); background: rgba(255, 255, 255, 0.04); font-size: 12px; color: var(--ss-ink-2); }
+#scrap-sniper-bar .ss-chip.ss-warn { color: var(--ss-warn); border-color: rgba(255, 182, 72, 0.35); }
+#scrap-sniper-bar .ss-margin { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 9px; border-radius: 999px; border: 1px solid var(--ss-line); background: rgba(255, 255, 255, 0.04); }
+#scrap-sniper-bar .ss-margin .ss-label { margin-right: 4px; }
+#scrap-sniper-bar .ss-step { width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--ss-line); background: rgba(255, 255, 255, 0.06); color: var(--ss-ink); font: inherit; font-size: 14px; line-height: 1; cursor: pointer; padding: 0; }
+#scrap-sniper-bar .ss-step:hover { background: rgba(255, 255, 255, 0.14); }
+#scrap-sniper-bar .ss-margin-in { width: 44px; text-align: center; font: inherit; font-size: 13px; font-weight: 700; color: #fff; background: transparent; border: 0; outline: none; -moz-appearance: textfield; }
+#scrap-sniper-bar .ss-margin-in::-webkit-outer-spin-button, #scrap-sniper-bar .ss-margin-in::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+#scrap-sniper-bar .ss-icon { width: 28px; height: 28px; border-radius: 8px; border: 1px solid var(--ss-line); background: rgba(255, 255, 255, 0.04); color: var(--ss-ink-2); font: inherit; font-size: 14px; cursor: pointer; padding: 0; }
+#scrap-sniper-bar .ss-icon:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+#scrap-sniper-bar .ss-refresh.ss-busy { animation: ss-spin 0.8s linear infinite; }
+@keyframes ss-spin { to { transform: rotate(360deg); } }
+
+/* body */
+#scrap-sniper-bar .ss-body { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+#scrap-sniper-bar[data-collapsed="1"] .ss-body { display: none; }
+#scrap-sniper-bar[data-collapsed="1"] .ss-collapse { transform: rotate(-90deg); }
+#scrap-sniper-bar .ss-stats { display: flex; flex-wrap: wrap; gap: 6px 22px; padding-bottom: 10px; border-bottom: 1px solid var(--ss-line); }
+#scrap-sniper-bar .ss-stat { display: flex; flex-direction: column; min-width: 96px; }
+#scrap-sniper-bar .ss-stat b { font-size: 16px; line-height: 1.2; font-variant-numeric: tabular-nums; }
+#scrap-sniper-bar .ss-stat .ss-sub { font-size: 11px; color: var(--ss-muted); }
+
+/* rarity tiles: the game's own borders and gradients */
+#scrap-sniper-bar .ss-floors { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+#scrap-sniper-bar .ss-tile { display: flex; flex-direction: column; gap: 1px; padding: 7px 10px; border-radius: 9px; border: 1px solid var(--ss-b); background: linear-gradient(45deg, var(--ss-g1), var(--ss-g2)); min-width: 0; }
+#scrap-sniper-bar .ss-tile[data-ss-rarity="mythic"]    { --ss-b: rgb(150, 38, 40);  --ss-g1: rgb(65, 17, 17); --ss-g2: rgb(28, 7, 7); }
+#scrap-sniper-bar .ss-tile[data-ss-rarity="legendary"] { --ss-b: rgb(129, 120, 45); --ss-g1: rgb(56, 53, 20); --ss-g2: rgb(24, 23, 8); }
+#scrap-sniper-bar .ss-tile[data-ss-rarity="epic"]      { --ss-b: rgb(94, 59, 145);  --ss-g1: rgb(41, 26, 63); --ss-g2: rgb(18, 11, 27); }
+#scrap-sniper-bar .ss-tile[data-ss-rarity="rare"]      { --ss-b: rgb(37, 78, 167);  --ss-g1: rgb(17, 35, 74); --ss-g2: rgb(7, 15, 32); }
+#scrap-sniper-bar .ss-tile[data-ss-rarity="uncommon"]  { --ss-b: rgb(43, 110, 68);  --ss-g1: rgb(19, 49, 30); --ss-g2: rgb(8, 21, 13); }
+#scrap-sniper-bar .ss-tile[data-ss-rarity="common"]    { --ss-b: rgb(80, 112, 124); --ss-g1: rgb(36, 50, 55); --ss-g2: rgb(15, 21, 23); }
+#scrap-sniper-bar .ss-tile-name { font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; color: rgba(255, 255, 255, 0.72); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#scrap-sniper-bar .ss-tile-price { font-size: 16px; font-weight: 700; color: #fff; font-variant-numeric: tabular-nums; line-height: 1.2; }
+#scrap-sniper-bar .ss-tile-sub { font-size: 10.5px; color: rgba(255, 255, 255, 0.55); white-space: nowrap; }
+#scrap-sniper-bar .ss-caption { margin-bottom: -4px; }
+@media (max-width: 1100px) { #scrap-sniper-bar .ss-floors { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+/* summary line */
+#scrap-sniper-bar .ss-summary { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; color: var(--ss-ink-2); font-size: 12.5px; }
+#scrap-sniper-bar .ss-hits { color: var(--ss-good); font-weight: 700; }
+#scrap-sniper-bar .ss-hits.ss-none { color: var(--ss-ink-2); font-weight: 600; }
+#scrap-sniper-bar .ss-summary .ss-warn { color: var(--ss-warn); }
+#scrap-sniper-bar .ss-dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: 0; border: 1px solid rgba(255, 255, 255, 0.3); }
+
+/* offers */
+[data-scrap-sniper] { position: relative; }
+[data-scrap-sniper="hit"] {
+  outline: 2px solid #4cd964 !important;
+  outline-offset: -2px;
+  border-radius: 10px;
+  box-shadow: 0 0 0 4px rgba(76, 217, 100, 0.16), inset 0 0 0 100vmax rgba(76, 217, 100, 0.06);
+}
+.ss-verdict {
+  position: absolute;
+  right: 108px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 200px;
+  padding: 7px 10px 8px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(0, 0, 0, 0.28);
+  color: #aab0bc;
+  font-family: inherit;
+  font-size: 11.5px;
+  line-height: 1.35;
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
+.ss-verdict b { color: #fff; font-weight: 700; }
+.ss-verdict .ss-v-top { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+.ss-verdict .ss-v-label { font-size: 10px; letter-spacing: 0.07em; text-transform: uppercase; color: #7f8794; }
+.ss-verdict .ss-v-main { font-size: 14px; }
+.ss-verdict .ss-v-pct { color: #7f8794; }
+.ss-verdict .ss-v-tag { font-size: 10px; letter-spacing: 0.1em; font-weight: 800; padding: 1px 6px; border-radius: 4px; background: #4cd964; color: #06130a; }
+.ss-verdict .ss-meter { height: 5px; margin: 5px 0 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
+.ss-verdict .ss-meter i { display: block; height: 100%; border-radius: 3px; background: #8f96a3; }
+.ss-verdict .ss-v-bottom { display: flex; justify-content: space-between; gap: 8px; white-space: nowrap; color: #8f96a3; }
+.ss-verdict[data-kind="hit"] { border-color: rgba(76, 217, 100, 0.45); background: rgba(31, 122, 53, 0.22); color: #cfeed6; }
+.ss-verdict[data-kind="hit"] .ss-v-main { color: #4cd964; }
+.ss-verdict[data-kind="hit"] .ss-meter i { background: #4cd964; }
+.ss-verdict[data-kind="hit"] .ss-v-bottom { color: #9fd9ab; }
+.ss-verdict[data-kind="unknown"] { border-color: rgba(255, 182, 72, 0.35); color: #ffb648; }
+.ss-verdict .ss-v-best {
+  position: absolute; top: -9px; right: 8px;
+  padding: 1px 7px; border-radius: 999px;
+  background: #ffd166; color: #1a1400;
+  font-size: 9.5px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase;
+}

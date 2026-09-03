@@ -1,0 +1,18 @@
+{
+  "name": "warera-scrap-sniper",
+  "version": "1.0.0",
+  "description": "Chrome extension for WarEra: shows the scrap value of every gear offer on the equipment market and highlights the ones priced under it. Read-only, never buys.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "vitest run",
+    "dash": "node dashboard/scrapdash.mjs",
+    "dash:once": "node dashboard/scrapdash.mjs --once"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.8"
+  }
+}

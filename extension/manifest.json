@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "WarEra Scrap Sniper",
+  "version": "0.1.0",
+  "description": "On the equipment market, shows the live scrap floor per rarity and highlights offers priced under it. Read-only: it never buys.",
+  "permissions": ["storage"],
+  "host_permissions": ["https://api2.warera.io/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://app.warera.io/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["lib/*.mjs"],
+      "matches": ["https://app.warera.io/*"]
+    }
+  ]
+}

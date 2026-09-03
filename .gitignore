@@ -1,0 +1,13 @@
+# secrets: your API key lives here and nowhere else
+.env
+
+# dashboard history
+data/
+
+# Chrome "Pack extension" output: the .pem is a private signing key
+*.crx
+*.pem
+
+node_modules/
+.DS_Store
+Thumbs.db
