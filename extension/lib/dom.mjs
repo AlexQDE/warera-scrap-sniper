@@ -51,9 +51,11 @@ export function rarityFromItemCode(code) {
   return WEAPON_RARITY[c] ?? null;
 }
 
-const SLOT_RE = /(helmet|chest|gloves|pants|boots|jet|tank|sniper|rifle|gun|knife)$/i;
+// A skin name ends in the slot ("dieselBoots"); without skins the image is
+// named by the plain item code ("chest2", "tank") or a label ("Chest T2").
+const SLOT_RE = /(helmet|chest|gloves|pants|boots|jet|tank|sniper|rifle|gun|knife)(?:\s*t?\d+)?\s*$/i;
 
-/** The slot off a skin name: "dieselBoots" -> boots, "winterJet" -> jet; null for avatars, flags, junk. */
+/** The slot off an item image name: "dieselBoots" -> boots, "chest2" -> chest, "winterJet" -> jet; null for avatars, flags, junk. */
 export function slotFromAlt(alt) {
   const a = String(alt ?? '').trim();
   if (!isItemImageAlt(a)) return null;

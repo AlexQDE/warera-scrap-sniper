@@ -18,9 +18,19 @@ describe('slotFromAlt', () => {
     expect(slotFromAlt('miamiKnife')).toBe('knife');
   });
 
+  it('reads the slot off a plain item code or name when the player uses no skins', () => {
+    expect(slotFromAlt('chest2')).toBe('chest');
+    expect(slotFromAlt('boots5')).toBe('boots');
+    expect(slotFromAlt('helmet1')).toBe('helmet');
+    expect(slotFromAlt('tank')).toBe('tank');
+    expect(slotFromAlt('Chest T2')).toBe('chest');
+    expect(slotFromAlt('Uncommon chest')).toBe('chest');
+  });
+
   it('is null for avatars, flags and unknown names', () => {
     expect(slotFromAlt('Nijntje avatar')).toBeNull();
     expect(slotFromAlt('Netherlands flag')).toBeNull();
+    expect(slotFromAlt('chestnut')).toBeNull();
     expect(slotFromAlt('')).toBeNull();
   });
 });

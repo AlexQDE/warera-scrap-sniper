@@ -307,8 +307,11 @@
     }
     widenPicker(dom.pickerCard(dialog));
     const label = dom.itemLabel(code);
+    // When nothing matched, name a few images the page could not describe, so a
+    // screenshot is enough to tell what an unskinned or new skin is called.
+    const unread = [...new Set(tiles.filter((t, i) => decisions[i] === 'unknown').map((t) => t.img.getAttribute('alt')).filter(Boolean))].slice(0, 3);
     const html = kept === 0
-      ? `<span>No <b>${label}</b> recognised among ${tiles.length} items · nothing hidden</span>`
+      ? `<span>No <b>${label}</b> recognised among ${tiles.length} items · nothing hidden${unread.length ? ` · unread names: ${unread.join(', ')}` : ''}</span>`
       : state.pickerShowAll
         ? `<span>All <b>${tiles.length}</b> items · ${kept} ${label}</span><button type="button" class="ss-pick-toggle">only ${label}</button>`
         : `<span><b>${kept}</b> ${label} of ${tiles.length} items · market filter</span><button type="button" class="ss-pick-toggle">show all</button>`;
