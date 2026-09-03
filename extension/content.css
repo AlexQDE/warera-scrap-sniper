@@ -49,6 +49,15 @@
 /* body */
 #scrap-sniper-bar .ss-body { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
 #scrap-sniper-bar[data-collapsed="1"] .ss-body { display: none; }
+#scrap-sniper-bar .ss-muted { color: var(--ss-muted); font-size: 12px; }
+
+/* first-run: no key, or a key the API ignored */
+#scrap-sniper-bar .ss-setup { display: none; align-items: center; justify-content: space-between; gap: 14px; padding: 10px 12px; border-radius: 9px; border: 1px solid rgba(255, 182, 72, 0.35); background: rgba(255, 182, 72, 0.08); }
+#scrap-sniper-bar[data-setup="1"] .ss-setup { display: flex; }
+#scrap-sniper-bar[data-setup="1"] .ss-stats, #scrap-sniper-bar[data-setup="1"] .ss-caption,
+#scrap-sniper-bar[data-setup="1"] .ss-floors, #scrap-sniper-bar[data-setup="1"] .ss-summary { display: none; }
+#scrap-sniper-bar .ss-open-settings { flex: 0 0 auto; font: inherit; font-size: 12.5px; font-weight: 600; color: #fff; background: #1f7a35; border: 1px solid #2c9a45; border-radius: 7px; padding: 7px 12px; cursor: pointer; }
+#scrap-sniper-bar .ss-open-settings:hover { background: #24913f; }
 #scrap-sniper-bar[data-collapsed="1"] .ss-collapse { transform: rotate(-90deg); }
 #scrap-sniper-bar .ss-stats { display: flex; flex-wrap: wrap; gap: 6px 22px; padding-bottom: 10px; border-bottom: 1px solid var(--ss-line); }
 #scrap-sniper-bar .ss-stat { display: flex; flex-direction: column; min-width: 96px; }

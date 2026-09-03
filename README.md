@@ -5,7 +5,7 @@ equipment market, what every listed piece of gear is worth as scrap and
 highlights the offers priced under that value.
 
 It helps you decide. It never buys, never clicks, never touches your session.
-No account, no token, no server of ours.
+It talks to the game's API only with **your own API key**, never without one.
 
 ## What you get
 
@@ -27,6 +27,10 @@ No account, no token, no server of ours.
 - a green outline and a **SNIPE** tag when the offer is under its scrap value
 - a gold **closest on page** tag on the offer nearest its scrap value
 
+**A settings page** behind the toolbar icon: your API key (with a Test button
+that tells you whether the API accepted it), the min margin and how often the
+scrap price is read.
+
 ## The rule
 
 ```
@@ -45,22 +49,38 @@ At a scrap price of 0.226 that gives 1.356 for a common piece and 329.508 for
 a mythic one. Every gold amount is shown with three decimals, the market's own
 precision, so you compare 1:1.
 
-## Install the extension
-
-No token or account needed.
+## Install
 
 1. Get the files: `git clone https://github.com/AlexQDE/warera-scrap-sniper.git`,
    or **Code → Download ZIP** on GitHub and unzip it.
 2. Open `chrome://extensions`, switch on **Developer mode** (top right).
 3. Click **Load unpacked** and choose the `extension` folder (the one that
    contains `manifest.json`).
-4. Open WarEra → Market → the equipment tab. The bar appears under the
+4. Click the Scrap Sniper icon in the toolbar (pin it if it is hidden behind
+   the puzzle-piece button), paste your API key and press **Save**. The page
+   tests the key against the API and tells you whether it was accepted.
+5. Open WarEra → Market → the equipment tab. The bar appears under the
    "Taxed price" notice.
 
 Works the same way in Edge, Brave and other Chromium browsers.
 
 **Updating:** pull or re-download, then click the ↻ (reload) icon on the
-extension's card in `chrome://extensions`.
+extension's card in `chrome://extensions`. Your settings stay.
+
+### Your API key
+
+Create the key in the game, under your account settings, and paste it into
+the extension's settings page. Nothing works without it: the extension makes
+no keyless requests. Without a key the toolbar shows a notice with an
+**Open settings** button instead of any numbers.
+
+The key is stored in the browser's extension storage on your computer and is
+sent only as the `x-api-key` header to `api2.warera.io`. The page you are
+looking at never sees it: only the extension's background worker does.
+
+One thing worth knowing: the API does not refuse a wrong key, it answers as
+if no key were sent. Scrap Sniper detects that (the answer comes with the
+keyless rate limit), drops the data and tells you the key was not accepted.
 
 ## Using it
 
@@ -72,14 +92,15 @@ extension's card in `chrome://extensions`.
 - **Load more.** New rows get their verdict automatically.
 - **Collapse** the bar with the ▾ button; the setting is remembered.
 
-The scrap book is read every 30 seconds without any key (two requests a
-minute, against a keyless limit of 100) and shared between your open tabs.
+The scrap price is read every 30 seconds by default (one request, shared
+between your open tabs; your key allows 500 a minute). Change the interval in
+the settings.
 
 ## Optional: the local dashboard
 
-A page and a terminal table for watching the scrap price through the day,
-with the same per-rarity table, a listing checker and a bid/ask chart. Needs
-[Node.js](https://nodejs.org) 18 or newer.
+A page and a terminal table for watching the scrap price through the day
+without the game open, with the same per-rarity table, a listing checker and
+a bid/ask chart. Needs [Node.js](https://nodejs.org) 18 or newer.
 
 ```
 npm install
@@ -87,26 +108,13 @@ node dashboard/scrapdash.mjs          # opens on http://127.0.0.1:8765
 node dashboard/scrapdash.mjs --once   # one table in the terminal, then exit
 ```
 
+The first run asks for your API key and saves it to a `.env` file next to
+`package.json` (ignored by git) so you never edit a file by hand. Delete
+`.env` to be asked again. The dashboard, like the extension, makes no
+keyless requests.
+
 Flags: `--port 9000`, `--interval 30` (seconds between reads, minimum 5),
 `--once`. History is appended to `data/scrap-ticks.ndjson` (ignored by git).
-
-### Your API key (optional)
-
-The dashboard works without a key: keyless reads are allowed at 100 requests
-a minute and it uses 3. A key raises the limit to 200. If you want that:
-
-1. Copy the example file: `cp .env.example .env` (on Windows: `copy .env.example .env`).
-2. Open `.env` and put your key after the equals sign:
-   ```
-   WARERA_API_KEY=paste-your-key-here
-   ```
-   The key is the one you generate in the game, in your account settings.
-3. Start the dashboard again. It prints `using your API key` on startup.
-
-`.env` is listed in `.gitignore`, so it cannot be committed by accident. Never
-paste a key into an issue or a chat. The key is sent only as the `x-api-key`
-header to `api2.warera.io`, and only by the dashboard: the extension never
-sees it, because it never needs one.
 
 ## How the page is read
 
@@ -127,7 +135,10 @@ npm install
 npm test
 ```
 
-- `extension/manifest.json`, `content.js`, `content.css`: the extension itself
+- `extension/manifest.json`, `content.js`, `content.css`: the toolbar and the verdicts
+- `extension/background.js`: holds the key, reads the scrap book
+- `extension/popup.html`, `popup.js`: the settings page
+- `extension/lib/api.mjs`: the one API call and the accepted-key check
 - `extension/lib/ladder.mjs`: the scrap ladder and the dismantle yield
 - `extension/lib/scraplib.mjs`: the per-rarity table, the order-book summary,
   the listing margin
@@ -137,17 +148,22 @@ npm test
 ## Fair play and privacy
 
 Read-only by construction. The extension performs no purchase, no click and no
-form submission; it reads the public scrap order book and the page you already
-have open. It uses no cookies, no session, no analytics and no server other
-than the game's own API. Its only stored data is your min-margin and collapse
-setting, in the browser's extension storage.
+form submission; it reads the scrap order book with your own key and the page
+you already have open. It uses no cookies, no session, no analytics and no
+server other than the game's own API. Its only stored data is your key and
+your settings, in the browser's extension storage.
 
 ## Uputstvo (srpski)
 
-**Ekstenzija** (ne treba nikakav token): skini repo (Code → Download ZIP ili
-`git clone`), otvori `chrome://extensions`, uključi **Developer mode**, klikni
-**Load unpacked** i izaberi folder `extension`. Otvori Market, tab sa opremom:
-traka se pojavljuje ispod obaveštenja "Taxed price".
+**Instalacija:** skini repo (Code → Download ZIP ili `git clone`), otvori
+`chrome://extensions`, uključi **Developer mode**, klikni **Load unpacked** i
+izaberi folder `extension`. Klikni ikonicu Scrap Sniper u traci pregledača,
+nalepi svoj API ključ i pritisni **Save**. Stranica proveri ključ i kaže da li
+ga je API prihvatio.
+
+**API ključ:** pravi se u igri, u podešavanjima naloga. Bez ključa ekstenzija
+ne šalje nijedan zahtev, samo pokaže obaveštenje sa dugmetom za podešavanja.
+Ključ ostaje u pregledaču i šalje se samo igrinom API-ju.
 
 **Šta gledaš:** pločice po retkosti su scrap vrednost (broj scrap-ova × cena
 scrap-a, najniža prodajna), blok na svakoj ponudi poredi tu vrednost sa cenom
@@ -155,13 +171,8 @@ kakva piše. Zeleni okvir i SNIPE znače da je ponuda ispod scrap vrednosti.
 "Min margin" određuje koliko posto ispod mora da bude.
 
 **Dashboard** (opciono, treba Node 18+): `npm install`, pa
-`node dashboard/scrapdash.mjs` i otvori `http://127.0.0.1:8765`, ili
-`node dashboard/scrapdash.mjs --once` za tabelu u terminalu.
-
-**API ključ** (opciono, samo za dashboard): kopiraj `.env.example` u `.env` i
-upiši `WARERA_API_KEY=tvoj_kljuc`. Ključ se generiše u igri, u podešavanjima
-naloga. `.env` je u `.gitignore` i nikad ne ide u repo. Bez ključa sve radi,
-samo je limit 100 zahteva u minutu umesto 200, a dashboard troši 3.
+`node dashboard/scrapdash.mjs`. Pri prvom pokretanju pita za ključ i sam ga
+sačuva u `.env`; ništa se ne kuca ručno u fajlove.
 
 ## License
 

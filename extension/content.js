@@ -8,49 +8,62 @@
 // order), compared with the gear price exactly as the market shows it. No tax
 // is added or removed anywhere.
 //
-// Read-only by construction. The scrap book comes from a keyless
-// tradingOrder.getTopOrders read (api2 allows the game's own origin; the
-// keyless limit is 100 requests a minute and this uses two). Nothing here
-// clicks BUY, and nothing reads or sends the session.
+// Read-only by construction. The scrap book is read by the background worker
+// with the player's OWN API key (never without one; see lib/api.mjs) and
+// shared between tabs. This script only reads the page it is on and draws.
+// Nothing here clicks BUY, and nothing reads or sends the session.
 (async () => {
   if (window.__scrapSniper) return;
   window.__scrapSniper = true;
 
-  const { scrapTable, summarizeBook } = await import(chrome.runtime.getURL('lib/scraplib.mjs'));
+  const { scrapTable } = await import(chrome.runtime.getURL('lib/scraplib.mjs'));
   const dom = await import(chrome.runtime.getURL('lib/dom.mjs'));
 
-  const BOOK_URL = 'https://api2.warera.io/trpc/tradingOrder.getTopOrders?input='
-    + encodeURIComponent(JSON.stringify({ itemCode: 'scraps', limit: 100 }));
   const DEFAULTS = { minMarginPct: 0, intervalSec: 30, collapsed: false };
   const TICK_MS = 5000;
 
-  const state = { settings: { ...DEFAULTS }, book: null, notice: null, error: null, summary: null, busy: false };
+  const state = {
+    settings: { ...DEFAULTS }, book: null, notice: null, error: null, summary: null, busy: false,
+    noKey: false, keyRejected: false,
+  };
 
-  // ---------- storage (shared across tabs: one poll feeds every open market tab) ----------
+  // ---------- settings (the API key stays in storage and in the background worker, never here) ----------
   const storage = {
     async get(keys) { return new Promise((r) => chrome.storage.local.get(keys, r)); },
     async set(obj) { return new Promise((r) => chrome.storage.local.set(obj, r)); },
   };
+  const withoutKey = (s) => { const { apiKey, ...rest } = s ?? {}; return rest; };
   const loaded = await storage.get(['settings', 'book']);
-  state.settings = { ...DEFAULTS, ...(loaded.settings ?? {}) };
+  state.settings = { ...DEFAULTS, ...withoutKey(loaded.settings) };
   if (loaded.book?.at) state.book = loaded.book;
-  const saveSettings = () => storage.set({ settings: state.settings });
+  const saveSettings = async () => {
+    const { settings = {} } = await storage.get(['settings']);   // merge, so the key is kept
+    await storage.set({ settings: { ...settings, ...state.settings } });
+  };
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local' || !changes.settings) return;
+    const before = state.settings;
+    state.settings = { ...DEFAULTS, ...withoutKey(changes.settings.newValue) };
+    const input = document.querySelector('#scrap-sniper-bar .ss-margin-in');
+    if (input && Number(input.value) !== state.settings.minMarginPct) input.value = state.settings.minMarginPct;
+    const keyChanged = String(changes.settings.oldValue?.apiKey ?? '') !== String(changes.settings.newValue?.apiKey ?? '');
+    if (keyChanged || before.intervalSec !== state.settings.intervalSec) refreshBook(true).then(scan);
+    else scan();
+  });
 
-  // ---------- the scrap book ----------
+  // ---------- the scrap book (asked from the background worker) ----------
   const isFresh = (b) => b?.at && Date.now() - Date.parse(b.at) < state.settings.intervalSec * 1000;
   async function refreshBook(force = false) {
-    if (isFresh(state.book) && !force) return;
-    const shared = (await storage.get(['book'])).book;
-    if (!force && isFresh(shared)) { state.book = shared; return; }
+    if (!force && isFresh(state.book) && !state.noKey && !state.keyRejected) return;
     state.busy = true;
     try {
-      const res = await fetch(BOOK_URL, { credentials: 'omit' });
-      const json = await res.json();
-      if (json?.error) throw new Error(json.error.message || 'trpc error');
-      const s = summarizeBook(json?.result?.data);
-      state.book = { bid: s.bid, ask: s.ask, bidQty: s.bidQty, askQty: s.askQty, bidCapped: s.bidCapped, askCapped: s.askCapped, at: new Date().toISOString() };
-      state.error = null;
-      await storage.set({ book: state.book });
+      const r = await chrome.runtime.sendMessage({ type: 'book', force });
+      if (!r) throw new Error('no answer from the extension');
+      state.noKey = r.error === 'no-key';
+      state.keyRejected = r.error === 'key-rejected';
+      if (state.keyRejected) state.book = null;
+      else if (r.book) state.book = r.book;
+      state.error = r.error && !state.noKey && !state.keyRejected ? (r.message ?? r.error) : null;
     } catch (e) {
       state.error = e.message;
     } finally {
@@ -108,12 +121,16 @@
         <button type="button" class="ss-icon ss-collapse" title="Collapse or expand">▾</button>
       </div>
       <div class="ss-body">
+        <div class="ss-setup"></div>
         <div class="ss-stats"></div>
         <div class="ss-caption"></div>
         <div class="ss-floors"></div>
         <div class="ss-summary"></div>
       </div>`;
     anchor.insertAdjacentElement(notice ? 'afterend' : 'beforebegin', bar);
+    bar.querySelector('.ss-setup').addEventListener('click', (e) => {
+      if (e.target.closest('.ss-open-settings')) chrome.runtime.sendMessage({ type: 'openSettings' });
+    });
 
     const input = bar.querySelector('.ss-margin-in');
     input.value = state.settings.minMarginPct;
@@ -139,17 +156,32 @@
     return bar;
   }
 
+  const SETUP_HTML = {
+    noKey: `<div><b>Add your WarEra API key to start.</b><div class="ss-muted">Scrap Sniper reads the scrap price only with your own key, never without one. Create the key in the game under your account settings, then paste it into the extension settings.</div></div><button type="button" class="ss-open-settings">Open settings</button>`,
+    rejected: `<div><b>The API did not accept this key.</b><div class="ss-muted">It answered as if no key were sent. Check the key for typos in the extension settings, or create a new one in the game.</div></div><button type="button" class="ss-open-settings">Open settings</button>`,
+  };
+
   function renderBar(bar, fl) {
     const b = state.book ?? {};
     bar.dataset.collapsed = state.settings.collapsed ? '1' : '0';
+    const setup = state.noKey || state.keyRejected;
+    bar.dataset.setup = setup ? '1' : '0';
+    const setupEl = bar.querySelector('.ss-setup');
+    const setupHtml = !setup ? '' : state.noKey ? SETUP_HTML.noKey : SETUP_HTML.rejected;
+    if (setupEl.innerHTML !== setupHtml) setupEl.innerHTML = setupHtml;
 
     const live = bar.querySelector('.ss-live');
-    const stale = !b.at || Date.now() - Date.parse(b.at) > state.settings.intervalSec * 3000 || !!state.error;
+    const stale = setup || !b.at || Date.now() - Date.parse(b.at) > state.settings.intervalSec * 3000 || !!state.error;
     live.dataset.stale = stale ? '1' : '0';
-    live.querySelector('.ss-live-text').textContent = state.error ? `read failed · showing ${ago(b.at)}` : `book ${ago(b.at)}`;
-    live.title = state.error
-      ? `The last scrap-book read failed: ${state.error}. The values shown come from the previous read.`
-      : `The scrap order book is read every ${state.settings.intervalSec}s without a key and shared between your tabs.`;
+    live.querySelector('.ss-live-text').textContent = state.noKey ? 'no API key'
+      : state.keyRejected ? 'key not accepted'
+        : state.error ? `read failed · showing ${ago(b.at)}` : `book ${ago(b.at)}`;
+    live.title = setup ? 'Open the extension settings and add your WarEra API key.'
+      : state.error
+        ? `The last scrap-book read failed: ${state.error}. The values shown come from the previous read.`
+        : `The scrap order book is read every ${state.settings.intervalSec}s with your API key and shared between your tabs.`
+          + (b.remaining != null ? ` ${b.remaining} of ${b.limit} requests were left that minute.` : '');
+    if (setup) return;
 
     const cap = (c) => (c ? '+' : '');
     bar.querySelector('.ss-stats').innerHTML = `
@@ -204,6 +236,12 @@
     if (!onMarket()) { clear(); return; }
     const notice = anchorNotice();
     const bar = ensureBar(notice);
+    if (state.noKey || state.keyRejected) {
+      clearVerdicts();
+      state.summary = null;
+      if (bar) renderBar(bar, null);
+      return;
+    }
     const fl = floors();
     const code = dom.filteredItemCode(location.search);
     const fromCode = code ? dom.rarityFromItemCode(code) : null;
@@ -228,12 +266,16 @@
     if (bar) renderBar(bar, fl);
   }
 
-  function clear() {
-    document.getElementById('scrap-sniper-bar')?.remove();
+  function clearVerdicts() {
     for (const el of document.querySelectorAll('[data-scrap-sniper]')) {
       el.querySelector(':scope > .ss-verdict')?.remove();
       delete el.dataset.scrapSniper;
     }
+  }
+
+  function clear() {
+    document.getElementById('scrap-sniper-bar')?.remove();
+    clearVerdicts();
   }
 
   // ---------- loop ----------

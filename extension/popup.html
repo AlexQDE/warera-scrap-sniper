@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scrap Sniper settings</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-width: 380px; background: #15171c; color: #e6e8ee;
+    font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 520px; margin: 0 auto; padding: 16px 18px 18px; }
+  header { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  header img { width: 28px; height: 28px; border-radius: 7px; }
+  h1 { font-size: 15px; margin: 0; font-weight: 700; letter-spacing: 0.02em; }
+  header .sub { color: #8b909a; font-size: 12px; }
+  section { border: 1px solid rgba(255, 255, 255, 0.09); border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; background: #1b1e25; }
+  h2 { font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; color: #8b909a; margin: 0 0 8px; font-weight: 600; }
+  label { display: block; color: #aab0bc; font-size: 12px; margin: 8px 0 4px; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  input[type=text], input[type=password], input[type=number] {
+    width: 100%; font: inherit; color: #fff; background: #0e1014; border: 1px solid #3a3f4a; border-radius: 6px; padding: 7px 9px;
+  }
+  input[type=number] { width: 96px; }
+  input:focus { outline: 2px solid rgba(76, 217, 100, 0.45); outline-offset: 1px; }
+  button {
+    font: inherit; font-size: 12.5px; color: #e6e8ee; background: #262a33; border: 1px solid #3a3f4a; border-radius: 6px; padding: 6px 12px; cursor: pointer; white-space: nowrap;
+  }
+  button:hover { background: #30353f; }
+  button.primary { background: #1f7a35; border-color: #2c9a45; color: #fff; font-weight: 600; }
+  button.primary:hover { background: #24913f; }
+  .toggle { color: #8b909a; font-size: 12px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; margin-top: 6px; }
+  .help { color: #8b909a; font-size: 12px; margin: 6px 0 0; }
+  .status { margin-top: 10px; padding: 8px 10px; border-radius: 7px; font-size: 12.5px; background: rgba(255, 255, 255, 0.04); color: #aab0bc; min-height: 34px; }
+  .status.ok { background: rgba(76, 217, 100, 0.12); color: #9fe3ad; }
+  .status.bad { background: rgba(208, 59, 59, 0.14); color: #ff9f9f; }
+  .status.warn { background: rgba(255, 182, 72, 0.12); color: #ffd08a; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+  footer { color: #7f8794; font-size: 11.5px; line-height: 1.5; margin-top: 4px; }
+  footer p { margin: 4px 0; }
+  .actions { display: flex; gap: 8px; margin-top: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <img src="icons/icon48.png" alt="">
+    <div>
+      <h1>Scrap Sniper</h1>
+      <div class="sub">settings · the extension reads the scrap price only with your own key</div>
+    </div>
+  </header>
+
+  <section>
+    <h2>Your WarEra API key</h2>
+    <label for="key">API key</label>
+    <div class="row">
+      <input id="key" type="password" autocomplete="off" spellcheck="false" placeholder="paste your key">
+      <button id="test" type="button">Test</button>
+    </div>
+    <label class="toggle"><input id="show" type="checkbox"> show the key</label>
+    <p class="help">Create the key in the game, in your account settings, and paste it here. It is stored only in this browser and sent only to <code>api2.warera.io</code> as the request header. Nothing works without it: the extension makes no keyless requests.</p>
+    <div id="status" class="status">No key saved yet.</div>
+  </section>
+
+  <section>
+    <h2>Behaviour</h2>
+    <div class="grid">
+      <div>
+        <label for="margin">Min margin (%)</label>
+        <input id="margin" type="number" min="-50" max="500" step="1">
+        <p class="help">Only offers at least this far under their scrap value get the green outline. Negative shows near misses.</p>
+      </div>
+      <div>
+        <label for="interval">Read the scrap price every (s)</label>
+        <input id="interval" type="number" min="10" max="600" step="5">
+        <p class="help">One request per read, shared by all your tabs. Your key allows 500 a minute.</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="actions">
+    <button id="save" class="primary" type="button">Save</button>
+    <span id="saved" class="help" style="align-self:center"></span>
+  </div>
+
+  <footer>
+    <p>Read-only: no purchase, no click, no session, no tracking. Settings live in the browser's extension storage.</p>
+    <p id="book" ></p>
+  </footer>
+</main>
+<script src="popup.js"></script>
+</body>
+</html>

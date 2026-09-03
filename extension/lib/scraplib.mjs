@@ -1,9 +1,10 @@
-// Scrap-value maths shared by the extension and the optional dashboard.
+// Scrap-value maths shared by the extension and the dashboard.
 //
 // Pure and import-light on purpose: the extension and the dashboard page load
 // this file straight into the browser as an ES module, so the table on screen
 // and the table in the tests are the same code. The ladder and the durability
-// formula live in ladder.mjs (measured on 17.3 million real dismantles).
+// formula are imported from the audited source (measured on 17.3 million real
+// dismantles - never re-derive them).
 //
 // The rule: scrap value = scraps x the scrap price, nothing else. The market
 // shows gear prices as paid and the scrap price as paid, so no tax is added or

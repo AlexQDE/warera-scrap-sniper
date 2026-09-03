@@ -9,17 +9,20 @@
 // The maths: scrap value = scraps x the scrap price (lowest sell order),
 // compared with the gear price exactly as the market shows it. No tax anywhere.
 //
-// Read-only. One tradingOrder.getTopOrders call per interval. Works without
-// any API key (100 requests a minute are allowed keyless, this uses 3). If
-// WARERA_API_KEY is set in the environment or in a .env file next to
-// package.json, it is sent as the x-api-key header and the limit is 200.
-// The key never reaches the browser: the page only talks to this process.
+// Read-only, and only with YOUR API key: the dashboard makes no keyless
+// requests. On the first run it asks for the key and writes it to .env next
+// to package.json (gitignored) so you never edit that file by hand. Delete
+// .env to forget the key. The key is sent only as the x-api-key header to
+// api2.warera.io and never reaches the browser page, which talks only to this
+// process.
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { existsSync, mkdirSync, readFileSync, appendFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { RARITIES, summarizeBook, scrapTable } from '../extension/lib/scraplib.mjs';
+import { createInterface } from 'node:readline';
+import { RARITIES, scrapTable } from '../extension/lib/scraplib.mjs';
+import { fetchBook } from '../extension/lib/api.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..');
@@ -37,46 +40,37 @@ const KEEP_TICKS = 24 * 60 * 60 * 1000; // a day of history in memory and on the
 const DATA = join(ROOT, 'data');
 if (!existsSync(DATA)) mkdirSync(DATA, { recursive: true });
 const TICKS = join(DATA, 'scrap-ticks.ndjson');
+const ENV = join(ROOT, '.env');
 
-// ---------- the API key (optional) ----------
-function readKey() {
-  const clean = (s) => String(s ?? '').replace(/^\s*['"]?|['"]?\s*$/g, '').trim();
+// ---------- the API key (required) ----------
+const clean = (s) => String(s ?? '').replace(/^\s*['"]?|['"]?\s*$/g, '').trim();
+function storedKey() {
   if (process.env.WARERA_API_KEY) return clean(process.env.WARERA_API_KEY);
   try {
-    const lines = readFileSync(join(ROOT, '.env'), 'utf8').split(/\r?\n/).filter((l) => l.trim().startsWith('WARERA_API_KEY='));
+    const lines = readFileSync(ENV, 'utf8').split(/\r?\n/).filter((l) => l.trim().startsWith('WARERA_API_KEY='));
     const line = lines[lines.length - 1];
     if (line) return clean(line.slice(line.indexOf('=') + 1));
   } catch {
-    /* no .env: keyless is fine */
+    /* no .env yet */
   }
   return '';
 }
-const KEY = readKey();
-console.log(KEY ? '  using your API key (200 requests/min)' : '  no API key found, reading keyless (100 requests/min, plenty for this)');
-
-// ---------- a minimal tRPC-over-GET client ----------
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-async function trpc(path, input) {
-  const url = `https://api2.warera.io/trpc/${path}?input=${encodeURIComponent(JSON.stringify(input))}`;
-  let err;
-  for (let i = 0; i < 5; i++) {
-    try {
-      const res = await fetch(url, { headers: KEY ? { 'x-api-key': KEY } : {} });
-      if (res.status === 429) {
-        const wait = Math.max(2, Number(res.headers.get('ratelimit-reset') || res.headers.get('retry-after') || 60));
-        console.warn(`  ! rate limited, waiting ${wait}s`);
-        await sleep(wait * 1000);
-        continue;
-      }
-      const json = await res.json();
-      if (json?.error) throw new Error(json.error.message || 'trpc error');
-      return json?.result?.data;
-    } catch (e) {
-      err = e;
-      await sleep(Math.min(30000, 750 * 2 ** i));
-    }
+async function askKey() {
+  if (!process.stdin.isTTY) return '';
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const answer = await new Promise((r) => rl.question('  Paste your WarEra API key (create it in the game, under your account settings): ', r));
+  rl.close();
+  const key = clean(answer);
+  if (key) {
+    appendFileSync(ENV, `WARERA_API_KEY=${key}\n`);
+    console.log(`  saved to ${ENV} (gitignored). Delete that file to forget the key.`);
   }
-  throw err ?? new Error('gave up');
+  return key;
+}
+const KEY = storedKey() || (await askKey());
+if (!KEY) {
+  console.error('  An API key is required: the dashboard makes no keyless requests. Run again and paste it, or set WARERA_API_KEY.');
+  process.exit(1);
 }
 
 // ---------- state ----------
@@ -91,18 +85,21 @@ if (state.ticks.length) console.log(`  loaded ${state.ticks.length} ticks from $
 
 async function poll() {
   try {
-    const raw = await trpc('tradingOrder.getTopOrders', { itemCode: 'scraps', limit: 100 });
-    const book = summarizeBook(raw);
+    const { book, limit, remaining } = await fetchBook(fetch, KEY);
     const at = new Date().toISOString();
     const tick = { at, bid: book.bid, ask: book.ask, bidQty: book.bidQty, askQty: book.askQty, bidDepthQty: book.bidDepthQty, askDepthQty: book.askDepthQty };
     appendFileSync(TICKS, `${JSON.stringify(tick)}\n`);
     state.ticks.push(tick);
     const cut = sinceCutoff();
     while (state.ticks.length && Date.parse(state.ticks[0].at) < cut) state.ticks.shift();
-    state.book = book;
+    state.book = { ...book, limit, remaining };
     state.at = at;
     state.error = null;
   } catch (e) {
+    if (e.code === 'key-rejected') {
+      console.error(`  ! ${e.message}. Fix WARERA_API_KEY in ${ENV} (or delete the file to be asked again).`);
+      process.exit(1);
+    }
     state.error = `${new Date().toISOString()} ${e.message}`;
     console.warn(`  ! book read failed: ${e.message}`);
   }
@@ -118,7 +115,7 @@ if (ONCE) {
   }
   const b = state.book;
   const cap = (c) => (c ? ', top 100 shown' : '');
-  console.log(`\n  SCRAPS  ${state.at.slice(0, 19).replace('T', ' ')} UTC`);
+  console.log(`\n  SCRAPS  ${state.at.slice(0, 19).replace('T', ' ')} UTC   (key accepted, ${b.remaining} of ${b.limit} requests left this minute)`);
   console.log(`  scrap price ${money(b.ask)} (lowest ask, ${b.askQty} for sale${cap(b.askCapped)})   best bid ${money(b.bid)} (${b.bidQty} wanted${cap(b.bidCapped)})   spread ${money(b.spread)}\n`);
   console.log(`  ${'rarity'.padEnd(10)} ${'scraps'.padStart(7)} ${'scrap value'.padStart(12)} ${'at bid'.padStart(9)}`);
   for (const r of scrapTable({ bid: b.bid, ask: b.ask })) {
@@ -160,6 +157,6 @@ await poll();
 setInterval(poll, INTERVAL * 1000);
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`\n  scrap dashboard  ->  http://127.0.0.1:${PORT}`);
-  console.log(`  reading the scrap book every ${INTERVAL}s`);
+  console.log(`  reading the scrap book every ${INTERVAL}s with your key`);
   console.log('  Ctrl+C to stop\n');
 });
