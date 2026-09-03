@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   rarityFromBorder, rarityFromItemCode, parsePrice, isItemImageAlt, priceFromLines, verdict,
-  closestIndex, fmtQty, slotFromAlt, targetFromCode, itemLabel, isPickerText,
+  closestIndex, fmtQty, slotFromAlt, targetFromCode, itemLabel, isPickerText, pickerDecision,
 } from './dom.mjs';
 
 // The inventory picker behind "New item offer" shows every item as a skin
@@ -36,6 +36,20 @@ describe('isPickerText', () => {
     expect(isPickerText('New item offerItemPriceWill be displayed')).toBe(false);
     expect(isPickerText('Items for sale')).toBe(false);
     expect(isPickerText('')).toBe(false);
+  });
+});
+
+describe('pickerDecision', () => {
+  const target = { slot: 'pants', rarity: 'uncommon' };
+  it('shows a matching tile and hides a tile that is positively something else', () => {
+    expect(pickerDecision({ slot: 'pants', rarity: 'uncommon' }, target)).toBe('show');
+    expect(pickerDecision({ slot: 'pants', rarity: 'rare' }, target)).toBe('hide');
+    expect(pickerDecision({ slot: 'boots', rarity: 'uncommon' }, target)).toBe('hide');
+  });
+
+  it('never hides what it cannot read: an unknown skin name or an off-palette border stays visible', () => {
+    expect(pickerDecision({ slot: null, rarity: 'uncommon' }, target)).toBe('unknown');
+    expect(pickerDecision({ slot: 'pants', rarity: null }, target)).toBe('unknown');
   });
 });
 

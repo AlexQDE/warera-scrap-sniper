@@ -198,8 +198,31 @@ export function taxNotice(root = document) {
  */
 export function pickerDialog(root = document) {
   return [...root.querySelectorAll('[role="dialog"]')].find((d) => (
-    isPickerText(d.textContent) && [...d.querySelectorAll('img')].some((i) => isItemImageAlt(i.getAttribute('alt')))
+    isPickerText(pickerText(d)) && [...d.querySelectorAll('img')].some((i) => isItemImageAlt(i.getAttribute('alt')))
   )) ?? null;
+}
+
+/** The dialog's text without the filter bar the extension itself inserted. */
+function pickerText(dialog) {
+  return [...dialog.childNodes]
+    .filter((n) => !(n.nodeType === 1 && n.classList.contains('ss-pick-bar')))
+    .map((n) => n.textContent || '')
+    .join('');
+}
+
+/** The picker's card: the dialog child that is not our bar (it carries the dark background). */
+export function pickerCard(dialog) {
+  return [...dialog.children].find((c) => !c.classList.contains('ss-pick-bar')) ?? dialog;
+}
+
+/**
+ * Show, hide, or leave alone one picker tile for the market's target item.
+ * A tile the page could not describe (unknown skin name, off-palette border)
+ * is never hidden: 'unknown'.
+ */
+export function pickerDecision(tile, target) {
+  if (!tile?.slot || !tile?.rarity) return 'unknown';
+  return tile.slot === target.slot && tile.rarity === target.rarity ? 'show' : 'hide';
 }
 
 /**
@@ -211,13 +234,19 @@ export function isPickerText(text) {
   return /^Item(?![A-Za-z])/.test(String(text ?? '').trim());
 }
 
-/** Every item tile in the picker: { img, tile, slot, rarity }. */
+/**
+ * Every item tile in the picker: { img, tile, cell, slot, rarity }. `cell` is
+ * the flex-wrap child that holds the tile (hiding the tile alone leaves a gap
+ * in the grid, hiding the cell does not).
+ */
 export function pickerTiles(dialog) {
   return [...dialog.querySelectorAll('img')]
     .filter((i) => isItemImageAlt(i.getAttribute('alt')))
     .map((img) => {
       const tile = tileOf(img);
-      return { img, tile, slot: slotFromAlt(img.getAttribute('alt')), rarity: rarityFromBorder(tile ? getComputedStyle(tile).borderColor : null) };
+      const parent = tile?.parentElement;
+      const cell = parent && parent !== dialog && parent.children.length === 1 ? parent : tile;
+      return { img, tile, cell, slot: slotFromAlt(img.getAttribute('alt')), rarity: rarityFromBorder(tile ? getComputedStyle(tile).borderColor : null) };
     })
     .filter((t) => t.tile);
 }

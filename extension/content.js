@@ -272,16 +272,17 @@
     const dialog = dom.pickerDialog();
     if (!dialog) { state.pickerShowAll = false; return; }
     const target = code ? dom.targetFromCode(code) : null;
-    let bar = dialog.querySelector(':scope .ss-pick-bar');
+    let bar = dialog.querySelector('.ss-pick-bar');
     if (!target) { bar?.remove(); for (const el of dialog.querySelectorAll('[data-ss-pick]')) delete el.dataset.ssPick; return; }
     const tiles = dom.pickerTiles(dialog);
-    let kept = 0;
-    for (const t of tiles) {
-      const match = t.slot === target.slot && t.rarity === target.rarity;
-      if (match) kept++;
-      const want = match || state.pickerShowAll ? 'show' : 'hide';
-      if (t.tile.dataset.ssPick !== want) t.tile.dataset.ssPick = want;
-    }
+    const decisions = tiles.map((t) => dom.pickerDecision(t, target));
+    const kept = decisions.filter((d) => d === 'show').length;
+    // Nothing recognised as the target: hide nothing rather than leave an empty picker.
+    const filtering = kept > 0 && !state.pickerShowAll;
+    tiles.forEach((t, i) => {
+      const want = filtering && decisions[i] === 'hide' ? 'hide' : 'show';
+      if (t.cell.dataset.ssPick !== want) t.cell.dataset.ssPick = want;
+    });
     if (!bar) {
       bar = document.createElement('div');
       bar.className = 'ss-pick-bar';
@@ -290,12 +291,14 @@
         state.pickerShowAll = !state.pickerShowAll;
         applyPickerFilter(code);
       });
-      dialog.prepend(bar);
+      dom.pickerCard(dialog).prepend(bar);   // inside the card, so it sits on the dark background
     }
     const label = dom.itemLabel(code);
-    const html = state.pickerShowAll
-      ? `<span>Showing all <b>${tiles.length}</b> items · <b>${kept}</b> ${label} among them</span><button type="button" class="ss-pick-toggle">only ${label}</button>`
-      : `<span>Showing only <b>${kept}</b> ${label} of ${tiles.length} items, to match the market filter</span><button type="button" class="ss-pick-toggle">show all</button>`;
+    const html = kept === 0
+      ? `<span>No <b>${label}</b> recognised among your <b>${tiles.length}</b> items, so nothing is hidden</span>`
+      : state.pickerShowAll
+        ? `<span>Showing all <b>${tiles.length}</b> items · <b>${kept}</b> ${label} among them</span><button type="button" class="ss-pick-toggle">only ${label}</button>`
+        : `<span>Showing only <b>${kept}</b> ${label} of ${tiles.length} items, to match the market filter</span><button type="button" class="ss-pick-toggle">show all</button>`;
     if (bar.innerHTML !== html) bar.innerHTML = html;
   }
 
