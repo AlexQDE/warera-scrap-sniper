@@ -267,6 +267,23 @@
       <span class="ss-muted">· read ${ago(s.at)}</span>`;
   }
 
+  // The game lays the picker's list out 3 tiles wide (max-width 220px) inside a
+  // card more than twice as wide, leaving the right side empty. Let the list use
+  // the card's full width, pinned to the width the card had before we touched it,
+  // so tiles wrap 7 per row and a short filtered list needs no scrolling.
+  function widenPicker(card) {
+    const list = [...card.querySelectorAll('*')].find((x) => /auto|scroll/.test(getComputedStyle(x).overflowY));
+    if (!list) return;
+    if (!card.dataset.ssWidth) card.dataset.ssWidth = String(Math.round(card.getBoundingClientRect().width));
+    const w = Number(card.dataset.ssWidth);
+    if (!(w > 0)) return;
+    const px = `${w}px`;
+    if (list.style.maxWidth !== px) { list.style.maxWidth = px; list.style.width = px; }
+    const inner = list.firstElementChild;
+    const grid = inner ? [...inner.children].find((c) => getComputedStyle(c).display === 'flex') : null;
+    for (const el of [inner, grid]) if (el && el.style.width !== 'auto') el.style.width = 'auto';
+  }
+
   // ---------- the inventory picker behind "New item offer": keep only the filtered item ----------
   function applyPickerFilter(code) {
     const dialog = dom.pickerDialog();
@@ -293,6 +310,7 @@
       });
       dom.pickerCard(dialog).prepend(bar);   // inside the card, so it sits on the dark background
     }
+    widenPicker(dom.pickerCard(dialog));
     const label = dom.itemLabel(code);
     const html = kept === 0
       ? `<span>No <b>${label}</b> recognised among your <b>${tiles.length}</b> items, so nothing is hidden</span>`

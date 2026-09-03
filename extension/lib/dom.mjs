@@ -197,17 +197,11 @@ export function taxNotice(root = document) {
  * rarity-bordered tile (450 of them for a full inventory, read 2026-09-03).
  */
 export function pickerDialog(root = document) {
-  return [...root.querySelectorAll('[role="dialog"]')].find((d) => (
-    isPickerText(pickerText(d)) && [...d.querySelectorAll('img')].some((i) => isItemImageAlt(i.getAttribute('alt')))
-  )) ?? null;
-}
-
-/** The dialog's text without the filter bar the extension itself inserted. */
-function pickerText(dialog) {
-  return [...dialog.childNodes]
-    .filter((n) => !(n.nodeType === 1 && n.classList.contains('ss-pick-bar')))
-    .map((n) => n.textContent || '')
-    .join('');
+  return [...root.querySelectorAll('[role="dialog"]')].find((d) => {
+    const hasItems = [...d.querySelectorAll('img')].some((i) => isItemImageAlt(i.getAttribute('alt')));
+    // Once our bar is inside the card the text starts with the bar, so the bar itself is the proof.
+    return hasItems && (!!d.querySelector('.ss-pick-bar') || isPickerText(d.textContent));
+  }) ?? null;
 }
 
 /** The picker's card: the dialog child that is not our bar (it carries the dark background). */

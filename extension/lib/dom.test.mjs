@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   rarityFromBorder, rarityFromItemCode, parsePrice, isItemImageAlt, priceFromLines, verdict,
-  closestIndex, fmtQty, slotFromAlt, targetFromCode, itemLabel, isPickerText, pickerDecision,
+  closestIndex, fmtQty, slotFromAlt, targetFromCode, itemLabel, isPickerText, pickerDecision, pickerDialog,
 } from './dom.mjs';
 
 // The inventory picker behind "New item offer" shows every item as a skin
@@ -36,6 +36,32 @@ describe('isPickerText', () => {
     expect(isPickerText('New item offerItemPriceWill be displayed')).toBe(false);
     expect(isPickerText('Items for sale')).toBe(false);
     expect(isPickerText('')).toBe(false);
+  });
+});
+
+// A stand-in for the DOM: enough of querySelector(All)/textContent for pickerDialog.
+const fakeDialog = ({ text, hasBar, imgAlt }) => ({
+  textContent: text,
+  querySelector: (sel) => (sel === '.ss-pick-bar' && hasBar ? {} : null),
+  querySelectorAll: (sel) => (sel === 'img' && imgAlt ? [{ getAttribute: () => imgAlt }] : []),
+});
+const fakeRoot = (...dialogs) => ({ querySelectorAll: () => dialogs });
+
+describe('pickerDialog', () => {
+  it('finds the picker by its text before the bar exists', () => {
+    const d = fakeDialog({ text: 'Item27050%430.5', hasBar: false, imgAlt: 'gsg9Pants' });
+    expect(pickerDialog(fakeRoot(d))).toBe(d);
+  });
+
+  it('still finds it once the bar sits inside the card and the text starts with the bar', () => {
+    const d = fakeDialog({ text: 'Showing only 29 uncommon pants of 453 itemsshow allItem27050%', hasBar: true, imgAlt: 'gsg9Pants' });
+    expect(pickerDialog(fakeRoot(d))).toBe(d);
+  });
+
+  it('ignores the outer offer dialog and dialogs without item images', () => {
+    const outer = fakeDialog({ text: 'New item offerItemPrice', hasBar: false, imgAlt: null });
+    const empty = fakeDialog({ text: 'Item', hasBar: false, imgAlt: null });
+    expect(pickerDialog(fakeRoot(outer, empty))).toBeNull();
   });
 });
 
