@@ -23,7 +23,7 @@ const ago = (iso) => {
 function renderBook(book) {
   const el = $('book');
   if (!book?.at) { el.textContent = 'No scrap price read yet.'; return; }
-  el.textContent = `Last scrap price read ${ago(book.at)}: lowest ask ${book.ask}, best bid ${book.bid}`
+  el.textContent = `Last scrap price read ${ago(book.at)}: best bid ${book.bid} (the price used), lowest ask ${book.ask}`
     + (book.remaining != null ? ` · ${book.remaining} of ${book.limit} requests left that minute` : '') + '.';
 }
 
@@ -61,7 +61,7 @@ async function test() {
   status('Checking the key against the API…');
   const r = await chrome.runtime.sendMessage({ type: 'testKey', key });
   if (r?.ok) {
-    status(`Key accepted. Scrap price now ${r.ask} (bid ${r.bid}) · ${r.remaining} of ${r.limit} requests left this minute.`, 'ok');
+    status(`Key accepted. Scrap price now ${r.bid} (best bid; lowest ask ${r.ask}) · ${r.remaining} of ${r.limit} requests left this minute.`, 'ok');
   } else if (r?.error === 'key-rejected') {
     status('Not accepted: the API answered as if no key were sent. Check the key for typos, or create a new one in the game.', 'bad');
   } else if (r?.error === 'rate-limited') {

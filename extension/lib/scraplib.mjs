@@ -6,9 +6,10 @@
 // formula are imported from the audited source (measured on 17.3 million real
 // dismantles - never re-derive them).
 //
-// The rule: scrap value = scraps x the scrap price, nothing else. The market
-// shows gear prices as paid and the scrap price as paid, so no tax is added or
-// removed on either leg.
+// The rule: scrap value = scraps x the scrap price, nothing else. The scrap
+// price is the HIGHEST BUY ORDER (what the scraps fetch if sold right away);
+// the lowest sell order is carried along for reference only. The market
+// shows gear prices as paid, so no tax is added or removed on either leg.
 import { SCRAP_LADDER, scrapYield } from './ladder.mjs';
 
 export const RARITIES = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
@@ -18,9 +19,10 @@ const times = (a, b) => (a == null || b == null ? null : a * b);
 
 /**
  * One row per rarity for gear at `state`% durability (market listings are
- * always 100%), valued against the live scrap book: `valueAtAsk` prices the
- * scraps at the lowest sell order (THE scrap price - the floor a listing is
- * compared with), `valueAtBid` at the highest buy order, for reference.
+ * always 100%), valued against the live scrap book: `valueAtBid` prices the
+ * scraps at the highest buy order (THE scrap price - what they fetch sold at
+ * once, the floor a listing is compared with), `valueAtAsk` at the lowest
+ * sell order, for reference.
  */
 export function scrapTable({ bid, ask, state = 100 }) {
   const b = num(bid);

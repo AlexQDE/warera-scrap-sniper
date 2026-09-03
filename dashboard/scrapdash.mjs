@@ -6,8 +6,9 @@
 //   node dashboard/scrapdash.mjs --interval 30   # seconds between book reads (default 20, min 5)
 //   node dashboard/scrapdash.mjs --once          # one read, print the table, exit
 //
-// The maths: scrap value = scraps x the scrap price (lowest sell order),
-// compared with the gear price exactly as the market shows it. No tax anywhere.
+// The maths: scrap value = scraps x the scrap price, the HIGHEST BUY ORDER
+// (what the scraps fetch sold right away), compared with the gear price exactly
+// as the market shows it. No tax anywhere. The lowest ask is shown for reference.
 //
 // Read-only, and only with YOUR API key: the dashboard makes no keyless
 // requests. On the first run it asks for the key and writes it to .env next
@@ -116,12 +117,12 @@ if (ONCE) {
   const b = state.book;
   const cap = (c) => (c ? ', top 100 shown' : '');
   console.log(`\n  SCRAPS  ${state.at.slice(0, 19).replace('T', ' ')} UTC   (key accepted, ${b.remaining} of ${b.limit} requests left this minute)`);
-  console.log(`  scrap price ${money(b.ask)} (lowest ask, ${b.askQty} for sale${cap(b.askCapped)})   best bid ${money(b.bid)} (${b.bidQty} wanted${cap(b.bidCapped)})   spread ${money(b.spread)}\n`);
-  console.log(`  ${'rarity'.padEnd(10)} ${'scraps'.padStart(7)} ${'scrap value'.padStart(12)} ${'at bid'.padStart(9)}`);
+  console.log(`  scrap price ${money(b.bid)} (highest buy order, ${b.bidQty} wanted${cap(b.bidCapped)})   lowest ask ${money(b.ask)} (${b.askQty} for sale${cap(b.askCapped)})   spread ${money(b.spread)}\n`);
+  console.log(`  ${'rarity'.padEnd(10)} ${'scraps'.padStart(7)} ${'scrap value'.padStart(12)} ${'at ask'.padStart(9)}`);
   for (const r of scrapTable({ bid: b.bid, ask: b.ask })) {
-    console.log(`  ${r.rarity.padEnd(10)} ${String(r.yield).padStart(7)} ${money(r.valueAtAsk).padStart(12)} ${money(r.valueAtBid).padStart(9)}`);
+    console.log(`  ${r.rarity.padEnd(10)} ${String(r.yield).padStart(7)} ${money(r.valueAtBid).padStart(12)} ${money(r.valueAtAsk).padStart(9)}`);
   }
-  console.log('\n  scrap value = scraps x scrap price; compare with the gear price exactly as the market shows it.');
+  console.log('\n  scrap value = scraps x best bid (what the scraps fetch sold right away); compare with the gear price exactly as the market shows it.');
   process.exit(0);
 }
 

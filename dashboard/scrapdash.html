@@ -112,14 +112,14 @@
 
   <section class="grid kpis">
     <div class="card tile">
-      <div class="label"><span class="swatch ask"></span>Scrap price (lowest sell order)</div>
-      <div class="value hero" id="ask">–</div>
-      <div class="sub" id="ask-sub"></div>
+      <div class="label"><span class="swatch bid"></span>Scrap price (highest buy order, instant sell)</div>
+      <div class="value hero" id="bid">–</div>
+      <div class="sub" id="bid-sub"></div>
     </div>
     <div class="card tile">
-      <div class="label"><span class="swatch bid"></span>Best bid (instant sell)</div>
-      <div class="value" id="bid">–</div>
-      <div class="sub" id="bid-sub"></div>
+      <div class="label"><span class="swatch ask"></span>Lowest ask (reference)</div>
+      <div class="value" id="ask">–</div>
+      <div class="sub" id="ask-sub"></div>
     </div>
     <div class="card tile">
       <div class="label">Spread</div>
@@ -142,8 +142,8 @@
             <tr>
               <th>Rarity</th>
               <th>Scraps</th>
-              <th>Scrap value (buy under this)</th>
-              <th>At best bid</th>
+              <th>Scrap value (× best bid, buy under this)</th>
+              <th>At lowest ask</th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -190,8 +190,8 @@
     <h2>How the numbers are made</h2>
     <footer>
       <p><b>Scraps</b> per dismantle: 6 / 18 / 54 / 162 / 486 / 1458 by rarity, audited against 17.3 million real dismantles. Market listings are always at 100% durability, so no wear adjustment applies.</p>
-      <p><b>Scrap value</b> = scraps × the scrap price (the lowest sell order). That is the whole calculation: no tax is added or removed on either side, and the gear price is compared exactly as the market shows it. <b>At best bid</b> is the same multiplication with the highest buy order, for reference.</p>
-      <p>Read-only: one order-book read per interval, with or without an API key, no browser session, no item-market crawl. The item market is yours to sweep by hand.</p>
+      <p><b>Scrap value</b> = scraps × the scrap price, where the scrap price is the highest buy order: what the scraps fetch if sold right away. That is the whole calculation: no tax is added or removed on either side, and the gear price is compared exactly as the market shows it. <b>At lowest ask</b> is the same multiplication with the lowest sell order, for reference.</p>
+      <p>Read-only: one order-book read per interval with your API key, no browser session, no item-market crawl. The item market is yours to sweep by hand.</p>
     </footer>
   </section>
 </main>
@@ -240,10 +240,10 @@ function renderLadder() {
     <tr>
       <td class="rarity">${r.rarity}</td>
       <td>${r.yield}</td>
-      <td class="buy">${fmtG(r.valueAtAsk)}</td>
-      <td>${fmtG(r.valueAtBid)}</td>
+      <td class="buy">${fmtG(r.valueAtBid)}</td>
+      <td>${fmtG(r.valueAtAsk)}</td>
     </tr>`).join('');
-  $('ladder-note').textContent = `Scrap value = scraps × ${fmtP(b.ask)} (the scrap price). Compare it with the gear price exactly as the market shows it; a listing under it pays for itself once dismantled.`;
+  $('ladder-note').textContent = `Scrap value = scraps × ${fmtP(b.bid)} (the best bid, what the scraps fetch sold right away). Compare it with the gear price exactly as the market shows it; a listing under it pays for itself once dismantled.`;
 }
 
 function renderCalc() {
@@ -252,12 +252,12 @@ function renderCalc() {
   const v = $('c-verdict');
   const out = $('c-out');
   if (!(price > 0)) { v.className = 'verdict none'; v.textContent = 'Enter the price as shown on the market.'; out.textContent = ''; return; }
-  const m = margin({ listedPrice: price, rarity, scrapPrice: book().ask });
+  const m = margin({ listedPrice: price, rarity, scrapPrice: book().bid });
   if (m.margin == null) { v.className = 'verdict none'; v.textContent = 'No scrap price yet.'; out.textContent = ''; return; }
   const ok = m.margin >= 0;
   v.className = `verdict ${ok ? 'good' : 'bad'}`;
   v.textContent = `${ok ? '✓ Worth scrapping' : '✗ Not worth scrapping'}: ${ok ? '+' : ''}${fmtG(m.margin)} gold (${(m.marginPct * 100).toFixed(2)}%)`;
-  out.innerHTML = `You pay <b>${fmtG(m.cost)}</b> · dismantle to <b>${m.yield}</b> scraps · worth <b>${fmtG(m.value)}</b> at ${fmtP(book().ask)} each.`;
+  out.innerHTML = `You pay <b>${fmtG(m.cost)}</b> · dismantle to <b>${m.yield}</b> scraps · worth <b>${fmtG(m.value)}</b> at the best bid of ${fmtP(book().bid)} each.`;
 }
 
 function ticksInRange() {

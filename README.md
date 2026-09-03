@@ -11,8 +11,9 @@ It talks to the game's API only with **your own API key**, never without one.
 
 **A toolbar** under the market's "Taxed price" notice:
 
-- the live scrap price (lowest sell order on the scrap market) and the best bid,
-  with the quantity resting at each
+- the live scrap price (the highest buy order on the scrap market: what your
+  scraps fetch if sold right away) and the lowest ask for reference, with the
+  quantity resting at each
 - six rarity tiles in the game's own colours: the scrap value of a common,
   uncommon, rare, epic, legendary and mythic piece
 - how many offers on the page are under their scrap value, and which offer
@@ -40,7 +41,10 @@ scrap value = scraps × scrap price
 - **scraps** per dismantle: 6 / 18 / 54 / 162 / 486 / 1458 for common /
   uncommon / rare / epic / legendary / mythic. Measured on 17.3 million real
   dismantles, zero exceptions.
-- **scrap price**: the lowest sell order on the scrap market, read live.
+- **scrap price**: the highest buy order on the scrap market, read live. That
+  is what the scraps fetch if you sell them right away, so a SNIPE pays even
+  without waiting for a buyer. The lowest sell order is shown for reference;
+  the two usually differ by 0.001.
 - The result is compared with the gear price **exactly as the market shows
   it**. Nothing is added or taken off on either side.
 - Market listings are always at 100% durability, so there is no wear term.
@@ -166,8 +170,8 @@ ne šalje nijedan zahtev, samo pokaže obaveštenje sa dugmetom za podešavanja.
 Ključ ostaje u pregledaču i šalje se samo igrinom API-ju.
 
 **Šta gledaš:** pločice po retkosti su scrap vrednost (broj scrap-ova × cena
-scrap-a, najniža prodajna), blok na svakoj ponudi poredi tu vrednost sa cenom
-kakva piše. Zeleni okvir i SNIPE znače da je ponuda ispod scrap vrednosti.
+scrap-a, gde je cena najviši kupovni nalog, ono što dobiješ ako scrap prodaš
+odmah), blok na svakoj ponudi poredi tu vrednost sa cenom kakva piše. Zeleni okvir i SNIPE znače da je ponuda ispod scrap vrednosti.
 "Min margin" određuje koliko posto ispod mora da bude.
 
 **Dashboard** (opciono, treba Node 18+): `npm install`, pa

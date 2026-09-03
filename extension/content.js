@@ -4,9 +4,9 @@
 // worth dismantled, how much of the price the scraps pay back, and whether the
 // offer is under its floor.
 //
-// The maths is the editor's rule: floor = scraps x the scrap price (lowest sell
-// order), compared with the gear price exactly as the market shows it. No tax
-// is added or removed anywhere.
+// The maths is the editor's rule: floor = scraps x the scrap price (the highest
+// buy order, what the scraps fetch sold right away), compared with the gear
+// price exactly as the market shows it. No tax is added or removed anywhere.
 //
 // Read-only by construction. The scrap book is read by the background worker
 // with the player's OWN API key (never without one; see lib/api.mjs) and
@@ -71,11 +71,11 @@
     }
   }
 
-  // ---------- per-rarity floors: scraps x the scrap price (lowest ask), nothing else ----------
+  // ---------- per-rarity floors: scraps x the scrap price (highest buy order), nothing else ----------
   function floors() {
-    if (state.book?.ask == null) return null;
+    if (state.book?.bid == null) return null;
     const rows = scrapTable({ bid: state.book.bid, ask: state.book.ask });
-    return Object.fromEntries(rows.map((r) => [r.rarity, { floor: r.valueAtAsk, scraps: r.yield }]));
+    return Object.fromEntries(rows.map((r) => [r.rarity, { floor: r.valueAtBid, scraps: r.yield }]));
   }
 
   function anchorNotice() {
@@ -185,15 +185,15 @@
 
     const cap = (c) => (c ? '+' : '');
     bar.querySelector('.ss-stats').innerHTML = `
-      <div class="ss-stat"><span class="ss-label">scrap price</span><b>${fmt(b.ask, 3)}</b><span class="ss-sub">${b.ask == null ? 'no sell orders' : `lowest sell order · ${dom.fmtQty(b.askQty)}${cap(b.askCapped)} for sale`}</span></div>
-      <div class="ss-stat"><span class="ss-label">best bid</span><b>${fmt(b.bid, 3)}</b><span class="ss-sub">${b.bid == null ? 'no buy orders' : `${dom.fmtQty(b.bidQty)}${cap(b.bidCapped)} wanted`}</span></div>`;
+      <div class="ss-stat"><span class="ss-label">scrap price</span><b>${fmt(b.bid, 3)}</b><span class="ss-sub">${b.bid == null ? 'no buy orders' : `highest buy order · ${dom.fmtQty(b.bidQty)}${cap(b.bidCapped)} wanted`}</span></div>
+      <div class="ss-stat"><span class="ss-label">lowest ask</span><b>${fmt(b.ask, 3)}</b><span class="ss-sub">${b.ask == null ? 'no sell orders' : `${dom.fmtQty(b.askQty)}${cap(b.askCapped)} for sale · reference`}</span></div>`;
 
     bar.querySelector('.ss-caption').innerHTML = fl
-      ? `<span class="ss-label">buy under these · scraps × ${fmt(b.ask, 3)} per rarity, compared with the price as shown</span>`
+      ? `<span class="ss-label">buy under these · scraps × ${fmt(b.bid, 3)} per rarity, compared with the price as shown</span>`
       : '';
     bar.querySelector('.ss-floors').innerHTML = fl
       ? dom.RARITIES.map((r) => `
-        <div class="ss-tile" data-ss-rarity="${r}" title="A ${r} piece dismantles into ${fl[r].scraps} scraps × ${fmt(b.ask, 3)} = ${fmt(fl[r].floor)}">
+        <div class="ss-tile" data-ss-rarity="${r}" title="A ${r} piece dismantles into ${fl[r].scraps} scraps × ${fmt(b.bid, 3)} (highest buy order) = ${fmt(fl[r].floor)}">
           <span class="ss-tile-name">${r}</span>
           <span class="ss-tile-price">${fmt(fl[r].floor)}</span>
           <span class="ss-tile-sub">${fl[r].scraps} scraps</span>
