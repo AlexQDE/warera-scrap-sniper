@@ -227,7 +227,7 @@ export async function startLens(runtime = chrome.runtime) {
         const name = e.target.closest("[data-action]")?.dataset.action;
         if (name === "refresh") {
           void read("cases", true);
-          if (!state.settings.casesCollapsed) void read("avg", true);
+          if (wantsAverages()) void read("avg", true);
           sched.schedule();
         } else if (name === "collapse")
           save({ casesCollapsed: !state.settings.casesCollapsed });
@@ -243,6 +243,7 @@ export async function startLens(runtime = chrome.runtime) {
           notice: state.setup,
           busy: state.busy.has("cases"),
           collapsed: state.settings.casesCollapsed,
+          sellFrom: state.settings.sellFrom,
         }),
       );
       nextRoots.push(context.cases.parentElement);
@@ -301,12 +302,17 @@ export async function startLens(runtime = chrome.runtime) {
     metrics.scanMs += performance.now() - start;
     metrics.maxScanMs = Math.max(metrics.maxScanMs, performance.now() - start);
   }
+  // The average item prices drive the verdict whenever the drop policy sells
+  // any rarity (the default sells from epic), and the expanded details show
+  // them even when it does not.
+  const wantsAverages = () =>
+    !state.settings.casesCollapsed || state.settings.sellFrom !== "never";
   async function fetchVisible() {
     if (state.setup || disposed || document.hidden) return;
     const jobs = [];
     if (context.equipment) jobs.push(read("book"));
     if (context.cases || context.travel) jobs.push(read("cases"));
-    if (context.cases && !state.settings.casesCollapsed) jobs.push(read("avg"));
+    if (context.cases && wantsAverages()) jobs.push(read("avg"));
     await Promise.all(jobs);
   }
   async function tick() {

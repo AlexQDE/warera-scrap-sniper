@@ -1,4 +1,4 @@
-import { preferences } from "./lib/settings.mjs";
+import { preferences, SELL_FROM } from "./lib/settings.mjs";
 const $ = (id) => document.getElementById(id);
 const fields = [
   "equipment",
@@ -27,6 +27,7 @@ async function load() {
     $("key").value = r.apiKey ?? "";
     $("margin").value = p.minMarginPct;
     $("interval").value = p.intervalSec;
+    $("sellFrom").value = SELL_FROM.includes(p.sellFrom) ? p.sellFrom : "epic";
     for (const field of fields) $(field).checked = p[field];
     status(
       r.rejected
@@ -70,12 +71,14 @@ async function save(event) {
         apiKey: $("key").value.trim(),
         minMarginPct: $("margin").value,
         intervalSec: $("interval").value,
+        sellFrom: $("sellFrom").value,
       },
     });
     if (r.error) throw new Error(r.message);
     status("Saved. Open game tabs pick up changes within five seconds.", "ok");
     $("margin").value = r.settings.minMarginPct;
     $("interval").value = r.settings.intervalSec;
+    $("sellFrom").value = r.settings.sellFrom;
   } catch (e) {
     status(e.message, "bad");
   } finally {

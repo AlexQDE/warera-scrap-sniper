@@ -7,14 +7,14 @@ export function verdictTag(verdict) {
   return (
     {
       sell: {
-        text: "SELL vs scrap",
+        text: "SELL",
         cls: "sell",
-        why: "Sealed bid exceeds this opening model by at least 10%",
+        why: "Sealed bid exceeds the opening value by at least 10%",
       },
       open: {
         text: "OPEN EV",
         cls: "open",
-        why: "Expected proceeds exceed sealed bid by at least 10%; one opening can lose",
+        why: "Expected proceeds exceed the sealed bid by at least 10%; one opening can lose",
       },
       even: {
         text: "UNCERTAIN",
@@ -29,6 +29,17 @@ export function verdictTag(verdict) {
   );
 }
 
+/** The per-rarity breakdown of a battle case under the drop policy, one line. */
+export function policyDetails(policy) {
+  if (!policy?.rows?.length) return "";
+  return policy.rows
+    .map(
+      (r) =>
+        `${r.rarity} ${r.mode}${r.fallback ? "*" : ""} ${r.contribution == null ? "–" : fmt(r.contribution)}`,
+    )
+    .join(" · ");
+}
+
 export function casesStripHtml({
   cases,
   error = null,
@@ -36,6 +47,7 @@ export function casesStripHtml({
   busy = false,
   now = Date.now(),
   collapsed = false,
+  sellFrom = "never",
 }) {
   const fresh = !error && freshness(cases?.at, TTL.cases, now) === "fresh";
   const head = header("Cases", {
@@ -69,19 +81,22 @@ export function casesStripHtml({
         ]),
       )
     : null;
-  const s = snapshotSummary({ books: cases.books, avg: currentAvg });
+  const s = snapshotSummary({ books: cases.books, avg: currentAvg, sellFrom });
   const rows = s.rows
     .map((r) => {
       const tag = verdictTag(fresh ? r.verdict : null);
-      const label =
-        r.code === "woodenCase" && tag.cls === "sell" ? "SELL" : tag.text;
-      return `<article class="lens-case" data-verdict="${esc(fresh ? (r.verdict ?? "none") : "none")}"><div><strong>${esc(r.label)}</strong><small>${esc(r.basis)}</small></div><div><small>Sealed bid</small><b>${fmt(r.bid)} g</b></div><div><small>Expected opening value</small><b>${r.complete ? fmt(r.openValue) : "–"} g</b></div><div><span class="lens-tag ${esc(tag.cls)}">${esc(label)}</span><small>${fresh ? esc(tag.why) : "Stale data; recommendation paused"}</small></div><div class="lens-case-details" ${collapsed ? "hidden" : ""}><span>Top bid depth ${fmtQty(r.bidQty)}${cases.books[r.code]?.bidCapped ? "+" : ""} · ask ${fmt(r.ask)} g</span><span>${r.code === "woodenCase" ? `Floor/round model band ${fmt(r.openBand?.[0])}–${fmt(r.openBand?.[1])} g · ${s.wooden.complete ? "20/20 resources covered" : `${s.wooden.missing.length} resources lack price/depth`}` : `Historical resale estimate ${fmt(r.openMarket)} g · priced probability coverage ${fmt((r.coverage ?? 0) * 100, 1)}% · not instant cash`}</span></div></article>`;
+      const fallbacks = r.policy?.rows.filter((x) => x.fallback).length ?? 0;
+      const details =
+        r.code === "woodenCase"
+          ? `Floor/round model band ${fmt(r.openBand?.[0])}–${fmt(r.openBand?.[1])} g · ${s.wooden.complete ? "20/20 resources covered" : `${s.wooden.missing.length} resources lack price/depth`}`
+          : `${esc(policyDetails(r.policy))}${fallbacks ? ` · *no average price yet, scrapped instead` : ""}<br>Scrap-only floor ${fmt(r.openScrap)} g · sold at avg (all drops) ${fmt(r.openMarket)} g · avg = the game's Current value, a mean of recent sales; selling takes time`;
+      return `<article class="lens-case" data-verdict="${esc(fresh ? (r.verdict ?? "none") : "none")}"><div><strong>${esc(r.label)}</strong><small>${esc(r.basis)}</small></div><div><small>Sealed bid</small><b>${fmt(r.bid)} g</b></div><div><small>Expected opening value</small><b>${r.complete ? fmt(r.openValue) : "–"} g</b></div><div><span class="lens-tag ${esc(tag.cls)}">${esc(tag.text)}</span><small>${fresh ? esc(tag.why) : "Stale data; recommendation paused"}</small></div><div class="lens-case-details" ${collapsed ? "hidden" : ""}><span>Top bid depth ${fmtQty(r.bidQty)}${cases.books[r.code]?.bidCapped ? "+" : ""} · ask ${fmt(r.ask)} g</span><span>${details}</span></div></article>`;
     })
     .join("");
   return (
     head +
     (error ? `<p class="lens-notice" role="status">${esc(error)}</p>` : "") +
-    `<div class="lens-cases">${rows}</div><p class="lens-muted" ${collapsed ? "hidden" : ""}>Expected values, not guaranteed rewards. Wooden model uses floor/round bounds; battle signals compare sealed bids with scrap-only EV. Historical resale is a separate partial estimate, never substituted for missing items. Depth is a snapshot, not reserved. No additional tax adjustment. Rules pinned 2026-09-16.</p>${cases.avgError ? `<p class="lens-notice">Resale estimates: ${esc(cases.avgError)}</p>` : ""}`
+    `<div class="lens-cases">${rows}</div><p class="lens-muted" ${collapsed ? "hidden" : ""}>Expected values, not guaranteed rewards. Wooden model uses floor/round bounds. Battle cases follow the drop policy in settings: rarities below the threshold are scrapped at the observed scrap bids, from the threshold up they are sold at the game's average item price. Depth is a snapshot, not reserved. No additional tax adjustment. Rules pinned 2026-09-16.</p>${cases.avgError ? `<p class="lens-notice">Average prices: ${esc(cases.avgError)}</p>` : ""}`
   );
 }
 

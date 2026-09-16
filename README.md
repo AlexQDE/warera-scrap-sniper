@@ -4,6 +4,20 @@ Read-only equipment, case and travel insights inside [WarEra](https://app.warera
 
 The extension helps you compare offers and estimates. It never buys, sells, opens a case or travels for you. It uses your own API key and has no runtime dependencies or build step.
 
+## What changed in 1.4.1
+
+The battle-case verdict follows a **drop policy** instead of scrap-only EV.
+Settings has "Case drops: sell from this rarity up" (default: epic). Drops
+below the threshold are valued at the scrap bids walked through the scrap
+book (dismantled at once); drops from the threshold up at the game's average
+item price ("Current value", a mean of recent sales, a few percent above the
+median). A rarity the policy would sell but that has no average yet falls
+back to its scrap quote and is marked with `*`; nothing is imputed. The
+expanded panel lists each rarity's contribution, the scrap-only floor and the
+all-sold estimate. With the policy set to "Never" the 1.4.0 behaviour is
+unchanged. On 2026-09-16 prices the policy moved the Elite Case opening value
+from 14.9 to 18.5 gold and the Case from 3.25 to 3.42.
+
 ## What changed in 1.4.0
 
 - **Equipment:** depth-adjusted scrap proceeds, profit/ROI, SNIPE versus NEAR MISS, and an accurately named Best value label. Negative thresholds never turn a loss into SNIPE.

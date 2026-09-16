@@ -352,17 +352,123 @@ export function regionsAwayFromText(text) {
   return m ? Number(m[1]) : null;
 }
 
+// ------------------------------------------------------------ drop policy -
+// The editor's rule (2026-09-16): cheap drops are dismantled, expensive ones
+// are sold. `sellFrom` names the first rarity that is sold at the game's
+// average item price; everything below it is valued at the scrap quote.
+// "never" scraps all, "common" sells all.
+export const SELL_FROM = [
+  "never",
+  "common",
+  "uncommon",
+  "rare",
+  "epic",
+  "legendary",
+  "mythic",
+];
+
+/** Does the policy sell a drop of this rarity (true) or scrap it (false)? */
+export function sellsRarity(sellFrom, rarity) {
+  const i = SELL_FROM.indexOf(sellFrom);
+  const r = RARITIES.indexOf(rarity);
+  return i > 0 && r >= 0 && r >= i - 1;
+}
+
+/** "scrap ≤ rare · sell ≥ epic at avg", "sell all drops at avg", "scrap-only EV". */
+export function policyLabel(sellFrom) {
+  const i = SELL_FROM.indexOf(sellFrom);
+  if (i <= 0) return "scrap-only EV";
+  if (i === 1) return "sell all drops at avg";
+  return `scrap ≤ ${RARITIES[i - 2]} · sell ≥ ${sellFrom} at avg`;
+}
+
+/**
+ * One rarity's drop sold at the game's average item price: the weapon at its
+ * share, the five armour pieces at the rest, renormalised over the codes that
+ * carry a price. { unit, priced, total }; unit null when nothing is priced.
+ */
+export function rarityResaleValue(rarity, odds, avgOf) {
+  const g = GEAR_CODES[rarity];
+  const weights = [
+    [g.weapon, odds.weaponShare],
+    ...g.gear.map((c) => [c, (1 - odds.weaponShare) / g.gear.length]),
+  ];
+  let sum = 0;
+  let cover = 0;
+  let priced = 0;
+  for (const [code, weight] of weights) {
+    const v = num(avgOf(code));
+    if (v == null || !(v > 0)) continue;
+    sum += weight * v;
+    cover += weight;
+    priced++;
+  }
+  return { unit: cover ? sum / cover : null, priced, total: weights.length };
+}
+
+/**
+ * What an open is worth under the drop policy: for each rarity the audited
+ * odds x (the scrap quote walked through the scrap book, or the resale value
+ * when the policy sells that rarity and a price exists). A rarity the policy
+ * would sell but that has no average price falls back to its scrap quote and
+ * is flagged, never imputed. { value, complete, selling, rows }.
+ */
+export function casePolicyValue(caseCode, { bids, avgOf, sellFrom = "never" }) {
+  const odds = CASE_ODDS[caseCode];
+  if (!odds) return { value: null, complete: false, selling: false, rows: [] };
+  const rows = [];
+  let value = 0;
+  let complete = true;
+  let selling = false;
+  for (const rarity of RARITIES) {
+    const p = odds.rarity[rarity];
+    if (!p) continue;
+    const scrap = quote(SCRAP_LADDER[rarity], bids);
+    let mode = sellsRarity(sellFrom, rarity) ? "sell" : "scrap";
+    let fallback = false;
+    let unit = null;
+    let priced = null;
+    if (mode === "sell") {
+      const r = rarityResaleValue(rarity, odds, avgOf ?? (() => null));
+      priced = `${r.priced}/${r.total}`;
+      if (r.unit == null) {
+        mode = "scrap";
+        fallback = true;
+      } else {
+        unit = r.unit;
+        selling = true;
+      }
+    }
+    if (mode === "scrap") {
+      unit = scrap.value;
+      if (!scrap.complete) complete = false;
+    }
+    rows.push({
+      rarity,
+      p,
+      mode,
+      fallback,
+      priced,
+      unit,
+      contribution: unit == null ? null : p * unit,
+    });
+    if (unit != null) value += p * unit;
+  }
+  return { value: complete ? value : null, complete, selling, rows };
+}
+
 // ----------------------------------------------------------------- summary -
 const summaryCache = new WeakMap();
 /** UI-only memoization: API snapshots are immutable. Freshness-filtered averages
- * participate in the key, so an expired/failed item cannot retain its valuation.
+ * and the drop policy participate in the key, so an expired/failed item or a
+ * changed policy cannot retain its valuation.
  */
-export function snapshotSummary({ books, avg = null }) {
-  if (!books) return casesSummary({ books, avg });
-  const key = JSON.stringify(avg);
+export function snapshotSummary({ books, avg = null, sellFrom = "never" }) {
+  if (!books) return casesSummary({ books, avg, sellFrom });
+  const key = `${sellFrom}:${JSON.stringify(avg)}`;
   const old = summaryCache.get(books);
   if (old?.key === key) return old.value;
-  const value = casesSummary({ books, avg });
+  const value = casesSummary({ books, avg, sellFrom });
   summaryCache.set(books, { key, value });
   return value;
 }
@@ -373,7 +479,7 @@ export function snapshotSummary({ books, avg = null }) {
  * oil ask and the scrap bid. `books[code] = { bid, ask, bidQty, askQty }`,
  * `avg[code] = number` (may be null when the averages were not read).
  */
-export function casesSummary({ books, avg }) {
+export function casesSummary({ books, avg, sellFrom = "never" }) {
   const b = books ?? {};
   const bidOf = (c) => num(b[c]?.bid);
   const avgOf = (c) => (avg ? num(avg[c]) : null);
@@ -390,6 +496,7 @@ export function casesSummary({ books, avg }) {
     let complete = true;
     let coverage = null;
     let basis = "resource EV";
+    let policy = null;
     if (code === "woodenCase") {
       openValue = wooden.ev;
       openBand = [wooden.ev, wooden.evRound];
@@ -402,11 +509,24 @@ export function casesSummary({ books, avg }) {
         : { value: null, complete: false };
       openMarket = m.value;
       coverage = m.coverage ?? 0;
-      // Historical resale estimates are not instant liquidation. Keep the two models separate.
-      complete = scrapQuote.complete;
-      openValue = openScrap;
+      // The drop policy decides what an open is worth: scrap the cheap rarities
+      // (an instant quote through the scrap book), sell the expensive ones at
+      // the game's average item price. With no policy, or no average prices
+      // yet, the scrap-only quote stands.
+      policy = casePolicyValue(code, { bids: b.scraps?.bids, avgOf, sellFrom });
       openBand = null;
-      basis = "scrap-only EV";
+      if (policy.selling) {
+        openValue = policy.value;
+        complete = policy.complete;
+        basis = policyLabel(sellFrom);
+      } else {
+        openValue = openScrap;
+        complete = scrapQuote.complete;
+        basis =
+          sellFrom !== "never" && SELL_FROM.includes(sellFrom)
+            ? "scrap-only EV (no average prices yet)"
+            : "scrap-only EV";
+      }
     }
     const sealed = quote(1, book.bids);
     complete = complete && sealed.complete;
@@ -430,6 +550,7 @@ export function casesSummary({ books, avg }) {
       complete,
       coverage,
       basis,
+      policy,
       ratio: v.ratio,
       verdict: v.verdict,
     };

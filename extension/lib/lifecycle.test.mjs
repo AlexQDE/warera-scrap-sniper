@@ -108,8 +108,21 @@ describe("SPA lifecycle and DOM work", () => {
       runtime.sendMessage.mock.calls.filter(([m]) => m.type === "cases"),
     ).toHaveLength(2);
   });
-  it("keeps market books when details are opened and loads averages only on demand", async () => {
+  it("reads the averages at once under the default drop policy, which sells from epic", async () => {
     const runtime = mockRuntime();
+    app = await startLens(runtime);
+    await settle();
+    expect(
+      runtime.sendMessage.mock.calls.filter(([m]) => m.type === "avg"),
+    ).toHaveLength(1);
+    expect(
+      runtime.sendMessage.mock.calls.filter(([m]) => m.type === "cases"),
+    ).toHaveLength(1);
+  });
+  it("keeps market books when details are opened and loads averages only on demand under a scrap-only policy", async () => {
+    const runtime = mockRuntime({
+      settings: { ...DEFAULTS, sellFrom: "never" },
+    });
     app = await startLens(runtime);
     await settle();
     expect(runtime.sendMessage.mock.calls.some(([m]) => m.type === "avg")).toBe(

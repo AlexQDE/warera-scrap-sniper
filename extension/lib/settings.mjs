@@ -1,4 +1,18 @@
 // @ts-check
+/**
+ * Where the drop policy starts selling: drops of this rarity and above are
+ * valued at the game's average item price (sold on the equipment market),
+ * every rarity below it at the scrap quote (dismantled). "never" scraps all.
+ */
+export const SELL_FROM = Object.freeze([
+  "never",
+  "common",
+  "uncommon",
+  "rare",
+  "epic",
+  "legendary",
+  "mythic",
+]);
 export const DEFAULTS = Object.freeze({
   minMarginPct: 0,
   intervalSec: 30,
@@ -9,6 +23,7 @@ export const DEFAULTS = Object.freeze({
   cases: true,
   travel: true,
   picker: true,
+  sellFrom: "epic",
   schemaVersion: 2,
 });
 /** @param {unknown} value @param {number} min @param {number} max @param {number} fallback */
@@ -38,5 +53,8 @@ export function preferences(input = {}) {
     cases: input.cases !== false,
     travel: input.travel !== false,
     picker: input.picker !== false,
+    sellFrom: SELL_FROM.includes(/** @type {string} */ (input.sellFrom))
+      ? /** @type {string} */ (input.sellFrom)
+      : DEFAULTS.sellFrom,
   };
 }

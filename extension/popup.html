@@ -229,6 +229,22 @@
               </p>
             </div>
           </div>
+          <label for="sellFrom">Case drops: sell from this rarity up</label>
+          <select id="sellFrom">
+            <option value="never">Never: scrap every drop</option>
+            <option value="common">Common and up (sell everything)</option>
+            <option value="uncommon">Uncommon and up</option>
+            <option value="rare">Rare and up</option>
+            <option value="epic">Epic and up (default)</option>
+            <option value="legendary">Legendary and up</option>
+            <option value="mythic">Mythic only</option>
+          </select>
+          <p class="help">
+            Rarities below the threshold are valued at the scrap bids
+            (dismantled at once); from the threshold up at the game's average
+            item price (sold on the equipment market, a mean of recent sales).
+            The case verdict uses this policy.
+          </p>
         </section>
 
         <section>

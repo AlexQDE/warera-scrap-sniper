@@ -1,6 +1,6 @@
 {
   "name": "warera-lens",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Read-only WarEra equipment, case and travel insights with depth-aware quotes and explicit uncertainty.",
   "type": "module",
   "private": true,

@@ -48,8 +48,8 @@ describe("safe case rendering", () => {
       times: Object.fromEntries(ALL_GEAR_CODES.map((c) => [c, at])),
     };
     const html = casesStripHtml({ cases: { ...cases, avg }, now: NOW });
-    expect(html).toContain("Historical resale estimate 100.000 g");
-    expect(html).toContain("not instant cash");
+    expect(html).toContain("sold at avg (all drops) 100.000 g");
+    expect(html).toContain("selling takes time");
     expect(html).not.toContain('data-verdict="open"');
     avg.failures = { jet: "failed" };
     const partial = casesStripHtml({ cases: { ...cases, avg }, now: NOW });
