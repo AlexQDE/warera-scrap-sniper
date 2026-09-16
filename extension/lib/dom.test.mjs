@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   rarityFromBorder, rarityFromItemCode, parsePrice, isItemImageAlt, priceFromLines, verdict,
   closestIndex, fmtQty, slotFromAlt, targetFromCode, itemLabel, isPickerText, pickerDecision, pickerDialog,
-  selectedTileIndex, codeFromSelection,
+  selectedTileIndex, codeFromSelection, escapeHtml, paletteFromSamples, gridCodeFromId, selectedCodeFromTiles,
 } from './dom.mjs';
 
 // The inventory picker behind "New item offer" shows every item as a skin
@@ -274,5 +274,107 @@ describe('fmtQty', () => {
     expect(fmtQty(1858)).toBe('1.9k');
     expect(fmtQty(270)).toBe('270');
     expect(fmtQty(null)).toBe('–');
+  });
+});
+
+// Strings that come from the page (skin-name alts) or from the API (error
+// text) go into innerHTML of nodes that live in the page DOM. They are text.
+describe('escapeHtml', () => {
+  it('neutralises markup and quotes', () => {
+    expect(escapeHtml('<img src=x onerror="alert(1)">&\'')).toBe('&lt;img src=x onerror=&quot;alert(1)&quot;&gt;&amp;&#39;');
+  });
+  it('treats nothing as an empty string', () => {
+    expect(escapeHtml(null)).toBe('');
+    expect(escapeHtml(undefined)).toBe('');
+    expect(escapeHtml(12)).toBe('12');
+  });
+});
+
+// v0.26.0 (2026-09-16) repainted the item frame: its border is now the theme's
+// 850 shade of the rarity colour (dark), where the 2026-09-03 sample was the
+// 600 shade. Both sets are in the fallback palette, and the live palette is
+// read off the market grid, whose tiles now carry id="item-code-selector-<code>".
+describe('rarityFromBorder after the v0.26 repaint', () => {
+  it('maps the six dark 850 borders of the new frame', () => {
+    expect(rarityFromBorder('rgb(57, 15, 16)')).toBe('mythic');
+    expect(rarityFromBorder('rgb(43, 43, 18)')).toBe('legendary');
+    expect(rarityFromBorder('rgb(42, 23, 69)')).toBe('epic');
+    expect(rarityFromBorder('rgb(14, 29, 63)')).toBe('rare');
+    expect(rarityFromBorder('rgb(10, 44, 28)')).toBe('uncommon');
+    expect(rarityFromBorder('rgb(28, 46, 49)')).toBe('common');
+  });
+
+  it('maps the 700 shade a hovered frame shows, and the colorblind pink epic', () => {
+    expect(rarityFromBorder('rgb(113, 31, 32)')).toBe('mythic');
+    expect(rarityFromBorder('rgb(19, 88, 56)')).toBe('uncommon');
+    expect(rarityFromBorder('rgb(49, 20, 44)')).toBe('epic');
+    expect(rarityFromBorder('rgb(98, 40, 89)')).toBe('epic');
+  });
+
+  it('does not mistake a plain dark panel border for a rarity', () => {
+    expect(rarityFromBorder('rgb(30, 30, 30)')).toBeNull();
+    expect(rarityFromBorder('rgb(45, 45, 45)')).toBeNull();
+    expect(rarityFromBorder('rgb(0, 0, 0)')).toBeNull();
+  });
+
+  it('prefers a calibrated palette read off the page', () => {
+    const palette = paletteFromSamples([
+      { code: 'jet', color: 'rgb(1, 2, 3)' }, { code: 'tank', color: 'rgb(200, 200, 0)' },
+    ]);
+    expect(rarityFromBorder('rgb(1, 2, 3)', palette)).toBe('mythic');
+    expect(rarityFromBorder('rgb(201, 199, 2)', palette)).toBe('legendary');
+    expect(rarityFromBorder('rgb(57, 15, 16)', palette)).toBeNull();   // not in this palette
+  });
+});
+
+describe('paletteFromSamples', () => {
+  it('takes the most common colour per rarity, so one hovered tile cannot poison it', () => {
+    const palette = paletteFromSamples([
+      { code: 'helmet6', color: 'rgb(57, 15, 16)' }, { code: 'chest6', color: 'rgb(113, 31, 32)' }, { code: 'jet', color: 'rgb(57, 15, 16)' },
+      { code: 'knife', color: 'rgb(28, 46, 49)' },
+      { code: 'scraps', color: 'rgb(9, 9, 9)' },        // not gear: ignored
+      { code: 'boots1', color: 'rgba(0, 0, 0, 0)' },    // unreadable: ignored
+    ]);
+    expect(palette.find((p) => p.rarity === 'mythic').rgb).toEqual([57, 15, 16]);
+    expect(palette.find((p) => p.rarity === 'common').rgb).toEqual([28, 46, 49]);
+    expect(palette.filter((p) => p.rarity === 'mythic')).toHaveLength(1);
+    expect(palette.some((p) => p.rarity === 'legendary')).toBe(false);
+  });
+
+  it('is empty when nothing readable was sampled', () => {
+    expect(paletteFromSamples([])).toEqual([]);
+    expect(paletteFromSamples([{ code: 'jet', color: '' }])).toEqual([]);
+  });
+});
+
+describe('gridCodeFromId', () => {
+  it('reads the item code off the grid tile id the game gives it', () => {
+    expect(gridCodeFromId('item-code-selector-boots5')).toBe('boots5');
+    expect(gridCodeFromId('item-code-selector-jet')).toBe('jet');
+  });
+  it('is null for anything else', () => {
+    expect(gridCodeFromId('item-code-selector-')).toBeNull();
+    expect(gridCodeFromId('scrap-sniper-bar')).toBeNull();
+    expect(gridCodeFromId(null)).toBeNull();
+  });
+});
+
+// The clicked grid tile is drawn on top (z-index 1) and the others dimmed to
+// half opacity; with nothing selected every tile sits at full opacity.
+describe('selectedCodeFromTiles', () => {
+  it('picks the one tile drawn on top', () => {
+    const tiles = [{ code: 'jet', opacity: 1, zIndex: '1' }, { code: 'tank', opacity: 0.5, zIndex: 'auto' }, { code: 'knife', opacity: 0.5, zIndex: 'auto' }];
+    expect(selectedCodeFromTiles(tiles)).toBe('jet');
+  });
+
+  it('falls back to the only tile left at full opacity', () => {
+    const tiles = [{ code: 'jet', opacity: 0.5, zIndex: 'auto' }, { code: 'tank', opacity: 1, zIndex: 'auto' }, { code: 'knife', opacity: 0.5, zIndex: 'auto' }];
+    expect(selectedCodeFromTiles(tiles)).toBe('tank');
+  });
+
+  it('is null when nothing is selected or the reading is ambiguous', () => {
+    expect(selectedCodeFromTiles([{ code: 'jet', opacity: 1, zIndex: 'auto' }, { code: 'tank', opacity: 1, zIndex: 'auto' }])).toBeNull();
+    expect(selectedCodeFromTiles([{ code: 'jet', opacity: 1, zIndex: '1' }, { code: 'tank', opacity: 1, zIndex: '1' }])).toBeNull();
+    expect(selectedCodeFromTiles([])).toBeNull();
   });
 });

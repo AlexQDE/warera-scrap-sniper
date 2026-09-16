@@ -1,8 +1,9 @@
-// Scrap Sniper content script. Runs on every app.warera.io page, does its work
-// only while the equipment market is open: a toolbar with the live scrap floor
-// per rarity, and a verdict block on each offer that says what the gear is
-// worth dismantled, how much of the price the scraps pay back, and whether the
-// offer is under its floor.
+// Scrap Sniper content script. Runs on every app.warera.io page and draws on
+// three of them: the equipment market (a toolbar with the live scrap floor per
+// rarity and a verdict block on each offer), the resource market and the
+// inventory (a strip that says whether each case is worth more sold sealed or
+// opened), and the map's "Nearest wooden case" menu item (what the walk costs
+// in stamina or oil and what is left of the case).
 //
 // The maths is the editor's rule: floor = scraps x the scrap price (the highest
 // buy order, what the scraps fetch sold right away), compared with the gear
@@ -19,10 +20,13 @@
   const { scrapTable } = await import(chrome.runtime.getURL('lib/scraplib.mjs'));
   const dom = await import(chrome.runtime.getURL('lib/dom.mjs'));
   const { salesStats } = await import(chrome.runtime.getURL('lib/sales.mjs'));
+  const { casesSummary } = await import(chrome.runtime.getURL('lib/cases.mjs'));
+  const casesui = await import(chrome.runtime.getURL('lib/casesui.mjs'));
 
   const DEFAULTS = { minMarginPct: 0, intervalSec: 30, collapsed: false };
   const TICK_MS = 5000;
   const SALES_REFRESH_MS = 3 * 60 * 1000;
+  const CASES_REFRESH_MS = 60 * 1000;
 
   const state = {
     settings: { ...DEFAULTS }, book: null, notice: null, error: null, summary: null, busy: false,
@@ -30,6 +34,8 @@
     stale: false,   // the extension was reloaded or updated under this page: only a page reload brings the new script
     sales: null, salesCode: null, salesBusy: false, salesError: null,   // recent fills of the filtered item
     pickerShowAll: false,                                               // "show all" pressed in the item picker
+    palette: dom.RARITY_PALETTE,   // rarity border colours as this page paints them: read off the grid each scan, the shipped list until then
+    cases: null, casesBusy: false, casesError: null,   // the case books and the average item prices (v0.26 strip and trip line)
   };
 
   // ---------- settings (the API key stays in storage and in the background worker, never here) ----------
@@ -64,6 +70,7 @@
   const invalidated = (e) => /context invalidated/i.test(e?.message ?? '');
   async function refreshBook(force = false) {
     if (state.stale) return;
+    if (state.busy && !force) return;   // one ask at a time; the worker coalesces the rest
     if (!force && isFresh(state.book) && !state.noKey && !state.keyRejected) return;
     state.busy = true;
     try {
@@ -101,6 +108,33 @@
     }
     const bar = document.getElementById('scrap-sniper-bar');
     if (bar && onMarket()) renderBar(bar, floors());
+    // The user moved on to another item while this one was being read: ask
+    // for that one now instead of leaving it to the next tick.
+    const wanted = currentCode();
+    if (wanted && wanted !== code) refreshSales(wanted);
+  }
+
+  // ---------- the case prices (asked from the background worker; one book call, averages every 10 min) ----------
+  async function refreshCases(force = false) {
+    if (state.stale || state.casesBusy) return;
+    const fresh = state.cases?.at && Date.now() - Date.parse(state.cases.at) < CASES_REFRESH_MS;
+    if (fresh && !force && !state.noKey && !state.keyRejected) return;
+    state.casesBusy = true;
+    try {
+      const r = await chrome.runtime.sendMessage({ type: 'cases', force });
+      if (!r) throw new Error('no answer from the extension');
+      if (r.error === 'no-key') state.noKey = true;
+      else if (r.error === 'key-rejected') { state.keyRejected = true; state.cases = null; }
+      else { state.noKey = false; state.keyRejected = false; if (r.cases) state.cases = r.cases; }
+      state.casesError = r.error && r.error !== 'no-key' && r.error !== 'key-rejected' ? (r.message ?? r.error) : null;
+    } catch (e) {
+      if (invalidated(e)) state.stale = true;
+      state.casesError = e.message;
+    } finally {
+      state.casesBusy = false;
+    }
+    scanCases();
+    scanMap();
   }
 
   // ---------- per-rarity floors: scraps x the scrap price (highest buy order), nothing else ----------
@@ -118,6 +152,8 @@
 
   // ---------- formatting ----------
   const onMarket = () => /\/market\/equipments/.test(location.pathname);
+  // the resource market (where the cases trade) and any inventory (where they are opened)
+  const onCasesPage = () => /^\/market\/?$/.test(location.pathname) || /\/inventory\/?$/.test(location.pathname);
   // The filtered item: the grid's selected tile first (Opera hides the query), the URL as fallback.
   const currentCode = () => dom.selectedItemCode() ?? dom.filteredItemCode(location.search);
   // Gold amounts carry 3 decimals, the market's own precision (392.991, 1.495), so a floor reads 1:1 against a price.
@@ -255,11 +291,11 @@
   function salesHtml(fl) {
     const code = currentCode();
     if (!code) return '<span class="ss-muted">Click an item in the grid above to see what it really sold for in the last 72 h.</span>';
-    const label = dom.itemLabel(code);
+    const label = dom.escapeHtml(dom.itemLabel(code));
     const s = state.sales;
     if (state.salesCode !== code || !s) {
       return state.salesError
-        ? `<span class="ss-warn">recent sales of ${label} unavailable: ${state.salesError}</span>`
+        ? `<span class="ss-warn">recent sales of ${label} unavailable: ${dom.escapeHtml(state.salesError)}</span>`
         : `<span class="ss-muted">reading recent sales of ${label}…</span>`;
     }
     const rarity = dom.rarityFromItemCode(code);
@@ -298,7 +334,7 @@
     const target = code ? dom.targetFromCode(code) : null;
     let bar = dialog.querySelector('.ss-pick-bar');
     if (!target) { bar?.remove(); for (const el of dialog.querySelectorAll('[data-ss-pick]')) delete el.dataset.ssPick; return; }
-    const tiles = dom.pickerTiles(dialog);
+    const tiles = dom.pickerTiles(dialog, state.palette);
     const decisions = tiles.map((t) => dom.pickerDecision(t, target));
     const kept = decisions.filter((d) => d === 'show').length;
     // Nothing recognised as the target: hide nothing rather than leave an empty picker.
@@ -318,12 +354,12 @@
       dom.pickerCard(dialog).prepend(bar);   // inside the card, so it sits on the dark background
     }
     widenPicker(dom.pickerCard(dialog));
-    const label = dom.itemLabel(code);
+    const label = dom.escapeHtml(dom.itemLabel(code));
     // When nothing matched, name a few images the page could not describe, so a
     // screenshot is enough to tell what an unskinned or new skin is called.
     const unread = [...new Set(tiles.filter((t, i) => decisions[i] === 'unknown').map((t) => t.img.getAttribute('alt')).filter(Boolean))].slice(0, 3);
     const html = kept === 0
-      ? `<span>No <b>${label}</b> recognised among ${tiles.length} items · nothing hidden${unread.length ? ` · unread names: ${unread.join(', ')}` : ''}</span>`
+      ? `<span>No <b>${label}</b> recognised among ${tiles.length} items · nothing hidden${unread.length ? ` · unread names: ${unread.map(dom.escapeHtml).join(', ')}` : ''}</span>`
       : state.pickerShowAll
         ? `<span>All <b>${tiles.length}</b> items · ${kept} ${label}</span><button type="button" class="ss-pick-toggle">only ${label}</button>`
         : `<span><b>${kept}</b> ${label} of ${tiles.length} items · market filter</span><button type="button" class="ss-pick-toggle">show all</button>`;
@@ -351,7 +387,70 @@
       <div class="ss-v-bottom"><span>${fmt(v.ratio, 2)}× floor</span><span>pays back ${Math.round(v.coverPct)}%</span></div>`;
   }
 
+  // ---------- the case strip: sold sealed or opened, per case (resource market, inventory) ----------
+  function setupNotice() {
+    return state.stale ? SETUP_HTML.stale : state.noKey ? SETUP_HTML.noKey : state.keyRejected ? SETUP_HTML.rejected : null;
+  }
+
+  function ensureCasesStrip(anchor) {
+    let strip = document.getElementById('scrap-sniper-cases');
+    if (strip) return strip;
+    strip = document.createElement('div');
+    strip.id = 'scrap-sniper-cases';
+    anchor.insertAdjacentElement('beforebegin', strip);
+    strip.addEventListener('click', (e) => {
+      if (e.target.closest('.ss-c-refresh')) { refreshCases(true); scanCases(); return; }
+      if (e.target.closest('.ss-reload-page')) { location.reload(); return; }
+      if (e.target.closest('.ss-open-settings')) chrome.runtime.sendMessage({ type: 'openSettings' }).catch(() => { state.stale = true; scanCases(); });
+    });
+    return strip;
+  }
+
+  function scanCases() {
+    if (document.hidden) return;
+    if (!onCasesPage()) { document.getElementById('scrap-sniper-cases')?.remove(); return; }
+    const anchor = dom.casesAnchor();
+    if (!anchor) { document.getElementById('scrap-sniper-cases')?.remove(); return; }
+    const strip = ensureCasesStrip(anchor);
+    if (strip.nextElementSibling !== anchor) anchor.insertAdjacentElement('beforebegin', strip);   // the page re-rendered its grid under us
+    const html = casesui.casesStripHtml({ cases: state.cases, error: state.casesError, notice: setupNotice(), busy: state.casesBusy });
+    if (strip.innerHTML !== html) strip.innerHTML = html;
+  }
+
+  // ---------- the trip line under the map's "Nearest wooden case" ----------
+  function scanMap() {
+    if (document.hidden) return;
+    const found = dom.mapLootItem();
+    if (!found) { for (const el of document.querySelectorAll('.ss-trip')) el.remove(); return; }
+    let line = found.item.querySelector(':scope > .ss-trip');
+    if (!line) { line = document.createElement('span'); line.className = 'ss-trip'; found.item.appendChild(line); }
+    for (const el of document.querySelectorAll('.ss-trip')) if (el !== line) el.remove();
+    if (setupNotice() || !state.cases?.at) {
+      const text = state.stale ? 'Scrap Sniper: reload the page' : state.noKey || state.keyRejected ? 'Scrap Sniper: add your API key in the extension settings' : state.casesError ? `Scrap Sniper: ${state.casesError}` : 'Scrap Sniper: reading the case prices…';
+      if (line.textContent !== text) line.textContent = text;
+      line.title = '';
+      return;
+    }
+    if (found.hops == null) {
+      const text = 'Scrap Sniper: distance not in regions yet (the map is still loading)';
+      if (line.textContent !== text) line.textContent = text;
+      return;
+    }
+    const s = casesSummary({ books: state.cases.books, avg: state.cases.avg });
+    const wooden = s.rows.find((r) => r.code === 'woodenCase');
+    const { html, title } = casesui.tripLineHtml({ hops: found.hops, oilAsk: s.oilAsk, sealedBid: wooden.bid, openValue: wooden.openValue });
+    if (line.innerHTML !== html) line.innerHTML = html;
+    if (line.title !== title) line.title = title;
+  }
+
   function scan() {
+    if (document.hidden) return;             // a hidden tab draws nothing and asks for nothing; visibilitychange -> tick() catches up
+    scanEquipments();
+    scanCases();
+    scanMap();
+  }
+
+  function scanEquipments() {
     if (!onMarket()) { clear(); return; }
     const notice = anchorNotice();
     const bar = ensureBar(notice);
@@ -361,13 +460,18 @@
       if (bar) renderBar(bar, null);
       return;
     }
+    // The frame border is the only rarity signal and the game repaints it per
+    // release (v0.26 went from the 600 to the 850 shade): read the palette off
+    // the grid, whose tiles name their item code, and fall back to the shipped list.
+    const live = dom.calibrateRarityBorders();
+    state.palette = live.length ? live : dom.RARITY_PALETTE;
     const fl = floors();
     const code = currentCode();
     const fromCode = code ? dom.rarityFromItemCode(code) : null;
     applyPickerFilter(code);
     if (code) refreshSales(code);
 
-    const rows = dom.offerRows().map((r) => {
+    const rows = dom.offerRows(document, state.palette).map((r) => {
       const rarity = fromCode ?? r.rarity;
       const floor = fl && rarity ? fl[rarity].floor : null;
       return { ...r, rarity, floor, v: dom.verdict({ price: r.price, floor, minMarginPct: state.settings.minMarginPct }) };
@@ -401,17 +505,22 @@
 
   // ---------- loop ----------
   let timer = null;
-  const OURS = '#scrap-sniper-bar, .ss-verdict, .ss-pick-bar';
+  const OURS = '#scrap-sniper-bar, .ss-verdict, .ss-pick-bar, #scrap-sniper-cases, .ss-trip';
   const ours = (n) => !!(n?.closest?.(OURS) || n?.parentElement?.closest?.(OURS));
   const schedule = () => { clearTimeout(timer); timer = setTimeout(scan, 250); };
+  // childList only: a repriced offer arrives as a new row and LOAD MORE appends
+  // rows, while characterData is the header timers ticking once a second
+  // (measured: every idle mutation burst on the live page was timer text).
   new MutationObserver((muts) => {
     if (muts.every((m) => ours(m.target))) return;
     schedule();
-  }).observe(document.body, { childList: true, subtree: true, characterData: true });
+  }).observe(document.body, { childList: true, subtree: true });
 
   async function tick() {
     if (document.hidden) return;              // a hidden tab reads nothing and draws nothing
     if (onMarket()) await refreshBook();
+    // the case prices are asked only while something on the page will show them
+    if (onCasesPage() || dom.mapLootItem()) await refreshCases();
     scan();
   }
   document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
