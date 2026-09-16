@@ -1,0 +1,47 @@
+export default [
+  { ignores: ["node_modules/**", "dist/**"] },
+  {
+    files: ["extension/**/*.{js,mjs}", "scripts/*.mjs"],
+    languageOptions: {
+      ecmaVersion: "latest",
+      sourceType: "module",
+      globals: Object.fromEntries(
+        [
+          "chrome",
+          "window",
+          "document",
+          "location",
+          "getComputedStyle",
+          "MutationObserver",
+          "performance",
+          "fetch",
+          "Headers",
+          "AbortController",
+          "DOMException",
+          "setTimeout",
+          "clearTimeout",
+          "setInterval",
+          "clearInterval",
+          "console",
+          "URL",
+          "URLSearchParams",
+          "process",
+          "Buffer",
+          "structuredClone",
+          "Event",
+        ].map((k) => [k, "readonly"]),
+      ),
+    },
+    rules: {
+      "no-undef": "error",
+      "no-unreachable": "error",
+      "no-dupe-keys": "error",
+      "no-duplicate-case": "error",
+      "no-constant-condition": ["error", { checkLoops: false }],
+      "no-unused-vars": [
+        "warn",
+        { argsIgnorePattern: "^_", caughtErrors: "none" },
+      ],
+    },
+  },
+];

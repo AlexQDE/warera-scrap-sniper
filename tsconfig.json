@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "strict": true,
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022", "DOM"],
+    "skipLibCheck": true
+  },
+  "files": [
+    "extension/lib/quality.mjs",
+    "extension/lib/settings.mjs",
+    "extension/lib/format.mjs",
+    "extension/lib/items.mjs"
+  ]
+}

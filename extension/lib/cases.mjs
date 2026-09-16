@@ -1,7 +1,7 @@
-// Case maths for the Scrap Sniper extension: what a case is worth opened,
+// Case models for WarEra Lens: what a case is worth opened,
 // what the market bids for it sealed, and what a trip to a wooden case on the
-// map costs. Pure and import-free, so the extension loads it straight into
-// the page and vitest covers the same code.
+// map costs. Pure functions plus explicit immutable-snapshot memoization;
+// the extension and tests use the same code.
 //
 // Valuation rule (editor, 2026-09-03, kept in src/woodcase/sim.mjs): contents
 // are worth what they fetch SOLD AT ONCE, the best bid, compared as is with the
@@ -15,33 +15,98 @@
 // is spent on it: units = floor(budget / productionPoints), never below one.
 // The notes' seven amount bands come out of floor and of round alike, so the
 // round rule is carried as the upper edge of a band.
+import { RARITIES, GEAR_CODES } from "./items.mjs";
+import { positive, quote } from "./quality.mjs";
+import { SCRAP_LADDER } from "./ladder.mjs";
+export { GEAR_CODES, ALL_GEAR_CODES } from "./items.mjs";
+
 export const WOODEN_TIERS = [
-  { tier: 'epic', pct: 2, items: ['cookedFish', 'heavyAmmo', 'cocain'] },
-  { tier: 'rare', pct: 13, items: ['ammo', 'steak'] },
-  { tier: 'uncommon', pct: 20, items: ['concrete', 'steel', 'bread', 'oil', 'paper', 'lightAmmo'] },
-  { tier: 'common', pct: 65, items: ['grain', 'iron', 'wood', 'lead', 'limestone', 'coca', 'petroleum', 'livestock', 'fish'] },
+  { tier: "epic", pct: 2, items: ["cookedFish", "heavyAmmo", "cocain"] },
+  { tier: "rare", pct: 13, items: ["ammo", "steak"] },
+  {
+    tier: "uncommon",
+    pct: 20,
+    items: ["concrete", "steel", "bread", "oil", "paper", "lightAmmo"],
+  },
+  {
+    tier: "common",
+    pct: 65,
+    items: [
+      "grain",
+      "iron",
+      "wood",
+      "lead",
+      "limestone",
+      "coca",
+      "petroleum",
+      "livestock",
+      "fish",
+    ],
+  },
 ];
 /** productionPoints per unit, gameConfig.getGameConfig items[] (pinned 2026-09-16). */
 export const WOODEN_PP = {
-  cookedFish: 40, heavyAmmo: 16, cocain: 200, ammo: 4, steak: 20,
-  concrete: 10, steel: 10, bread: 10, oil: 1, paper: 1, lightAmmo: 1,
-  grain: 1, iron: 1, wood: 1, lead: 1, limestone: 1, coca: 1, petroleum: 1, livestock: 20, fish: 40,
+  cookedFish: 40,
+  heavyAmmo: 16,
+  cocain: 200,
+  ammo: 4,
+  steak: 20,
+  concrete: 10,
+  steel: 10,
+  bread: 10,
+  oil: 1,
+  paper: 1,
+  lightAmmo: 1,
+  grain: 1,
+  iron: 1,
+  wood: 1,
+  lead: 1,
+  limestone: 1,
+  coca: 1,
+  petroleum: 1,
+  livestock: 20,
+  fish: 40,
 };
 export const WOODEN_BUDGET = { min: 20, max: 80 };
 export const RESOURCE_NAMES = {
-  cookedFish: 'Cooked Fish', heavyAmmo: 'Heavy Ammo', cocain: 'Pill', ammo: 'Ammo', steak: 'Steak',
-  concrete: 'Concrete', steel: 'Steel', bread: 'Bread', oil: 'Oil', paper: 'Paper', lightAmmo: 'Light Ammo',
-  grain: 'Grain', iron: 'Iron', wood: 'Wood', lead: 'Lead', limestone: 'Limestone', coca: 'Mysterious Plant',
-  petroleum: 'Petroleum', livestock: 'Livestock', fish: 'Fish',
+  cookedFish: "Cooked Fish",
+  heavyAmmo: "Heavy Ammo",
+  cocain: "Pill",
+  ammo: "Ammo",
+  steak: "Steak",
+  concrete: "Concrete",
+  steel: "Steel",
+  bread: "Bread",
+  oil: "Oil",
+  paper: "Paper",
+  lightAmmo: "Light Ammo",
+  grain: "Grain",
+  iron: "Iron",
+  wood: "Wood",
+  lead: "Lead",
+  limestone: "Limestone",
+  coca: "Mysterious Plant",
+  petroleum: "Petroleum",
+  livestock: "Livestock",
+  fish: "Fish",
 };
 export const WOODEN_CODES = WOODEN_TIERS.flatMap((t) => t.items);
 
 /** Expected units of a resource per case: the budget, uniform over 20..80, divided by its production points. */
-export function expectedQty(pp, rule = 'floor') {
-  const f = rule === 'round' ? Math.round : Math.floor;
+const quantityCache = new Map();
+export function expectedQty(pp, rule = "floor") {
+  if (positive(pp) == null || !["floor", "round"].includes(rule))
+    throw new RangeError("Invalid production model");
+  const key = `${pp}:${rule}`;
+  if (quantityCache.has(key)) return quantityCache.get(key);
+  const f = rule === "round" ? Math.round : Math.floor;
   let sum = 0;
   let n = 0;
-  for (let b = WOODEN_BUDGET.min; b <= WOODEN_BUDGET.max; b++) { sum += Math.max(1, f(b / pp)); n++; }
+  for (let b = WOODEN_BUDGET.min; b <= WOODEN_BUDGET.max; b++) {
+    sum += Math.max(1, f(b / pp));
+    n++;
+  }
+  quantityCache.set(key, sum / n);
   return sum / n;
 }
 
@@ -50,26 +115,65 @@ export function expectedQty(pp, rule = 'floor') {
  * (the best bid). { ev, evRound, rows, tiers, complete, missing }; a resource
  * without a price counts zero and is named in `missing`.
  */
-export function woodenCaseValue(priceOf, rule = 'floor') {
+export function woodenCaseValue(priceOf, rule = "floor", quoteOf = null) {
   const rows = [];
   const missing = [];
   for (const t of WOODEN_TIERS) {
     for (const code of t.items) {
       const price = priceOf(code);
-      const ok = Number.isFinite(Number(price)) && price != null;
-      if (!ok) missing.push(code);
+      let ok = positive(price) != null;
       const eQty = expectedQty(WOODEN_PP[code], rule);
-      rows.push({ code, name: RESOURCE_NAMES[code], tier: t.tier, tierPct: t.pct, itemPct: t.pct / t.items.length, pp: WOODEN_PP[code], eQty, bid: ok ? Number(price) : null, gold: ok ? eQty * Number(price) : 0 });
+      let gold = ok ? eQty * Number(price) : 0;
+      if (quoteOf) {
+        let total = 0;
+        for (
+          let budget = WOODEN_BUDGET.min;
+          budget <= WOODEN_BUDGET.max;
+          budget++
+        ) {
+          const units = Math.max(1, Math[rule](budget / WOODEN_PP[code]));
+          const q = quoteOf(code, units);
+          if (!q.complete) ok = false;
+          total += q.value ?? 0;
+        }
+        gold = total / (WOODEN_BUDGET.max - WOODEN_BUDGET.min + 1);
+      }
+      if (!ok) missing.push(code);
+      rows.push({
+        code,
+        name: RESOURCE_NAMES[code],
+        tier: t.tier,
+        tierPct: t.pct,
+        itemPct: t.pct / t.items.length,
+        pp: WOODEN_PP[code],
+        eQty,
+        bid: positive(price),
+        gold,
+      });
     }
   }
   const tiers = WOODEN_TIERS.map((t) => {
     const rs = rows.filter((r) => r.tier === t.tier);
     const meanGold = rs.reduce((s, r) => s + r.gold, 0) / rs.length;
-    return { tier: t.tier, pct: t.pct, meanGold, contribution: (t.pct / 100) * meanGold };
+    return {
+      tier: t.tier,
+      pct: t.pct,
+      meanGold,
+      contribution: (t.pct / 100) * meanGold,
+    };
   });
   const ev = tiers.reduce((s, t) => s + t.contribution, 0);
-  const evRound = rule === 'round' ? ev : woodenCaseValue(priceOf, 'round').ev;
-  return { ev, evRound, rows, tiers, complete: missing.length === 0, missing };
+  const round =
+    rule === "round" ? null : woodenCaseValue(priceOf, "round", quoteOf);
+  const evRound = round?.ev ?? ev;
+  return {
+    ev,
+    evRound,
+    rows,
+    tiers,
+    complete: missing.length === 0 && (round?.complete ?? true),
+    missing: [...new Set([...missing, ...(round?.missing ?? [])])],
+  };
 }
 
 // --------------------------------------------------------- the battle cases -
@@ -79,31 +183,61 @@ export function woodenCaseValue(priceOf, rule = 'floor') {
 // (67.5 scraps against 70 advertised), so the empirical figures are the ones.
 export const CASE_ODDS = {
   case1: {
-    label: 'Case', scrapsPerCase: 14.7188, weaponShare: 0.30015,
-    rarity: { common: 0.619237, uncommon: 0.300342, rare: 0.071349, epic: 0.008533, legendary: 0.000436, mythic: 0.000103 },
+    label: "Case",
+    scrapsPerCase: 14.7188,
+    weaponShare: 0.30015,
+    rarity: {
+      common: 0.619237,
+      uncommon: 0.300342,
+      rare: 0.071349,
+      epic: 0.008533,
+      legendary: 0.000436,
+      mythic: 0.000103,
+    },
   },
   case2: {
-    label: 'Elite Case', scrapsPerCase: 67.499, weaponShare: 0.3073,
-    rarity: { common: 0, uncommon: 0.503745, rare: 0.324203, epic: 0.143002, legendary: 0.025305, mythic: 0.003745 },
+    label: "Elite Case",
+    scrapsPerCase: 67.499,
+    weaponShare: 0.3073,
+    rarity: {
+      common: 0,
+      uncommon: 0.503745,
+      rare: 0.324203,
+      epic: 0.143002,
+      legendary: 0.025305,
+      mythic: 0.003745,
+    },
   },
 };
-export const CASE_LABELS = { woodenCase: 'Wooden Case', case1: 'Case', case2: 'Elite Case' };
-export const CASE_CODES = ['woodenCase', 'case1', 'case2'];
+export const CASE_LABELS = {
+  woodenCase: "Wooden Case",
+  case1: "Case",
+  case2: "Elite Case",
+};
+export const CASE_CODES = ["woodenCase", "case1", "case2"];
 
-const RARITIES = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
-const WEAPONS = ['knife', 'gun', 'rifle', 'sniper', 'tank', 'jet'];
-const SLOTS = ['helmet', 'chest', 'gloves', 'pants', 'boots'];
-/** The 36 gear codes a battle case can drop, by rarity: one weapon and five armour pieces each. */
-export const GEAR_CODES = Object.fromEntries(RARITIES.map((r, i) => [r, { weapon: WEAPONS[i], gear: SLOTS.map((s) => `${s}${i + 1}`) }]));
-export const ALL_GEAR_CODES = RARITIES.flatMap((r) => [GEAR_CODES[r].weapon, ...GEAR_CODES[r].gear]);
-
-const num = (v) => (v == null || !Number.isFinite(Number(v)) ? null : Number(v));
+const num = (v) =>
+  v == null || !Number.isFinite(Number(v)) ? null : Number(v);
 
 /** An open cashed by dismantling: scraps per case (audited) x the scrap price; null for the wooden case. */
 export function caseScrapValue(caseCode, scrapBid) {
   const odds = CASE_ODDS[caseCode];
   const p = num(scrapBid);
   return odds && p != null ? odds.scrapsPerCase * p : null;
+}
+
+/** Outcome-weighted proceeds, walking the depth separately for each possible drop. */
+export function caseScrapQuote(caseCode, bids) {
+  const odds = CASE_ODDS[caseCode];
+  if (!odds) return { value: null, complete: false };
+  let value = 0;
+  for (const rarity of RARITIES) {
+    if (!odds.rarity[rarity]) continue;
+    const q = quote(SCRAP_LADDER[rarity], bids);
+    if (!q.complete) return { value: null, complete: false };
+    value += odds.rarity[rarity] * q.value;
+  }
+  return { value, complete: true };
 }
 
 /**
@@ -117,22 +251,36 @@ export function caseMarketValue(caseCode, avgOf) {
   if (!odds) return { value: null, complete: false, missing: [] };
   let value = 0;
   const missing = [];
+  let coverage = 0;
   for (const r of RARITIES) {
     const p = odds.rarity[r];
     if (!p) continue;
     const g = GEAR_CODES[r];
     // zero is the game's "no sales yet", not a price: it never enters a mean
-    const priced = (c) => { const v = num(avgOf(c)); return v != null && v > 0 ? v : null; };
+    const priced = (c) => {
+      const v = num(avgOf(c));
+      return v != null && v > 0 ? v : null;
+    };
     const weapon = priced(g.weapon);
-    const gear = g.gear.map(priced).filter((v) => v != null);
-    const gearMean = gear.length ? gear.reduce((s, v) => s + v, 0) / gear.length : null;
-    if (weapon == null && gearMean == null) { missing.push(r); continue; }
-    // a side with no price takes the other side's number, so a thin rarity still counts
-    const w = weapon ?? gearMean;
-    const a = gearMean ?? weapon;
-    value += p * (odds.weaponShare * w + (1 - odds.weaponShare) * a);
+    for (const [code, weight] of [
+      [g.weapon, odds.weaponShare],
+      ...g.gear.map((c) => [c, (1 - odds.weaponShare) / g.gear.length]),
+    ]) {
+      const price = code === g.weapon ? weapon : priced(code);
+      if (price == null) {
+        missing.push(code);
+        continue;
+      }
+      value += p * weight * price;
+      coverage += p * weight;
+    }
   }
-  return { value: missing.length === RARITIES.filter((r) => odds.rarity[r]).length ? null : value, complete: missing.length === 0, missing };
+  return {
+    value: coverage ? value : null,
+    complete: missing.length === 0,
+    missing,
+    coverage,
+  };
 }
 
 // ---------------------------------------------------------------- verdicts -
@@ -140,12 +288,23 @@ export function caseMarketValue(caseCode, avgOf) {
 export const SELL_MARGIN = 1.1;
 
 /** { verdict: 'sell' | 'open' | 'even' | null, ratio: bid / openValue }. */
-export function caseVerdict({ bid, openValue, margin = SELL_MARGIN }) {
+export function caseVerdict({
+  bid,
+  openValue,
+  margin = SELL_MARGIN,
+  complete = true,
+  band = null,
+}) {
   const b = num(bid);
   const o = num(openValue);
-  if (b == null || o == null || !(o > 0) || !(b > 0)) return { verdict: null, ratio: null };
+  if (b == null || o == null || !(o > 0) || !(b > 0) || !complete)
+    return { verdict: null, ratio: null };
   const ratio = b / o;
-  return { verdict: ratio >= margin ? 'sell' : ratio <= 1 / margin ? 'open' : 'even', ratio };
+  const [low, high] = band ?? [o, o];
+  return {
+    verdict: b >= high * margin ? "sell" : low >= b * margin ? "open" : "even",
+    ratio,
+  };
 }
 
 // ------------------------------------------------------------------ travel -
@@ -156,16 +315,32 @@ export const OIL_PER_HOP = 2;
 
 /** The cost of walking `hops` regions to a case worth `value`, oil at `oilAsk`. */
 export function tripCost({ hops, oilAsk, value }) {
-  const h = Math.max(0, Math.round(Number(hops) || 0));
+  const h = Number(hops);
+  if (
+    hops == null ||
+    hops === "" ||
+    typeof hops === "boolean" ||
+    !Number.isSafeInteger(h) ||
+    h < 0
+  )
+    throw new RangeError("Distance must be a non-negative integer");
   const oil = h * OIL_PER_HOP;
   const price = num(oilAsk);
   const v = num(value);
-  const oilGold = price == null ? null : oil * price;
+  const oilGold = h === 0 ? 0 : price == null ? null : oil * price;
   const netOneWay = v == null || oilGold == null ? null : v - oilGold;
   const netRoundTrip = v == null || oilGold == null ? null : v - 2 * oilGold;
   return {
-    hops: h, stamina: h * STAMINA_PER_HOP, oil, oilGold, netOneWay, netRoundTrip,
-    breakevenHops: v == null || price == null || !(price > 0) ? null : v / (OIL_PER_HOP * price),
+    hops: h,
+    stamina: h * STAMINA_PER_HOP,
+    oil,
+    oilGold,
+    netOneWay,
+    netRoundTrip,
+    breakevenHops:
+      v == null || price == null || !(price > 0)
+        ? null
+        : v / (OIL_PER_HOP * price),
     paysOneWay: netOneWay == null ? null : netOneWay > 0,
     paysRoundTrip: netRoundTrip == null ? null : netRoundTrip > 0,
   };
@@ -173,11 +348,25 @@ export function tripCost({ hops, oilAsk, value }) {
 
 /** "7 regions away" / "1 region away" -> 7 / 1 (lingui id sX+lDG, the same text in every catalog read); null for the km fallback. */
 export function regionsAwayFromText(text) {
-  const m = /(\d+)\s*regions?\s+away/i.exec(String(text ?? ''));
+  const m = /(\d+)\s*regions?\s+away/i.exec(String(text ?? ""));
   return m ? Number(m[1]) : null;
 }
 
 // ----------------------------------------------------------------- summary -
+const summaryCache = new WeakMap();
+/** UI-only memoization: API snapshots are immutable. Freshness-filtered averages
+ * participate in the key, so an expired/failed item cannot retain its valuation.
+ */
+export function snapshotSummary({ books, avg = null }) {
+  if (!books) return casesSummary({ books, avg });
+  const key = JSON.stringify(avg);
+  const old = summaryCache.get(books);
+  if (old?.key === key) return old.value;
+  const value = casesSummary({ books, avg });
+  summaryCache.set(books, { key, value });
+  return value;
+}
+
 /**
  * One row per case for the strip: { code, label, bid, bidQty, ask, askQty,
  * openScrap, openMarket, openValue, openBand, complete, ratio, verdict }, plus the
@@ -188,8 +377,10 @@ export function casesSummary({ books, avg }) {
   const b = books ?? {};
   const bidOf = (c) => num(b[c]?.bid);
   const avgOf = (c) => (avg ? num(avg[c]) : null);
-  const scrapBid = bidOf('scraps');
-  const wooden = woodenCaseValue(bidOf);
+  const scrapBid = bidOf("scraps");
+  const wooden = woodenCaseValue(bidOf, "floor", (code, units) =>
+    quote(units, b[code]?.bids),
+  );
   const rows = CASE_CODES.map((code) => {
     const book = b[code] ?? {};
     let openScrap = null;
@@ -197,23 +388,57 @@ export function casesSummary({ books, avg }) {
     let openValue = null;
     let openBand = null;
     let complete = true;
-    if (code === 'woodenCase') {
+    let coverage = null;
+    let basis = "resource EV";
+    if (code === "woodenCase") {
       openValue = wooden.ev;
       openBand = [wooden.ev, wooden.evRound];
       complete = wooden.complete;
     } else {
-      openScrap = caseScrapValue(code, scrapBid);
-      const m = avg ? caseMarketValue(code, avgOf) : { value: null, complete: false };
+      const scrapQuote = caseScrapQuote(code, b.scraps?.bids);
+      openScrap = scrapQuote.value;
+      const m = avg
+        ? caseMarketValue(code, avgOf)
+        : { value: null, complete: false };
       openMarket = m.value;
-      complete = openScrap != null && (avg ? m.complete : true);
-      openValue = openScrap == null && openMarket == null ? null : Math.max(openScrap ?? -Infinity, openMarket ?? -Infinity);
+      coverage = m.coverage ?? 0;
+      // Historical resale estimates are not instant liquidation. Keep the two models separate.
+      complete = scrapQuote.complete;
+      openValue = openScrap;
+      openBand = null;
+      basis = "scrap-only EV";
     }
-    const v = caseVerdict({ bid: num(book.bid), openValue });
+    const sealed = quote(1, book.bids);
+    complete = complete && sealed.complete;
+    const v = caseVerdict({
+      bid: num(book.bid),
+      openValue,
+      band: openBand,
+      complete,
+    });
     return {
-      code, label: CASE_LABELS[code],
-      bid: num(book.bid), bidQty: num(book.bidQty) ?? 0, ask: num(book.ask), askQty: num(book.askQty) ?? 0,
-      openScrap, openMarket, openValue, openBand, complete, ratio: v.ratio, verdict: v.verdict,
+      code,
+      label: CASE_LABELS[code],
+      bid: num(book.bid),
+      bidQty: num(book.bidQty) ?? 0,
+      ask: num(book.ask),
+      askQty: num(book.askQty) ?? 0,
+      openScrap,
+      openMarket,
+      openValue,
+      openBand,
+      complete,
+      coverage,
+      basis,
+      ratio: v.ratio,
+      verdict: v.verdict,
     };
   });
-  return { rows, oilAsk: num(b.oil?.ask), oilBid: num(b.oil?.bid), scrapBid, wooden };
+  return {
+    rows,
+    oilAsk: num(b.oil?.ask),
+    oilBid: num(b.oil?.bid),
+    scrapBid,
+    wooden,
+  };
 }

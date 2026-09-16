@@ -1,77 +1,109 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from "vitest";
 import {
-  rarityFromBorder, rarityFromItemCode, parsePrice, isItemImageAlt, priceFromLines, verdict,
-  closestIndex, fmtQty, slotFromAlt, targetFromCode, itemLabel, isPickerText, pickerDecision, pickerDialog,
-  selectedTileIndex, codeFromSelection, escapeHtml, paletteFromSamples, gridCodeFromId, selectedCodeFromTiles,
-} from './dom.mjs';
+  rarityFromBorder,
+  rarityFromItemCode,
+  parsePrice,
+  isItemImageAlt,
+  priceFromLines,
+  verdict,
+  closestIndex,
+  fmtQty,
+  slotFromAlt,
+  targetFromCode,
+  itemLabel,
+  isPickerText,
+  pickerDecision,
+  pickerDialog,
+  selectedTileIndex,
+  codeFromSelection,
+  escapeHtml,
+  paletteFromSamples,
+  gridCodeFromId,
+  selectedCodeFromTiles,
+} from "./dom.mjs";
 
 // The inventory picker behind "New item offer" shows every item as a skin
 // image whose name ends in the slot (dieselBoots, miamiHelmet, winterJet) inside
 // a rarity-bordered tile; the market filter puts the item code in the URL.
-describe('slotFromAlt', () => {
-  it('reads the slot off the skin name', () => {
-    expect(slotFromAlt('dieselBoots')).toBe('boots');
-    expect(slotFromAlt('miamiHelmet')).toBe('helmet');
-    expect(slotFromAlt('gsg9Pants')).toBe('pants');
-    expect(slotFromAlt('winterJet')).toBe('jet');
-    expect(slotFromAlt('1kSubRifle')).toBe('rifle');
-    expect(slotFromAlt('miamiKnife')).toBe('knife');
+describe("slotFromAlt", () => {
+  it("reads the slot off the skin name", () => {
+    expect(slotFromAlt("dieselBoots")).toBe("boots");
+    expect(slotFromAlt("miamiHelmet")).toBe("helmet");
+    expect(slotFromAlt("gsg9Pants")).toBe("pants");
+    expect(slotFromAlt("winterJet")).toBe("jet");
+    expect(slotFromAlt("1kSubRifle")).toBe("rifle");
+    expect(slotFromAlt("miamiKnife")).toBe("knife");
   });
 
-  it('reads the slot off a plain item code or name when the player uses no skins', () => {
-    expect(slotFromAlt('chest2')).toBe('chest');
-    expect(slotFromAlt('boots5')).toBe('boots');
-    expect(slotFromAlt('helmet1')).toBe('helmet');
-    expect(slotFromAlt('tank')).toBe('tank');
-    expect(slotFromAlt('Chest T2')).toBe('chest');
-    expect(slotFromAlt('Uncommon chest')).toBe('chest');
+  it("reads the slot off a plain item code or name when the player uses no skins", () => {
+    expect(slotFromAlt("chest2")).toBe("chest");
+    expect(slotFromAlt("boots5")).toBe("boots");
+    expect(slotFromAlt("helmet1")).toBe("helmet");
+    expect(slotFromAlt("tank")).toBe("tank");
+    expect(slotFromAlt("Chest T2")).toBe("chest");
+    expect(slotFromAlt("Uncommon chest")).toBe("chest");
   });
 
-  it('is null for avatars, flags and unknown names', () => {
-    expect(slotFromAlt('Nijntje avatar')).toBeNull();
-    expect(slotFromAlt('Netherlands flag')).toBeNull();
-    expect(slotFromAlt('chestnut')).toBeNull();
-    expect(slotFromAlt('')).toBeNull();
+  it("is null for avatars, flags and unknown names", () => {
+    expect(slotFromAlt("Nijntje avatar")).toBeNull();
+    expect(slotFromAlt("Netherlands flag")).toBeNull();
+    expect(slotFromAlt("chestnut")).toBeNull();
+    expect(slotFromAlt("")).toBeNull();
   });
 });
 
-describe('isPickerText', () => {
+describe("isPickerText", () => {
   it('recognises the picker dialog by its textContent, where "Item" runs straight into the first number', () => {
     // real textContent of the picker on 2026-09-03: no whitespace after the title
-    expect(isPickerText('Item27050%430.5100%15633%148.8100%')).toBe(true);
-    expect(isPickerText('Item\n270\n50%')).toBe(true);
-    expect(isPickerText('  Item')).toBe(true);
+    expect(isPickerText("Item27050%430.5100%15633%148.8100%")).toBe(true);
+    expect(isPickerText("Item\n270\n50%")).toBe(true);
+    expect(isPickerText("  Item")).toBe(true);
   });
 
-  it('rejects the outer offer dialog and anything else starting with Item-something', () => {
-    expect(isPickerText('New item offerItemPriceWill be displayed')).toBe(false);
-    expect(isPickerText('Items for sale')).toBe(false);
-    expect(isPickerText('')).toBe(false);
+  it("rejects the outer offer dialog and anything else starting with Item-something", () => {
+    expect(isPickerText("New item offerItemPriceWill be displayed")).toBe(
+      false,
+    );
+    expect(isPickerText("Items for sale")).toBe(false);
+    expect(isPickerText("")).toBe(false);
   });
 });
 
 // A stand-in for the DOM: enough of querySelector(All)/textContent for pickerDialog.
 const fakeDialog = ({ text, hasBar, imgAlt }) => ({
   textContent: text,
-  querySelector: (sel) => (sel === '.ss-pick-bar' && hasBar ? {} : null),
-  querySelectorAll: (sel) => (sel === 'img' && imgAlt ? [{ getAttribute: () => imgAlt }] : []),
+  querySelector: (sel) => (sel === ".ss-pick-bar" && hasBar ? {} : null),
+  querySelectorAll: (sel) =>
+    sel === "img" && imgAlt ? [{ getAttribute: () => imgAlt }] : [],
 });
 const fakeRoot = (...dialogs) => ({ querySelectorAll: () => dialogs });
 
-describe('pickerDialog', () => {
-  it('finds the picker by its text before the bar exists', () => {
-    const d = fakeDialog({ text: 'Item27050%430.5', hasBar: false, imgAlt: 'gsg9Pants' });
+describe("pickerDialog", () => {
+  it("finds the picker by its text before the bar exists", () => {
+    const d = fakeDialog({
+      text: "Item27050%430.5",
+      hasBar: false,
+      imgAlt: "gsg9Pants",
+    });
     expect(pickerDialog(fakeRoot(d))).toBe(d);
   });
 
-  it('still finds it once the bar sits inside the card and the text starts with the bar', () => {
-    const d = fakeDialog({ text: 'Showing only 29 uncommon pants of 453 itemsshow allItem27050%', hasBar: true, imgAlt: 'gsg9Pants' });
+  it("still finds it once the bar sits inside the card and the text starts with the bar", () => {
+    const d = fakeDialog({
+      text: "Showing only 29 uncommon pants of 453 itemsshow allItem27050%",
+      hasBar: true,
+      imgAlt: "gsg9Pants",
+    });
     expect(pickerDialog(fakeRoot(d))).toBe(d);
   });
 
-  it('ignores the outer offer dialog and dialogs without item images', () => {
-    const outer = fakeDialog({ text: 'New item offerItemPrice', hasBar: false, imgAlt: null });
-    const empty = fakeDialog({ text: 'Item', hasBar: false, imgAlt: null });
+  it("ignores the outer offer dialog and dialogs without item images", () => {
+    const outer = fakeDialog({
+      text: "New item offerItemPrice",
+      hasBar: false,
+      imgAlt: null,
+    });
+    const empty = fakeDialog({ text: "Item", hasBar: false, imgAlt: null });
     expect(pickerDialog(fakeRoot(outer, empty))).toBeNull();
   });
 });
@@ -80,175 +112,201 @@ describe('pickerDialog', () => {
 // carries (2 extra hashed classes, read 2026-09-03); the rarity classes repeat
 // once per section, so they are not unique in the grid. Opera hides the ?item=
 // query, so the selection is read from the page and the URL is the fallback.
-describe('selectedTileIndex', () => {
-  it('finds the one tile whose classes appear nowhere else in the grid', () => {
-    const grid = ['base r1', 'base r2', 'base r1', 'base r2 selA selB'];
+describe("selectedTileIndex", () => {
+  it("finds the one tile whose classes appear nowhere else in the grid", () => {
+    const grid = ["base r1", "base r2", "base r1", "base r2 selA selB"];
     expect(selectedTileIndex(grid)).toBe(3);
   });
 
-  it('is -1 when nothing is selected or the pick is ambiguous', () => {
-    expect(selectedTileIndex(['base r1', 'base r2', 'base r1', 'base r2'])).toBe(-1);
-    expect(selectedTileIndex(['base x', 'base y'])).toBe(-1);   // two tiles with unique classes
+  it("is -1 when nothing is selected or the pick is ambiguous", () => {
+    expect(
+      selectedTileIndex(["base r1", "base r2", "base r1", "base r2"]),
+    ).toBe(-1);
+    expect(selectedTileIndex(["base x", "base y"])).toBe(-1); // two tiles with unique classes
     expect(selectedTileIndex([])).toBe(-1);
   });
 });
 
-describe('codeFromSelection', () => {
-  it('turns a grid section and a tile rarity into the item code', () => {
-    expect(codeFromSelection('Pants', 'uncommon')).toBe('pants2');
-    expect(codeFromSelection('Boots', 'legendary')).toBe('boots5');
-    expect(codeFromSelection('Helmets', 'common')).toBe('helmet1');
-    expect(codeFromSelection('Chests', 'mythic')).toBe('chest6');
-    expect(codeFromSelection('Gloves', 'epic')).toBe('gloves4');
-    expect(codeFromSelection('Weapons', 'mythic')).toBe('jet');
-    expect(codeFromSelection('Weapons', 'common')).toBe('knife');
+describe("codeFromSelection", () => {
+  it("turns a grid section and a tile rarity into the item code", () => {
+    expect(codeFromSelection("Pants", "uncommon")).toBe("pants2");
+    expect(codeFromSelection("Boots", "legendary")).toBe("boots5");
+    expect(codeFromSelection("Helmets", "common")).toBe("helmet1");
+    expect(codeFromSelection("Chests", "mythic")).toBe("chest6");
+    expect(codeFromSelection("Gloves", "epic")).toBe("gloves4");
+    expect(codeFromSelection("Weapons", "mythic")).toBe("jet");
+    expect(codeFromSelection("Weapons", "common")).toBe("knife");
   });
 
-  it('is null for an unknown section or an unreadable rarity', () => {
-    expect(codeFromSelection('Cases', 'rare')).toBeNull();
-    expect(codeFromSelection('Pants', null)).toBeNull();
-  });
-});
-
-describe('pickerDecision', () => {
-  const target = { slot: 'pants', rarity: 'uncommon' };
-  it('shows a matching tile and hides a tile that is positively something else', () => {
-    expect(pickerDecision({ slot: 'pants', rarity: 'uncommon' }, target)).toBe('show');
-    expect(pickerDecision({ slot: 'pants', rarity: 'rare' }, target)).toBe('hide');
-    expect(pickerDecision({ slot: 'boots', rarity: 'uncommon' }, target)).toBe('hide');
-  });
-
-  it('never hides what it cannot read: an unknown skin name or an off-palette border stays visible', () => {
-    expect(pickerDecision({ slot: null, rarity: 'uncommon' }, target)).toBe('unknown');
-    expect(pickerDecision({ slot: 'pants', rarity: null }, target)).toBe('unknown');
+  it("is null for an unknown section or an unreadable rarity", () => {
+    expect(codeFromSelection("Cases", "rare")).toBeNull();
+    expect(codeFromSelection("Pants", null)).toBeNull();
   });
 });
 
-describe('targetFromCode', () => {
-  it('turns a market item code into the slot and rarity the picker should keep', () => {
-    expect(targetFromCode('boots5')).toEqual({ slot: 'boots', rarity: 'legendary' });
-    expect(targetFromCode('helmet1')).toEqual({ slot: 'helmet', rarity: 'common' });
-    expect(targetFromCode('jet')).toEqual({ slot: 'jet', rarity: 'mythic' });
-    expect(targetFromCode('gun')).toEqual({ slot: 'gun', rarity: 'uncommon' });
+describe("pickerDecision", () => {
+  const target = { slot: "pants", rarity: "uncommon" };
+  it("shows a matching tile and hides a tile that is positively something else", () => {
+    expect(pickerDecision({ slot: "pants", rarity: "uncommon" }, target)).toBe(
+      "show",
+    );
+    expect(pickerDecision({ slot: "pants", rarity: "rare" }, target)).toBe(
+      "hide",
+    );
+    expect(pickerDecision({ slot: "boots", rarity: "uncommon" }, target)).toBe(
+      "hide",
+    );
   });
 
-  it('is null for anything that is not gear', () => {
-    expect(targetFromCode('scraps')).toBeNull();
+  it("never hides what it cannot read: an unknown skin name or an off-palette border stays visible", () => {
+    expect(pickerDecision({ slot: null, rarity: "uncommon" }, target)).toBe(
+      "unknown",
+    );
+    expect(pickerDecision({ slot: "pants", rarity: null }, target)).toBe(
+      "unknown",
+    );
+  });
+});
+
+describe("targetFromCode", () => {
+  it("turns a market item code into the slot and rarity the picker should keep", () => {
+    expect(targetFromCode("boots5")).toEqual({
+      slot: "boots",
+      rarity: "legendary",
+    });
+    expect(targetFromCode("helmet1")).toEqual({
+      slot: "helmet",
+      rarity: "common",
+    });
+    expect(targetFromCode("jet")).toEqual({ slot: "jet", rarity: "mythic" });
+    expect(targetFromCode("gun")).toEqual({ slot: "gun", rarity: "uncommon" });
+  });
+
+  it("is null for anything that is not gear", () => {
+    expect(targetFromCode("scraps")).toBeNull();
     expect(targetFromCode(null)).toBeNull();
   });
 });
 
-describe('itemLabel', () => {
-  it('names gear the way a player says it', () => {
-    expect(itemLabel('boots5')).toBe('legendary boots');
-    expect(itemLabel('jet')).toBe('mythic jet');
-    expect(itemLabel('nothing')).toBe('nothing');
+describe("itemLabel", () => {
+  it("names gear the way a player says it", () => {
+    expect(itemLabel("boots5")).toBe("legendary boots");
+    expect(itemLabel("jet")).toBe("mythic jet");
+    expect(itemLabel("nothing")).toBe("nothing");
   });
 });
 
 // Border colours read off app.warera.io/market/equipments on 2026-09-03 (grid
 // tiles and offer-row tiles alike, getComputedStyle(...).borderColor).
-describe('rarityFromBorder', () => {
-  it('maps the six live tile borders', () => {
-    expect(rarityFromBorder('rgb(150, 38, 40)')).toBe('mythic');
-    expect(rarityFromBorder('rgb(129, 120, 45)')).toBe('legendary');
-    expect(rarityFromBorder('rgb(94, 59, 145)')).toBe('epic');
-    expect(rarityFromBorder('rgb(37, 78, 167)')).toBe('rare');
-    expect(rarityFromBorder('rgb(43, 110, 68)')).toBe('uncommon');
-    expect(rarityFromBorder('rgb(80, 112, 124)')).toBe('common');
+describe("rarityFromBorder", () => {
+  it("maps the six live tile borders", () => {
+    expect(rarityFromBorder("rgb(150, 38, 40)")).toBe("mythic");
+    expect(rarityFromBorder("rgb(129, 120, 45)")).toBe("legendary");
+    expect(rarityFromBorder("rgb(94, 59, 145)")).toBe("epic");
+    expect(rarityFromBorder("rgb(37, 78, 167)")).toBe("rare");
+    expect(rarityFromBorder("rgb(43, 110, 68)")).toBe("uncommon");
+    expect(rarityFromBorder("rgb(80, 112, 124)")).toBe("common");
   });
 
-  it('tolerates a small palette shift and accepts rgba', () => {
-    expect(rarityFromBorder('rgba(155, 40, 44, 0.9)')).toBe('mythic');
+  it("tolerates a small palette shift and accepts rgba", () => {
+    expect(rarityFromBorder("rgba(155, 40, 44, 0.9)")).toBe("mythic");
   });
 
-  it('refuses a colour that is not near any tile border', () => {
-    expect(rarityFromBorder('rgb(208, 221, 225)')).toBeNull();   // the avatar/flag tile
-    expect(rarityFromBorder('rgba(0, 0, 0, 0)')).toBeNull();
-    expect(rarityFromBorder('')).toBeNull();
+  it("refuses a colour that is not near any tile border", () => {
+    expect(rarityFromBorder("rgb(208, 221, 225)")).toBeNull(); // the avatar/flag tile
+    expect(rarityFromBorder("rgba(0, 0, 0, 0)")).toBeNull();
+    expect(rarityFromBorder("")).toBeNull();
   });
 });
 
-describe('rarityFromItemCode', () => {
-  it('reads the tier digit on gear and names on weapons (gameConfig 2026-09-03)', () => {
-    expect(rarityFromItemCode('helmet6')).toBe('mythic');
-    expect(rarityFromItemCode('boots1')).toBe('common');
-    expect(rarityFromItemCode('pants4')).toBe('epic');
-    expect(rarityFromItemCode('jet')).toBe('mythic');
-    expect(rarityFromItemCode('knife')).toBe('common');
-    expect(rarityFromItemCode('tank')).toBe('legendary');
+describe("rarityFromItemCode", () => {
+  it("reads the tier digit on gear and names on weapons (gameConfig 2026-09-03)", () => {
+    expect(rarityFromItemCode("helmet6")).toBe("mythic");
+    expect(rarityFromItemCode("boots1")).toBe("common");
+    expect(rarityFromItemCode("pants4")).toBe("epic");
+    expect(rarityFromItemCode("jet")).toBe("mythic");
+    expect(rarityFromItemCode("knife")).toBe("common");
+    expect(rarityFromItemCode("tank")).toBe("legendary");
   });
 
-  it('returns null for skins, resources and junk', () => {
-    expect(rarityFromItemCode('winterJet')).toBeNull();
-    expect(rarityFromItemCode('scraps')).toBeNull();
-    expect(rarityFromItemCode('')).toBeNull();
+  it("returns null for skins, resources and junk", () => {
+    expect(rarityFromItemCode("winterJet")).toBeNull();
+    expect(rarityFromItemCode("scraps")).toBeNull();
+    expect(rarityFromItemCode("")).toBeNull();
     expect(rarityFromItemCode(null)).toBeNull();
   });
 });
 
-describe('parsePrice', () => {
-  it('reads plain and grouped decimals', () => {
-    expect(parsePrice('392.991')).toBeCloseTo(392.991, 9);
-    expect(parsePrice('1.43')).toBeCloseTo(1.43, 9);
-    expect(parsePrice(' 1,234.5 ')).toBeCloseTo(1234.5, 9);
-    expect(parsePrice('385')).toBe(385);
+describe("parsePrice", () => {
+  it("reads plain and grouped decimals", () => {
+    expect(parsePrice("392.991")).toBeCloseTo(392.991, 9);
+    expect(parsePrice("1.43")).toBeCloseTo(1.43, 9);
+    expect(parsePrice(" 1,234.5 ")).toBeCloseTo(1234.5, 9);
+    expect(parsePrice("385")).toBe(385);
   });
 
-  it('expands the K and M suffixes the header uses', () => {
-    expect(parsePrice('1.858K')).toBeCloseTo(1858, 9);
-    expect(parsePrice('2M')).toBe(2_000_000);
+  it("expands the K and M suffixes the header uses", () => {
+    expect(parsePrice("1.858K")).toBeCloseTo(1858, 9);
+    expect(parsePrice("2M")).toBe(2_000_000);
   });
 
-  it('rejects anything that is not a bare number', () => {
-    expect(parsePrice('BUY')).toBeNull();
-    expect(parsePrice('3h38m')).toBeNull();
-    expect(parsePrice('100%')).toBeNull();
-    expect(parsePrice('')).toBeNull();
-  });
-});
-
-describe('isItemImageAlt', () => {
-  it('keeps skins and drops avatars and flags', () => {
-    expect(isItemImageAlt('winterJet')).toBe(true);
-    expect(isItemImageAlt('dieselGloves')).toBe(true);
-    expect(isItemImageAlt('Nijntje avatar')).toBe(false);
-    expect(isItemImageAlt('Netherlands flag')).toBe(false);
-    expect(isItemImageAlt('')).toBe(false);
+  it("rejects anything that is not a bare number", () => {
+    expect(parsePrice("BUY")).toBeNull();
+    expect(parsePrice("3h38m")).toBeNull();
+    expect(parsePrice("100%")).toBeNull();
+    expect(parsePrice("")).toBeNull();
   });
 });
 
-describe('priceFromLines', () => {
-  it('takes the number just before BUY, not the stats or durability', () => {
-    expect(priceFromLines(['239', '44%', '100%', 'khaleesi', '26m', '383.8', 'BUY'])).toBe('383.8');
-    expect(priceFromLines(['4%', '100%', 'Nijntje', '3h38m', '1.43', 'BUY'])).toBe('1.43');
-  });
-
-  it('returns null when there is no BUY or no number before it', () => {
-    expect(priceFromLines(['Nijntje', '3h38m'])).toBeNull();
-    expect(priceFromLines(['Nijntje', 'BUY'])).toBeNull();
+describe("isItemImageAlt", () => {
+  it("keeps skins and drops avatars and flags", () => {
+    expect(isItemImageAlt("winterJet")).toBe(true);
+    expect(isItemImageAlt("dieselGloves")).toBe(true);
+    expect(isItemImageAlt("Nijntje avatar")).toBe(false);
+    expect(isItemImageAlt("Netherlands flag")).toBe(false);
+    expect(isItemImageAlt("")).toBe(false);
   });
 });
 
-describe('verdict', () => {
-  it('measures the displayed price against the floor as they are, nothing added on either side', () => {
+describe("priceFromLines", () => {
+  it("takes the number just before BUY, not the stats or durability", () => {
+    expect(
+      priceFromLines(["239", "44%", "100%", "khaleesi", "26m", "383.8", "BUY"]),
+    ).toBe("383.8");
+    expect(
+      priceFromLines(["4%", "100%", "Nijntje", "3h38m", "1.43", "BUY"]),
+    ).toBe("1.43");
+  });
+
+  it("returns null when there is no BUY or no number before it", () => {
+    expect(priceFromLines(["Nijntje", "3h38m"])).toBeNull();
+    expect(priceFromLines(["Nijntje", "BUY"])).toBeNull();
+  });
+});
+
+describe("verdict", () => {
+  it("measures the displayed price against the floor as they are, nothing added on either side", () => {
     const v = verdict({ price: 300, floor: 324.7695 });
     expect(v.margin).toBeCloseTo(24.7695, 6);
     expect(v.marginPct).toBeCloseTo(24.7695 / 300, 6);
     expect(v.hit).toBe(true);
   });
 
-  it('is a miss above the floor and null without a floor', () => {
+  it("is a miss above the floor and null without a floor", () => {
     expect(verdict({ price: 383.8, floor: 324.7695 }).hit).toBe(false);
     expect(verdict({ price: 383.8, floor: null }).hit).toBeNull();
   });
 
-  it('honours a minimum margin percentage', () => {
-    expect(verdict({ price: 320, floor: 324.7695, minMarginPct: 5 }).hit).toBe(false);
-    expect(verdict({ price: 300, floor: 324.7695, minMarginPct: 5 }).hit).toBe(true);
+  it("honours a minimum margin percentage", () => {
+    expect(verdict({ price: 320, floor: 324.7695, minMarginPct: 5 }).hit).toBe(
+      false,
+    );
+    expect(verdict({ price: 300, floor: 324.7695, minMarginPct: 5 }).hit).toBe(
+      true,
+    );
   });
 
-  it('reports how far above the floor the price sits and how much of it scrap covers', () => {
+  it("reports how far above the floor the price sits and how much of it scrap covers", () => {
     const v = verdict({ price: 383.8, floor: 324.7695 });
     expect(v.ratio).toBeCloseTo(383.8 / 324.7695, 6);
     expect(v.coverPct).toBeCloseTo((324.7695 / 383.8) * 100, 6);
@@ -256,37 +314,44 @@ describe('verdict', () => {
   });
 });
 
-describe('closestIndex', () => {
-  it('picks the offer nearest its floor, ignoring unreadable ones', () => {
-    const rows = [{ ratio: 1.21 }, { ratio: null }, { ratio: 1.08 }, { ratio: 1.18 }];
+describe("closestIndex", () => {
+  it("picks the offer nearest its floor, ignoring unreadable ones", () => {
+    const rows = [
+      { ratio: 1.21 },
+      { ratio: null },
+      { ratio: 1.08 },
+      { ratio: 1.18 },
+    ];
     expect(closestIndex(rows)).toBe(2);
   });
 
-  it('is -1 when nothing is readable', () => {
+  it("is -1 when nothing is readable", () => {
     expect(closestIndex([{ ratio: null }, {}])).toBe(-1);
     expect(closestIndex([])).toBe(-1);
   });
 });
 
-describe('fmtQty', () => {
-  it('shortens big quantities the way the game does', () => {
-    expect(fmtQty(650675)).toBe('651k');
-    expect(fmtQty(1858)).toBe('1.9k');
-    expect(fmtQty(270)).toBe('270');
-    expect(fmtQty(null)).toBe('–');
+describe("fmtQty", () => {
+  it("shortens big quantities the way the game does", () => {
+    expect(fmtQty(650675)).toBe("651k");
+    expect(fmtQty(1858)).toBe("1.9k");
+    expect(fmtQty(270)).toBe("270");
+    expect(fmtQty(null)).toBe("–");
   });
 });
 
 // Strings that come from the page (skin-name alts) or from the API (error
 // text) go into innerHTML of nodes that live in the page DOM. They are text.
-describe('escapeHtml', () => {
-  it('neutralises markup and quotes', () => {
-    expect(escapeHtml('<img src=x onerror="alert(1)">&\'')).toBe('&lt;img src=x onerror=&quot;alert(1)&quot;&gt;&amp;&#39;');
+describe("escapeHtml", () => {
+  it("neutralises markup and quotes", () => {
+    expect(escapeHtml('<img src=x onerror="alert(1)">&\'')).toBe(
+      "&lt;img src=x onerror=&quot;alert(1)&quot;&gt;&amp;&#39;",
+    );
   });
-  it('treats nothing as an empty string', () => {
-    expect(escapeHtml(null)).toBe('');
-    expect(escapeHtml(undefined)).toBe('');
-    expect(escapeHtml(12)).toBe('12');
+  it("treats nothing as an empty string", () => {
+    expect(escapeHtml(null)).toBe("");
+    expect(escapeHtml(undefined)).toBe("");
+    expect(escapeHtml(12)).toBe("12");
   });
 });
 
@@ -294,87 +359,112 @@ describe('escapeHtml', () => {
 // 850 shade of the rarity colour (dark), where the 2026-09-03 sample was the
 // 600 shade. Both sets are in the fallback palette, and the live palette is
 // read off the market grid, whose tiles now carry id="item-code-selector-<code>".
-describe('rarityFromBorder after the v0.26 repaint', () => {
-  it('maps the six dark 850 borders of the new frame', () => {
-    expect(rarityFromBorder('rgb(57, 15, 16)')).toBe('mythic');
-    expect(rarityFromBorder('rgb(43, 43, 18)')).toBe('legendary');
-    expect(rarityFromBorder('rgb(42, 23, 69)')).toBe('epic');
-    expect(rarityFromBorder('rgb(14, 29, 63)')).toBe('rare');
-    expect(rarityFromBorder('rgb(10, 44, 28)')).toBe('uncommon');
-    expect(rarityFromBorder('rgb(28, 46, 49)')).toBe('common');
+describe("rarityFromBorder after the v0.26 repaint", () => {
+  it("maps the six dark 850 borders of the new frame", () => {
+    expect(rarityFromBorder("rgb(57, 15, 16)")).toBe("mythic");
+    expect(rarityFromBorder("rgb(43, 43, 18)")).toBe("legendary");
+    expect(rarityFromBorder("rgb(42, 23, 69)")).toBe("epic");
+    expect(rarityFromBorder("rgb(14, 29, 63)")).toBe("rare");
+    expect(rarityFromBorder("rgb(10, 44, 28)")).toBe("uncommon");
+    expect(rarityFromBorder("rgb(28, 46, 49)")).toBe("common");
   });
 
-  it('maps the 700 shade a hovered frame shows, and the colorblind pink epic', () => {
-    expect(rarityFromBorder('rgb(113, 31, 32)')).toBe('mythic');
-    expect(rarityFromBorder('rgb(19, 88, 56)')).toBe('uncommon');
-    expect(rarityFromBorder('rgb(49, 20, 44)')).toBe('epic');
-    expect(rarityFromBorder('rgb(98, 40, 89)')).toBe('epic');
+  it("maps the 700 shade a hovered frame shows, and the colorblind pink epic", () => {
+    expect(rarityFromBorder("rgb(113, 31, 32)")).toBe("mythic");
+    expect(rarityFromBorder("rgb(19, 88, 56)")).toBe("uncommon");
+    expect(rarityFromBorder("rgb(49, 20, 44)")).toBe("epic");
+    expect(rarityFromBorder("rgb(98, 40, 89)")).toBe("epic");
   });
 
-  it('does not mistake a plain dark panel border for a rarity', () => {
-    expect(rarityFromBorder('rgb(30, 30, 30)')).toBeNull();
-    expect(rarityFromBorder('rgb(45, 45, 45)')).toBeNull();
-    expect(rarityFromBorder('rgb(0, 0, 0)')).toBeNull();
+  it("does not mistake a plain dark panel border for a rarity", () => {
+    expect(rarityFromBorder("rgb(30, 30, 30)")).toBeNull();
+    expect(rarityFromBorder("rgb(45, 45, 45)")).toBeNull();
+    expect(rarityFromBorder("rgb(0, 0, 0)")).toBeNull();
   });
 
-  it('prefers a calibrated palette read off the page', () => {
+  it("prefers a calibrated palette read off the page", () => {
     const palette = paletteFromSamples([
-      { code: 'jet', color: 'rgb(1, 2, 3)' }, { code: 'tank', color: 'rgb(200, 200, 0)' },
+      { code: "jet", color: "rgb(1, 2, 3)" },
+      { code: "tank", color: "rgb(200, 200, 0)" },
     ]);
-    expect(rarityFromBorder('rgb(1, 2, 3)', palette)).toBe('mythic');
-    expect(rarityFromBorder('rgb(201, 199, 2)', palette)).toBe('legendary');
-    expect(rarityFromBorder('rgb(57, 15, 16)', palette)).toBeNull();   // not in this palette
+    expect(rarityFromBorder("rgb(1, 2, 3)", palette)).toBe("mythic");
+    expect(rarityFromBorder("rgb(201, 199, 2)", palette)).toBe("legendary");
+    expect(rarityFromBorder("rgb(57, 15, 16)", palette)).toBeNull(); // not in this palette
   });
 });
 
-describe('paletteFromSamples', () => {
-  it('takes the most common colour per rarity, so one hovered tile cannot poison it', () => {
+describe("paletteFromSamples", () => {
+  it("takes the most common colour per rarity, so one hovered tile cannot poison it", () => {
     const palette = paletteFromSamples([
-      { code: 'helmet6', color: 'rgb(57, 15, 16)' }, { code: 'chest6', color: 'rgb(113, 31, 32)' }, { code: 'jet', color: 'rgb(57, 15, 16)' },
-      { code: 'knife', color: 'rgb(28, 46, 49)' },
-      { code: 'scraps', color: 'rgb(9, 9, 9)' },        // not gear: ignored
-      { code: 'boots1', color: 'rgba(0, 0, 0, 0)' },    // unreadable: ignored
+      { code: "helmet6", color: "rgb(57, 15, 16)" },
+      { code: "chest6", color: "rgb(113, 31, 32)" },
+      { code: "jet", color: "rgb(57, 15, 16)" },
+      { code: "knife", color: "rgb(28, 46, 49)" },
+      { code: "scraps", color: "rgb(9, 9, 9)" }, // not gear: ignored
+      { code: "boots1", color: "rgba(0, 0, 0, 0)" }, // unreadable: ignored
     ]);
-    expect(palette.find((p) => p.rarity === 'mythic').rgb).toEqual([57, 15, 16]);
-    expect(palette.find((p) => p.rarity === 'common').rgb).toEqual([28, 46, 49]);
-    expect(palette.filter((p) => p.rarity === 'mythic')).toHaveLength(1);
-    expect(palette.some((p) => p.rarity === 'legendary')).toBe(false);
+    expect(palette.find((p) => p.rarity === "mythic").rgb).toEqual([
+      57, 15, 16,
+    ]);
+    expect(palette.find((p) => p.rarity === "common").rgb).toEqual([
+      28, 46, 49,
+    ]);
+    expect(palette.filter((p) => p.rarity === "mythic")).toHaveLength(1);
+    expect(palette.some((p) => p.rarity === "legendary")).toBe(false);
   });
 
-  it('is empty when nothing readable was sampled', () => {
+  it("is empty when nothing readable was sampled", () => {
     expect(paletteFromSamples([])).toEqual([]);
-    expect(paletteFromSamples([{ code: 'jet', color: '' }])).toEqual([]);
+    expect(paletteFromSamples([{ code: "jet", color: "" }])).toEqual([]);
   });
 });
 
-describe('gridCodeFromId', () => {
-  it('reads the item code off the grid tile id the game gives it', () => {
-    expect(gridCodeFromId('item-code-selector-boots5')).toBe('boots5');
-    expect(gridCodeFromId('item-code-selector-jet')).toBe('jet');
+describe("gridCodeFromId", () => {
+  it("reads the item code off the grid tile id the game gives it", () => {
+    expect(gridCodeFromId("item-code-selector-boots5")).toBe("boots5");
+    expect(gridCodeFromId("item-code-selector-jet")).toBe("jet");
   });
-  it('is null for anything else', () => {
-    expect(gridCodeFromId('item-code-selector-')).toBeNull();
-    expect(gridCodeFromId('scrap-sniper-bar')).toBeNull();
+  it("is null for anything else", () => {
+    expect(gridCodeFromId("item-code-selector-")).toBeNull();
+    expect(gridCodeFromId("scrap-sniper-bar")).toBeNull();
     expect(gridCodeFromId(null)).toBeNull();
   });
 });
 
 // The clicked grid tile is drawn on top (z-index 1) and the others dimmed to
 // half opacity; with nothing selected every tile sits at full opacity.
-describe('selectedCodeFromTiles', () => {
-  it('picks the one tile drawn on top', () => {
-    const tiles = [{ code: 'jet', opacity: 1, zIndex: '1' }, { code: 'tank', opacity: 0.5, zIndex: 'auto' }, { code: 'knife', opacity: 0.5, zIndex: 'auto' }];
-    expect(selectedCodeFromTiles(tiles)).toBe('jet');
+describe("selectedCodeFromTiles", () => {
+  it("picks the one tile drawn on top", () => {
+    const tiles = [
+      { code: "jet", opacity: 1, zIndex: "1" },
+      { code: "tank", opacity: 0.5, zIndex: "auto" },
+      { code: "knife", opacity: 0.5, zIndex: "auto" },
+    ];
+    expect(selectedCodeFromTiles(tiles)).toBe("jet");
   });
 
-  it('falls back to the only tile left at full opacity', () => {
-    const tiles = [{ code: 'jet', opacity: 0.5, zIndex: 'auto' }, { code: 'tank', opacity: 1, zIndex: 'auto' }, { code: 'knife', opacity: 0.5, zIndex: 'auto' }];
-    expect(selectedCodeFromTiles(tiles)).toBe('tank');
+  it("falls back to the only tile left at full opacity", () => {
+    const tiles = [
+      { code: "jet", opacity: 0.5, zIndex: "auto" },
+      { code: "tank", opacity: 1, zIndex: "auto" },
+      { code: "knife", opacity: 0.5, zIndex: "auto" },
+    ];
+    expect(selectedCodeFromTiles(tiles)).toBe("tank");
   });
 
-  it('is null when nothing is selected or the reading is ambiguous', () => {
-    expect(selectedCodeFromTiles([{ code: 'jet', opacity: 1, zIndex: 'auto' }, { code: 'tank', opacity: 1, zIndex: 'auto' }])).toBeNull();
-    expect(selectedCodeFromTiles([{ code: 'jet', opacity: 1, zIndex: '1' }, { code: 'tank', opacity: 1, zIndex: '1' }])).toBeNull();
+  it("is null when nothing is selected or the reading is ambiguous", () => {
+    expect(
+      selectedCodeFromTiles([
+        { code: "jet", opacity: 1, zIndex: "auto" },
+        { code: "tank", opacity: 1, zIndex: "auto" },
+      ]),
+    ).toBeNull();
+    expect(
+      selectedCodeFromTiles([
+        { code: "jet", opacity: 1, zIndex: "1" },
+        { code: "tank", opacity: 1, zIndex: "1" },
+      ]),
+    ).toBeNull();
     expect(selectedCodeFromTiles([])).toBeNull();
   });
 });

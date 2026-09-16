@@ -9,7 +9,14 @@
 // exactly one third at 0%, floored in between. Market listings are always at
 // 100%, so the extension only ever uses the full value.
 
-export const SCRAP_LADDER = { common: 6, uncommon: 18, rare: 54, epic: 162, legendary: 486, mythic: 1458 };
+export const SCRAP_LADDER = {
+  common: 6,
+  uncommon: 18,
+  rare: 54,
+  epic: 162,
+  legendary: 486,
+  mythic: 1458,
+};
 
 export function scrapYield(rarity, state, maxState = 100) {
   const full = SCRAP_LADDER[rarity];

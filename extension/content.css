@@ -1,185 +1,248 @@
-/* Scrap Sniper: a toolbar above the equipment market and a verdict block on
-   every offer. Styled to sit inside the game's dark panel: same tile borders
-   and gradients the game paints per rarity, inherited font family, muted ink. */
-
-#scrap-sniper-bar, #scrap-sniper-cases {
-  --ss-ink: #e6e8ee;
-  --ss-ink-2: #aab0bc;
-  --ss-muted: #7f8794;
-  --ss-line: rgba(255, 255, 255, 0.09);
-  --ss-good: #4cd964;
-  --ss-warn: #ffb648;
-  margin: 0 0 12px;
-  padding: 10px 14px 12px;
-  border: 1px solid var(--ss-line);
+/* WarEra Lens: scoped UI, native game layout stays in control. */
+[data-lens] {
+  --lens-bg: #161e2b;
+  --lens-line: #344255;
+  --lens-muted: #a0aec0;
+  --lens-good: #91e6c0;
+  color: #e9eef6;
+  font:
+    13px/1.5 system-ui,
+    sans-serif;
+  box-sizing: border-box;
+}
+[data-lens] *,
+[data-lens] *::before,
+[data-lens] *::after {
+  box-sizing: border-box;
+}
+[data-lens] [hidden] {
+  display: none !important;
+}
+[data-lens] button {
+  font: inherit;
+  color: #e9eef6;
+  border: 1px solid var(--lens-line);
+  border-radius: 7px;
+  background: #243145;
+  padding: 5px 9px;
+  cursor: pointer;
+  min-height: 30px;
+}
+[data-lens] button:hover {
+  background: #32425a;
+}
+[data-lens] button:focus-visible,
+[data-lens] a:focus-visible {
+  outline: 2px solid #91ccff;
+  outline-offset: 3px;
+}
+[data-lens] button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+#scrap-sniper-bar,
+#scrap-sniper-cases {
+  container-type: inline-size;
+  background: var(--lens-bg);
+  border: 1px solid var(--lens-line);
   border-radius: 12px;
-  background: linear-gradient(180deg, #1d2028 0%, #15171c 100%);
-  color: var(--ss-ink);
-  font-family: inherit;
-  font-size: 13px;
-  line-height: 1.4;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+  margin: 10px 0 14px;
+  padding: 12px 14px;
 }
-:is(#scrap-sniper-bar, #scrap-sniper-cases) * { box-sizing: border-box; }
-:is(#scrap-sniper-bar, #scrap-sniper-cases) b { color: #fff; font-weight: 700; }
-:is(#scrap-sniper-bar, #scrap-sniper-cases) .ss-label { font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ss-muted); }
-
-/* head row */
-:is(#scrap-sniper-bar, #scrap-sniper-cases) .ss-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-:is(#scrap-sniper-bar, #scrap-sniper-cases) .ss-brand { display: inline-flex; align-items: center; gap: 7px; font-weight: 700; letter-spacing: 0.02em; color: #fff; }
-:is(#scrap-sniper-bar, #scrap-sniper-cases) .ss-logo { width: 22px; height: 22px; border-radius: 6px; display: inline-grid; place-items: center; background: linear-gradient(135deg, #4cd964, #1f7a35); color: #06130a; font-size: 13px; }
-:is(#scrap-sniper-bar, #scrap-sniper-cases) .ss-live { display: inline-flex; align-items: center; gap: 6px; color: var(--ss-ink-2); font-size: 12px; }
-:is(#scrap-sniper-bar, #scrap-sniper-cases) .ss-pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--ss-good); box-shadow: 0 0 0 0 rgba(76, 217, 100, 0.6); animation: ss-pulse 2s infinite; }
-:is(#scrap-sniper-bar, #scrap-sniper-cases) .ss-live[data-stale="1"] .ss-pulse { background: var(--ss-warn); animation: none; box-shadow: none; }
-@keyframes ss-pulse { 0% { box-shadow: 0 0 0 0 rgba(76, 217, 100, 0.55); } 70% { box-shadow: 0 0 0 7px rgba(76, 217, 100, 0); } 100% { box-shadow: 0 0 0 0 rgba(76, 217, 100, 0); } }
-:is(#scrap-sniper-bar, #scrap-sniper-cases) .ss-grow { flex: 1 1 auto; }
-:is(#scrap-sniper-bar, #scrap-sniper-cases) .ss-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--ss-line); background: rgba(255, 255, 255, 0.04); font-size: 12px; color: var(--ss-ink-2); }
-:is(#scrap-sniper-bar, #scrap-sniper-cases) .ss-chip.ss-warn { color: var(--ss-warn); border-color: rgba(255, 182, 72, 0.35); }
-#scrap-sniper-bar .ss-margin { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 9px; border-radius: 999px; border: 1px solid var(--ss-line); background: rgba(255, 255, 255, 0.04); }
-#scrap-sniper-bar .ss-margin .ss-label { margin-right: 4px; }
-#scrap-sniper-bar .ss-step { width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--ss-line); background: rgba(255, 255, 255, 0.06); color: var(--ss-ink); font: inherit; font-size: 14px; line-height: 1; cursor: pointer; padding: 0; }
-#scrap-sniper-bar .ss-step:hover { background: rgba(255, 255, 255, 0.14); }
-#scrap-sniper-bar .ss-margin-in { width: 44px; text-align: center; font: inherit; font-size: 13px; font-weight: 700; color: #fff; background: transparent; border: 0; outline: none; -moz-appearance: textfield; }
-#scrap-sniper-bar .ss-margin-in::-webkit-outer-spin-button, #scrap-sniper-bar .ss-margin-in::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-:is(#scrap-sniper-bar, #scrap-sniper-cases) .ss-icon { width: 28px; height: 28px; border-radius: 8px; border: 1px solid var(--ss-line); background: rgba(255, 255, 255, 0.04); color: var(--ss-ink-2); font: inherit; font-size: 14px; cursor: pointer; padding: 0; }
-:is(#scrap-sniper-bar, #scrap-sniper-cases) .ss-icon:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
-:is(#scrap-sniper-bar, #scrap-sniper-cases) .ss-refresh.ss-busy { animation: ss-spin 0.8s linear infinite; }
-@keyframes ss-spin { to { transform: rotate(360deg); } }
-
-/* body */
-#scrap-sniper-bar .ss-body { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
-#scrap-sniper-bar[data-collapsed="1"] .ss-body { display: none; }
-:is(#scrap-sniper-bar, #scrap-sniper-cases) .ss-muted { color: var(--ss-muted); font-size: 12px; }
-
-/* first-run: no key, or a key the API ignored */
-#scrap-sniper-bar .ss-setup { display: none; align-items: center; justify-content: space-between; gap: 14px; padding: 10px 12px; border-radius: 9px; border: 1px solid rgba(255, 182, 72, 0.35); background: rgba(255, 182, 72, 0.08); }
-#scrap-sniper-bar[data-setup="1"] .ss-setup { display: flex; }
-#scrap-sniper-bar[data-setup="1"] .ss-stats, #scrap-sniper-bar[data-setup="1"] .ss-caption,
-#scrap-sniper-bar[data-setup="1"] .ss-floors, #scrap-sniper-bar[data-setup="1"] .ss-summary { display: none; }
-:is(#scrap-sniper-bar, #scrap-sniper-cases) .ss-open-settings, :is(#scrap-sniper-bar, #scrap-sniper-cases) .ss-reload-page { flex: 0 0 auto; font: inherit; font-size: 12.5px; font-weight: 600; color: #fff; background: #1f7a35; border: 1px solid #2c9a45; border-radius: 7px; padding: 7px 12px; cursor: pointer; }
-:is(#scrap-sniper-bar, #scrap-sniper-cases) .ss-open-settings:hover, :is(#scrap-sniper-bar, #scrap-sniper-cases) .ss-reload-page:hover { background: #24913f; }
-#scrap-sniper-bar[data-collapsed="1"] .ss-collapse { transform: rotate(-90deg); }
-#scrap-sniper-bar .ss-stats { display: flex; flex-wrap: wrap; gap: 6px 22px; padding-bottom: 10px; border-bottom: 1px solid var(--ss-line); }
-#scrap-sniper-bar .ss-stat { display: flex; flex-direction: column; min-width: 96px; }
-#scrap-sniper-bar .ss-stat b { font-size: 16px; line-height: 1.2; font-variant-numeric: tabular-nums; }
-#scrap-sniper-bar .ss-stat .ss-sub { font-size: 11px; color: var(--ss-muted); }
-
-/* rarity tiles: the game's own borders and gradients */
-#scrap-sniper-bar .ss-floors { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
-#scrap-sniper-bar .ss-tile { display: flex; flex-direction: column; gap: 1px; padding: 7px 10px; border-radius: 9px; border: 1px solid var(--ss-b); background: linear-gradient(45deg, var(--ss-g1), var(--ss-g2)); min-width: 0; }
-#scrap-sniper-bar .ss-tile[data-ss-rarity="mythic"]    { --ss-b: rgb(150, 38, 40);  --ss-g1: rgb(65, 17, 17); --ss-g2: rgb(28, 7, 7); }
-#scrap-sniper-bar .ss-tile[data-ss-rarity="legendary"] { --ss-b: rgb(129, 120, 45); --ss-g1: rgb(56, 53, 20); --ss-g2: rgb(24, 23, 8); }
-#scrap-sniper-bar .ss-tile[data-ss-rarity="epic"]      { --ss-b: rgb(94, 59, 145);  --ss-g1: rgb(41, 26, 63); --ss-g2: rgb(18, 11, 27); }
-#scrap-sniper-bar .ss-tile[data-ss-rarity="rare"]      { --ss-b: rgb(37, 78, 167);  --ss-g1: rgb(17, 35, 74); --ss-g2: rgb(7, 15, 32); }
-#scrap-sniper-bar .ss-tile[data-ss-rarity="uncommon"]  { --ss-b: rgb(43, 110, 68);  --ss-g1: rgb(19, 49, 30); --ss-g2: rgb(8, 21, 13); }
-#scrap-sniper-bar .ss-tile[data-ss-rarity="common"]    { --ss-b: rgb(80, 112, 124); --ss-g1: rgb(36, 50, 55); --ss-g2: rgb(15, 21, 23); }
-#scrap-sniper-bar .ss-tile-name { font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; color: rgba(255, 255, 255, 0.72); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#scrap-sniper-bar .ss-tile-price { font-size: 16px; font-weight: 700; color: #fff; font-variant-numeric: tabular-nums; line-height: 1.2; }
-#scrap-sniper-bar .ss-tile-sub { font-size: 10.5px; color: rgba(255, 255, 255, 0.55); white-space: nowrap; }
-#scrap-sniper-bar .ss-caption { margin-bottom: -4px; }
-@media (max-width: 1100px) { #scrap-sniper-bar .ss-floors { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-
-/* summary line */
-#scrap-sniper-bar .ss-summary { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; color: var(--ss-ink-2); font-size: 12.5px; }
-#scrap-sniper-bar .ss-hits { color: var(--ss-good); font-weight: 700; }
-#scrap-sniper-bar .ss-hits.ss-none { color: var(--ss-ink-2); font-weight: 600; }
-#scrap-sniper-bar .ss-summary .ss-warn { color: var(--ss-warn); }
-#scrap-sniper-bar .ss-dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: 0; border: 1px solid rgba(255, 255, 255, 0.3); }
-
-/* recent sales strip */
-#scrap-sniper-bar .ss-sales { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; padding-top: 10px; border-top: 1px solid var(--ss-line); color: var(--ss-ink-2); font-size: 12.5px; font-variant-numeric: tabular-nums; }
-#scrap-sniper-bar .ss-fills { display: inline-flex; flex-wrap: wrap; gap: 4px; }
-#scrap-sniper-bar .ss-fill { padding: 1px 7px; border-radius: 999px; background: rgba(255, 255, 255, 0.06); border: 1px solid var(--ss-line); color: var(--ss-ink-2); font-size: 11.5px; }
-#scrap-sniper-bar .ss-fill-under { background: rgba(76, 217, 100, 0.14); border-color: rgba(76, 217, 100, 0.45); color: #9fe3ad; }
-
-/* the inventory picker: tiles that do not match the market filter are hidden */
-[data-ss-pick="hide"] { display: none !important; }
-/* The picker card hugs its content. The game's list is 220px (3 tiles); the bar
-   and the list share one width instead, so tiles wrap 8 a row and nothing is
-   left empty beside them. */
-[data-ss-wide] { max-width: min(480px, 60vw) !important; width: min(480px, 60vw) !important; }
-[data-ss-wide] > *, [data-ss-wide] > * > * { width: auto !important; }
-.ss-pick-bar {
-  width: min(480px, 60vw); max-width: 100%; box-sizing: border-box; flex-wrap: wrap;
-  display: flex; align-items: center; justify-content: space-between; gap: 6px 10px;
-  margin: 0 0 8px; padding: 6px 10px; border-radius: 8px;
-  background: rgba(76, 217, 100, 0.10); border: 1px solid rgba(76, 217, 100, 0.35);
-  color: #cfeed6; font-family: inherit; font-size: 12px; line-height: 1.35;
+[data-lens] .lens-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
 }
-.ss-pick-bar b { color: #fff; font-weight: 700; }
-.ss-pick-toggle { flex: 0 0 auto; font: inherit; font-size: 12px; font-weight: 600; color: #e6e8ee; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
-.ss-pick-toggle:hover { background: rgba(255, 255, 255, 0.16); }
-
-/* offers */
-[data-scrap-sniper] { position: relative; }
-[data-scrap-sniper="hit"] {
-  outline: 2px solid #4cd964 !important;
-  outline-offset: -2px;
-  border-radius: 10px;
-  box-shadow: 0 0 0 4px rgba(76, 217, 100, 0.16), inset 0 0 0 100vmax rgba(76, 217, 100, 0.06);
+[data-lens] .lens-brand {
+  color: #b9dcff;
+  font-size: 14px;
+  font-weight: 750;
 }
-.ss-verdict {
-  position: absolute;
-  right: 108px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 200px;
-  padding: 7px 10px 8px;
-  border-radius: 9px;
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  background: rgba(0, 0, 0, 0.28);
-  color: #aab0bc;
-  font-family: inherit;
-  font-size: 11.5px;
-  line-height: 1.35;
-  pointer-events: none;
+[data-lens] .lens-section {
+  font-weight: 650;
+}
+[data-lens] .lens-grow {
+  flex: 1;
+}
+[data-lens] .lens-status {
+  display: inline-flex;
+  gap: 4px;
+  color: #d3bc87;
+  font-size: 11px;
+}
+[data-lens] .lens-status[data-status="fresh"] {
+  color: var(--lens-good);
+}
+[data-lens] .lens-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 18px;
+  align-items: center;
+  padding-top: 12px;
+}
+[data-lens] .lens-muted,
+[data-lens] small {
+  color: var(--lens-muted);
+  font-size: 12px;
+}
+[data-lens] small {
+  display: block;
+}
+[data-lens] .lens-notice {
+  color: #f3d291;
+  background: #332c20;
+  padding: 9px 12px;
+  border-radius: 8px;
+  margin-top: 10px;
+}
+[data-lens] .lens-floors {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+[data-lens] .lens-floors > div {
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--lens-line);
+  border-radius: 7px;
+  padding: 8px;
+}
+[data-lens] .lens-floors span {
+  font-size: 11px;
+  text-transform: capitalize;
+  color: var(--lens-muted);
+}
+[data-lens] b,
+[data-lens] strong {
   font-variant-numeric: tabular-nums;
 }
-.ss-verdict b { color: #fff; font-weight: 700; }
-.ss-verdict .ss-v-top { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
-.ss-verdict .ss-v-label { font-size: 10px; letter-spacing: 0.07em; text-transform: uppercase; color: #7f8794; }
-.ss-verdict .ss-v-main { font-size: 14px; }
-.ss-verdict .ss-v-pct { color: #7f8794; }
-.ss-verdict .ss-v-tag { font-size: 10px; letter-spacing: 0.1em; font-weight: 800; padding: 1px 6px; border-radius: 4px; background: #4cd964; color: #06130a; }
-.ss-verdict .ss-meter { height: 5px; margin: 5px 0 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
-.ss-verdict .ss-meter i { display: block; height: 100%; border-radius: 3px; background: #8f96a3; }
-.ss-verdict .ss-v-bottom { display: flex; justify-content: space-between; gap: 8px; white-space: nowrap; color: #8f96a3; }
-.ss-verdict[data-kind="hit"] { border-color: rgba(76, 217, 100, 0.45); background: rgba(31, 122, 53, 0.22); color: #cfeed6; }
-.ss-verdict[data-kind="hit"] .ss-v-main { color: #4cd964; }
-.ss-verdict[data-kind="hit"] .ss-meter i { background: #4cd964; }
-.ss-verdict[data-kind="hit"] .ss-v-bottom { color: #9fd9ab; }
-.ss-verdict[data-kind="unknown"] { border-color: rgba(255, 182, 72, 0.35); color: #ffb648; }
-.ss-verdict .ss-v-best {
-  position: absolute; top: -9px; right: 8px;
-  padding: 1px 7px; border-radius: 999px;
-  background: #ffd166; color: #1a1400;
-  font-size: 9.5px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase;
+[data-lens] .lens-cases {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
 }
-
-/* ---------- v0.26: the case strip (open or sell) and the trip line on the map ---------- */
-#scrap-sniper-cases { margin: 0 0 12px; }
-#scrap-sniper-cases .ss-c-rows { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
-#scrap-sniper-cases .ss-c-row { display: grid; grid-template-columns: 110px repeat(3, minmax(120px, 1fr)) minmax(180px, 1.4fr); gap: 6px 14px; align-items: center; padding: 8px 10px; border-radius: 9px; border: 1px solid var(--ss-line); background: rgba(255, 255, 255, 0.03); }
-#scrap-sniper-cases .ss-c-row[data-verdict="sell"] { border-color: rgba(255, 182, 72, 0.35); }
-#scrap-sniper-cases .ss-c-row[data-verdict="open"] { border-color: rgba(76, 217, 100, 0.4); }
-#scrap-sniper-cases .ss-c-name { font-weight: 700; color: #fff; }
-#scrap-sniper-cases .ss-c-col { display: flex; flex-direction: column; min-width: 0; }
-#scrap-sniper-cases .ss-c-col b { font-size: 15px; line-height: 1.2; font-variant-numeric: tabular-nums; }
-#scrap-sniper-cases .ss-sub { font-size: 11px; color: var(--ss-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#scrap-sniper-cases .ss-c-verdict { display: flex; align-items: center; gap: 8px; min-width: 0; }
-#scrap-sniper-cases .ss-c-verdict .ss-sub { white-space: normal; }
-#scrap-sniper-cases .ss-tag { flex: 0 0 auto; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 800; letter-spacing: 0.06em; }
-#scrap-sniper-cases .ss-tag-sell { background: rgba(255, 182, 72, 0.18); color: #ffd08a; border: 1px solid rgba(255, 182, 72, 0.45); }
-#scrap-sniper-cases .ss-tag-open { background: rgba(76, 217, 100, 0.16); color: #9fe3ad; border: 1px solid rgba(76, 217, 100, 0.45); }
-#scrap-sniper-cases .ss-tag-even { background: rgba(255, 255, 255, 0.08); color: #e6e8ee; border: 1px solid var(--ss-line); }
-#scrap-sniper-cases .ss-tag-none { background: transparent; color: var(--ss-muted); border: 1px solid var(--ss-line); }
-#scrap-sniper-cases .ss-c-foot { margin-top: 8px; line-height: 1.4; }
-#scrap-sniper-cases .ss-c-notice { margin-top: 8px; padding: 8px 10px; border-radius: 8px; border: 1px solid rgba(255, 182, 72, 0.35); background: rgba(255, 182, 72, 0.08); font-size: 12.5px; }
-@media (max-width: 900px) { #scrap-sniper-cases .ss-c-row { grid-template-columns: 1fr 1fr; } }
-
-.ss-trip { display: block; margin-top: 4px; padding: 5px 8px; border-radius: 7px; background: rgba(0, 0, 0, 0.35); border: 1px solid rgba(255, 255, 255, 0.12); color: #e6e8ee; font-size: 11.5px; line-height: 1.35; text-align: left; white-space: normal; font-variant-numeric: tabular-nums; }
-.ss-trip b { color: #fff; font-weight: 700; }
-.ss-trip .ss-trip-line { display: block; }
-.ss-trip .ss-trip-verdict { display: block; margin-top: 2px; font-weight: 700; }
-.ss-trip .ss-good, #scrap-sniper-cases .ss-good { color: #9fe3ad; }
-.ss-trip .ss-bad, #scrap-sniper-cases .ss-bad { color: #ff9f9f; }
+[data-lens] .lens-case {
+  display: grid;
+  grid-template-columns: minmax(95px, 1fr) repeat(2, minmax(105px, 1fr)) minmax(
+      170px,
+      1.5fr
+    );
+  gap: 9px 14px;
+  padding: 10px;
+  border: 1px solid var(--lens-line);
+  border-radius: 8px;
+  align-items: center;
+}
+[data-lens] .lens-case-details {
+  grid-column: 1/-1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  border-top: 1px solid var(--lens-line);
+  padding-top: 8px;
+  color: var(--lens-muted);
+  font-size: 12px;
+}
+[data-lens] .lens-tag {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  border: 1px solid var(--lens-line);
+  background: #263449;
+  padding: 3px 7px;
+  border-radius: 5px;
+  width: fit-content;
+}
+[data-lens] .lens-tag.sell,
+[data-lens] .lens-tag.open {
+  color: #a9d6ff;
+  border-color: #477499;
+}
+[data-scrap-sniper="hit"] {
+  outline: 2px solid #5fbf95;
+  outline-offset: -2px;
+}
+[data-scrap-sniper="near"] {
+  outline: 1px dashed #dab878;
+  outline-offset: -1px;
+}
+.ss-verdict[data-lens] {
+  position: static;
+  flex: 0 1 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  max-width: 100%;
+  padding: 7px 9px;
+  margin: 4px;
+  background: #182231;
+  border: 1px solid #344255;
+  border-radius: 8px;
+  pointer-events: none;
+}
+[data-scrap-sniper="hit"] > .ss-verdict .lens-tag {
+  color: #a4ecc7;
+}
+[data-scrap-sniper="near"] > .ss-verdict .lens-tag {
+  color: #f3d291;
+}
+.ss-trip[data-lens] {
+  display: block;
+  background: #161e2b;
+  padding: 9px;
+  margin-top: 7px;
+  border: 1px solid #344255;
+  border-radius: 8px;
+  max-width: 100%;
+  white-space: normal;
+}
+[data-lens] .lens-trip {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+}
+[data-lens] .lens-trip > span,
+[data-lens] .lens-trip > small {
+  grid-column: 1/-1;
+}
+.ss-pick-bar[data-lens] {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  background: #172536;
+  padding: 9px;
+  margin-bottom: 8px;
+  max-width: 100%;
+}
+[data-ss-pick="hide"] {
+  display: none !important;
+}
+@container (max-width:650px) {
+  [data-lens] .lens-case {
+    grid-template-columns: 1fr 1fr;
+  }
+  [data-lens] .lens-floors {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@container (max-width:360px) {
+  [data-lens] .lens-case {
+    grid-template-columns: 1fr;
+  }
+  [data-lens] .lens-floors {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-lens] *,
+  [data-lens] *::before,
+  [data-lens] *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

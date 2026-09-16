@@ -1,192 +1,82 @@
-# WarEra Scrap Sniper
+# WarEra Lens
 
-A Chrome extension for [WarEra](https://app.warera.io) that shows, right on the
-equipment market, what every listed piece of gear is worth as scrap and
-highlights the offers priced under that value.
+Read-only equipment, case and travel insights inside [WarEra](https://app.warera.io). Formerly **WarEra Scrap Sniper**.
 
-It helps you decide. It never buys, never clicks, never touches your session.
-It talks to the game's API only with **your own API key**, never without one.
+The extension helps you compare offers and estimates. It never buys, sells, opens a case or travels for you. It uses your own API key and has no runtime dependencies or build step.
 
-## What you get
+## What changed in 1.4.0
 
-**A toolbar** under the market's "Taxed price" notice:
+- **Equipment:** depth-adjusted scrap proceeds, profit/ROI, SNIPE versus NEAR MISS, and an accurately named Best value label. Negative thresholds never turn a loss into SNIPE.
+- **Cases:** separate sealed bids, expected opening proceeds, uncertainty bands and historical resale estimates. Missing data and stale quotes pause action labels.
+- **Travel:** one-way / round-trip toggle, oil ask-depth pricing, separate sealed and expected-opened net values. Stamina is a requirement, not assumed free.
+- **UI:** compact by default, responsive panels, explicit freshness, keyboard focus states, per-feature switches and optional detail views.
+- **Reliability:** shared in-flight reads, validated responses, global server cooldowns, per-resource retry backoff, account-safe caches and retained per-item average timestamps.
+- **Maintenance:** separate API/controller, models, DOM adapter and UI modules; lint, gradual strict type checks, regression tests and CI.
 
-- the live scrap price (the highest buy order on the scrap market: what your
-  scraps fetch if sold right away) and the lowest ask for reference, with the
-  quantity resting at each
-- six rarity tiles in the game's own colours: the scrap value of a common,
-  uncommon, rare, epic, legendary and mythic piece
-- how many offers on the page are under their scrap value, and which offer
-  sits closest to it
-- a **min margin** stepper, a refresh button and a collapse button
+## Install or update
 
-**A verdict block on every offer**, left of BUY:
+Requires Chrome 105+ or a compatible Chromium browser.
 
-- the scrap value of that piece and the gap to its price
-- a meter showing how much of the price the scraps pay back
-- the price as a multiple of its scrap value
-- a green outline and a **SNIPE** tag when the offer is under its scrap value
-- a gold **closest on page** tag on the offer nearest its scrap value
+1. Download or clone this repository and select the branch/version you intend to test.
+2. Open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked** and select the `extension` folder.
+3. Open the WarEra Lens settings from its toolbar icon. Paste your own API key and **Save**. **Test** is a separate explicit action; saving does not automatically call the API.
+4. Reload the WarEra page. Equipment insights appear on the equipment market; cases on supported market/inventory views; travel estimates next to the nearest-case map entry.
 
-**Recent sales of the filtered item.** Click an item in the game's grid and
-the toolbar adds what that item really sold for in the last 72 hours: how
-many changed hands, low, median, high, the last fill and how long ago, how
-many went at or under the scrap value, and the ten most recent prices as
-chips (green when at or under the scrap value). Read from the official
-transactions feed with your key.
+For an existing unpacked install, update files in the **same extension folder**, reload the extension and then reload the game. Keep the original extension installation identity to preserve its settings. The rebrand retains existing storage keys and migrates preferences; it does not rename the GitHub repository or create a new extension identity.
 
-**A smaller inventory picker.** When the market is filtered to one item and
-you open **New item offer → +**, the picker shows only the pieces of that
-item (say, your legendary boots) instead of your whole inventory, with a
-**show all** button to lift the filter.
+Do not publish or merge a release before completing the [manual checklist](docs/RELEASE-CHECKLIST.md).
 
-**A settings page** behind the toolbar icon: your API key (with a Test button
-that tells you whether the API accepted it), the min margin and how often the
-scrap price is read.
+## Read the signals correctly
 
-## The rule
+| Signal               | Meaning                                                                                              |
+| -------------------- | ---------------------------------------------------------------------------------------------------- |
+| SNIPE                | Nonnegative snapshot profit and requested minimum ROI, with enough observed scrap bids               |
+| NEAR MISS            | A loss within the explicitly negative ROI threshold; never counted as a profitable match             |
+| ABOVE TARGET         | The offer does not meet the requested threshold                                                      |
+| STALE / NO QUOTE     | Old, missing or insufficient data; no active recommendation                                          |
+| SELL / SELL vs scrap | Sealed bid clears the applicable opening model by at least 10%; battle case comparison is scrap-only |
+| OPEN EV              | Expected opening proceeds clear the sealed bid by at least 10%; an individual opening can still lose |
+| UNCERTAIN            | Inside the decision margin or wooden floor/round model band                                          |
 
-```
-scrap value = scraps × scrap price
-```
+Equipment ROI is `(quoted scrap proceeds − displayed purchase price) / displayed purchase price`. Proceeds walk descending bid levels for the whole dismantle quantity; they are not simply the top bid multiplied beyond available depth. The rarity ladder remains 6 / 18 / 54 / 162 / 486 / 1458.
 
-- **scraps** per dismantle: 6 / 18 / 54 / 162 / 486 / 1458 for common /
-  uncommon / rare / epic / legendary / mythic. Measured on 17.3 million real
-  dismantles, zero exceptions.
-- **scrap price**: the highest buy order on the scrap market, read live. That
-  is what the scraps fetch if you sell them right away, so a SNIPE pays even
-  without waiting for a buyer. The lowest sell order is shown for reference;
-  the two usually differ by 0.001.
-- The result is compared with the gear price **exactly as the market shows
-  it**. Nothing is added or taken off on either side.
-- Market listings are always at 100% durability, so there is no wear term.
+Case EV weights possible outcomes, not guaranteed rewards. The wooden model carries floor/round quantity bounds. Battle-case signals use outcome-weighted scrap proceeds; average equipment resale is separately labeled and never substituted for missing prices. Quotes are snapshots, not reserved liquidity. No additional tax adjustment is applied; see the model assumptions in the [release checklist](docs/RELEASE-CHECKLIST.md).
 
-At a scrap price of 0.226 that gives 1.356 for a common piece and 329.508 for
-a mythic one. Every gold amount is shown with three decimals, the market's own
-precision, so you compare 1:1.
+Recent sales are requested for the selected item when equipment details are open. The window is 72 hours, capped at five pages of 100 fills; the panel names a capped sample. The inventory picker hides only positively identified nonmatching tiles and always offers Show all.
 
-## Install
+## Refresh, privacy and safety
 
-1. Get the files: `git clone https://github.com/AlexQDE/warera-scrap-sniper.git`,
-   or **Code → Download ZIP** on GitHub and unzip it.
-2. Open `chrome://extensions`, switch on **Developer mode** (top right).
-3. Click **Load unpacked** and choose the `extension` folder (the one that
-   contains `manifest.json`).
-4. Click the Scrap Sniper icon in the toolbar (pin it if it is hidden behind
-   the puzzle-piece button), paste your API key and press **Save**. The page
-   tests the key against the API and tells you whether it was accepted.
-5. Open WarEra → Market → the equipment tab. The bar appears under the
-   "Taxed price" notice.
+Equipment refresh defaults to 30 seconds (10–600 configurable). Case books refresh after 60 seconds, selected-item sales after 3 minutes, and average prices after 10 minutes. Hidden tabs request nothing. API caches and active requests are shared by the background worker across tabs. Manual refresh does not bypass server cooldowns.
 
-Works the same way in Edge, Brave, Opera and other Chromium browsers.
+The key is stored locally in extension storage restricted to trusted extension contexts. Content scripts receive public preferences and data, not the key. API requests send it only to `api2.warera.io`, omit cookies/credentials and refuse redirects. There is no analytics or third-party backend. Local storage also holds preferences and bounded market/sales caches; it is not an encrypted secret vault.
 
-**Updating:** pull or re-download, click the ↻ (reload) icon on the
-extension's card in `chrome://extensions`, **then reload the game page**
-(F5). A page that was open during the update keeps running the old script
-and shows a "Scrap Sniper was updated" notice with a Reload button until you
-do. Your settings stay.
+The accepted-key check retains the original rate-limit-bucket heuristic. Missing verification headers produce an explicit unverified state; rejected keys pause reads until saved again. This release did not independently re-audit the live API or historical game-rule research.
 
-### Your API key
-
-Create the key in the game, under your account settings, and paste it into
-the extension's settings page. Nothing works without it: the extension makes
-no keyless requests. Without a key the toolbar shows a notice with an
-**Open settings** button instead of any numbers.
-
-The key is stored in the browser's extension storage on your computer and is
-sent only as the `x-api-key` header to `api2.warera.io`. The page you are
-looking at never sees it: only the extension's background worker does.
-
-One thing worth knowing: the API does not refuse a wrong key, it answers as
-if no key were sent. Scrap Sniper detects that (the answer comes with the
-keyless rate limit), drops the data and tells you the key was not accepted.
-
-## Using it
-
-- **Filter by item.** Click a tile in the game's own grid (for example the
-  mythic weapon) and the list narrows to that item; the verdicts follow.
-- **Min margin.** Only offers at least this many percent under their scrap
-  value get the green outline. Use the − and + buttons (5% steps) or type a
-  number. A negative value shows near misses too.
-- **Load more.** New rows get their verdict automatically.
-- **Collapse** the bar with the ▾ button; the setting is remembered.
-
-The scrap price is read every 30 seconds by default (one request, shared
-between your open tabs; your key allows 500 a minute). Change the interval in
-the settings. The recent sales of the filtered item are read at most every 3
-minutes, up to 5 pages of 100 fills (a busy common item may not reach 72 h in
-500 fills; the strip says "first 500 only" when that happens). A hidden tab
-reads nothing.
-
-## How the page is read
-
-WarEra does not label offers with their rarity, so the extension reads:
-
-- **which item the list is filtered to** from the tile the game marks as
-  selected in its grid (its section gives the slot, its border the rarity);
-  the `?item=` part of the address is only a fallback, because Opera hides it
-- **price** from the line just before the BUY button in each row
-- your own listing shows DELETE instead of BUY, so it is skipped
-- in the inventory picker, the **slot** from the skin image's name
-  (`dieselBoots`, `winterJet`) and the rarity from the tile border again
-
-If the game changes its layout, a verdict turns amber ("rarity unreadable")
-instead of guessing. Open an issue with a screenshot and it will be fixed.
+The DOM adapter reads existing offer prices, item IDs, borders and map labels. Unknown or changed markup must fail closed. The interface is in English; localization is not implemented.
 
 ## Development
 
+Use Node 24+:
+
+```sh
+npm ci --ignore-scripts
+npm run check
 ```
-npm install
-npm test
-```
 
-- `extension/manifest.json`, `content.js`, `content.css`: the toolbar and the verdicts
-- `extension/background.js`: holds the key, reads the scrap book
-- `extension/popup.html`, `popup.js`: the settings page
-- `extension/lib/api.mjs`: the two API calls (scrap book, one item's recent
-  fills) and the accepted-key check
-- `extension/lib/sales.mjs`: the 72-hour sales statistics
-- `extension/lib/ladder.mjs`: the scrap ladder and the dismantle yield
-- `extension/lib/scraplib.mjs`: the per-rarity table, the order-book summary,
-  the listing margin
-- `extension/lib/dom.mjs`: everything that reads the market page
+Individual commands: `npm test`, `npm run lint`, `npm run typecheck`, `npm run validate`, `npm run format`.
 
-`npm install` is only for running the tests; the extension itself has no
-dependencies and no build step.
+The extension runs directly from `extension/`; development packages are not shipped to the game. See [architecture and data contracts](docs/ARCHITECTURE.md) for module responsibilities and test boundaries. Synthetic DOM tests cover lifecycle and mutation behavior, not live browser layout or FPS.
 
-## Fair play and privacy
+## Kratko uputstvo
 
-Read-only by construction. The extension performs no purchase, no click and no
-form submission; it reads the scrap order book with your own key and the page
-you already have open. It uses no cookies, no session, no analytics and no
-server other than the game's own API. Its only stored data is your key and
-your settings, in the browser's extension storage.
+WarEra Lens je novo ime postojeće ekstenzije; repozitorijum i sačuvani ključ ostaju isti. Ažuriraj postojeći `extension` folder, klikni Reload u `chrome://extensions`, pa osveži igru.
 
-## Uputstvo (srpski)
+U podešavanjima sačuvaj sopstveni API ključ; Test se pokreće odvojeno. Paneli su podrazumevano sklopljeni. Details prikazuje dodatne procene i učitava potrebnu istoriju prodaja/proseke. Module možeš pojedinačno da isključiš.
 
-**Instalacija:** skini repo (Code → Download ZIP ili `git clone`), otvori
-`chrome://extensions`, uključi **Developer mode**, klikni **Load unpacked** i
-izaberi folder `extension`. Klikni ikonicu Scrap Sniper u traci pregledača,
-nalepi svoj API ključ i pritisni **Save**. Stranica proveri ključ i kaže da li
-ga je API prihvatio.
+SNIPE znači da ponuda zadovoljava prag i nije gubitnička prema trenutnoj dubini bidova. NEAR MISS je zasebno označen mali gubitak. STALE/NO QUOTE znači da nema dovoljno pouzdanih podataka za signal. EV je očekivana, ne zagarantovana vrednost. Povratno putovanje uključuje obe deonice; stanje stamine se ne čita.
 
-**API ključ:** pravi se u igri, u podešavanjima naloga. Bez ključa ekstenzija
-ne šalje nijedan zahtev, samo pokaže obaveštenje sa dugmetom za podešavanja.
-Ključ ostaje u pregledaču i šalje se samo igrinom API-ju.
-
-**Šta gledaš:** pločice po retkosti su scrap vrednost (broj scrap-ova × cena
-scrap-a, gde je cena najviši kupovni nalog, ono što dobiješ ako scrap prodaš
-odmah), blok na svakoj ponudi poredi tu vrednost sa cenom kakva piše. Zeleni okvir i SNIPE znače da je ponuda ispod scrap vrednosti.
-"Min margin" određuje koliko posto ispod mora da bude.
-
-**Stvarne prodaje:** kad klikneš artikal u mreži, traka pokaže šta se za taj
-artikal stvarno platilo u poslednjih 72 h (broj, najniža, medijana, najviša,
-poslednja, koliko ispod scrap vrednosti, poslednjih deset cena).
-
-**Manji birač:** kad je market filtriran na jedan artikal i otvoriš "New item
-offer" pa "+", birač pokazuje samo te komade iz tvog inventara, sa dugmetom
-"show all" ako hoćeš sve.
+Pre korišćenja proveri aktuelne poreze, pravila igre i ponašanje na svom ekranu prema [kontrolnoj listi](docs/RELEASE-CHECKLIST.md). Ekstenzija ne izvršava transakcije niti klikće kontrole igre.
 
 ## License
 
-MIT. See `LICENSE`.
+MIT. See [LICENSE](LICENSE).

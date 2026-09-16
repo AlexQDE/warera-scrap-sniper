@@ -1,6 +1,5 @@
-// Page-reading helpers for the Scrap Sniper extension. Import-free on purpose:
-// this file is pasted verbatim into the game page for live checks, and unit
-// tested under vitest for everything that does not need a DOM.
+// WarEra Lens DOM adapter. Historical layout observations below are retained
+// from the repository; pure readers and synthetic DOM fixtures run in Vitest.
 //
 // What the equipment market page looks like (app.warera.io/market/equipments,
 // read 2026-09-03, re-read from the v0.26.0 client bundle 2026-09-16): a grid
@@ -14,16 +13,9 @@
 // is the theme's dark 850 shade of the rarity colour (it was the 600 shade),
 // and the selected tile is drawn on top with the others dimmed.
 
-export const RARITIES = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
-
-/**
- * Text that goes into innerHTML of a node living in the page DOM: skin-name
- * alts read off the page, error text from the API. Markup in it would run
- * in the page's world, so it is neutralised here.
- */
-export function escapeHtml(s) {
-  return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
+import { RARITIES, WEAPONS } from "./items.mjs";
+export { RARITIES } from "./items.mjs";
+export { escapeHtml, fmtQty } from "./format.mjs";
 
 /**
  * Tile border colours per rarity, as the toolbar paints its own tiles: the
@@ -53,22 +45,34 @@ export const RARITY_BORDERS = {
 const sample = (rarity, rgb, tolerance) => ({ rarity, rgb, tolerance });
 export const RARITY_PALETTE = [
   // v0.26 frame border: theme 850
-  sample('mythic', [57, 15, 16], 12), sample('legendary', [43, 43, 18], 12), sample('epic', [42, 23, 69], 12),
-  sample('rare', [14, 29, 63], 12), sample('uncommon', [10, 44, 28], 12), sample('common', [28, 46, 49], 12),
-  sample('epic', [49, 20, 44], 12),                                                  // pink850, colorblind epic
+  sample("mythic", [57, 15, 16], 12),
+  sample("legendary", [43, 43, 18], 12),
+  sample("epic", [42, 23, 69], 12),
+  sample("rare", [14, 29, 63], 12),
+  sample("uncommon", [10, 44, 28], 12),
+  sample("common", [28, 46, 49], 12),
+  sample("epic", [49, 20, 44], 12), // pink850, colorblind epic
   // hovered frame: theme 700
-  sample('mythic', [113, 31, 32], 12), sample('legendary', [86, 87, 36], 12), sample('epic', [83, 46, 137], 12),
-  sample('rare', [28, 58, 125], 12), sample('uncommon', [19, 88, 56], 12), sample('common', [55, 91, 98], 12),
-  sample('epic', [98, 40, 89], 12),                                                  // pink700
+  sample("mythic", [113, 31, 32], 12),
+  sample("legendary", [86, 87, 36], 12),
+  sample("epic", [83, 46, 137], 12),
+  sample("rare", [28, 58, 125], 12),
+  sample("uncommon", [19, 88, 56], 12),
+  sample("common", [55, 91, 98], 12),
+  sample("epic", [98, 40, 89], 12), // pink700
   // the 2026-09-03 border: theme 600
-  ...Object.entries(RARITY_BORDERS).map(([rarity, rgb]) => sample(rarity, rgb, 40)),
+  ...Object.entries(RARITY_BORDERS).map(([rarity, rgb]) =>
+    sample(rarity, rgb, 40),
+  ),
 ];
 const CALIBRATED_TOLERANCE = 12; // a colour read off the page today is matched near-exactly
 
-const WEAPON_RARITY = { knife: 'common', gun: 'uncommon', rifle: 'rare', sniper: 'epic', tank: 'legendary', jet: 'mythic' };
+const WEAPON_RARITY = Object.fromEntries(
+  WEAPONS.map((code, i) => [code, RARITIES[i]]),
+);
 
 const parseRgb = (s) => {
-  const m = /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/.exec(String(s ?? ''));
+  const m = /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/.exec(String(s ?? ""));
   return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
 };
 
@@ -83,8 +87,15 @@ export function rarityFromBorder(color, palette = RARITY_PALETTE) {
   let best = null;
   let bestD = Infinity;
   for (const p of palette) {
-    const d = Math.hypot(rgb[0] - p.rgb[0], rgb[1] - p.rgb[1], rgb[2] - p.rgb[2]);
-    if (d <= p.tolerance && d < bestD) { bestD = d; best = p.rarity; }
+    const d = Math.hypot(
+      rgb[0] - p.rgb[0],
+      rgb[1] - p.rgb[1],
+      rgb[2] - p.rgb[2],
+    );
+    if (d <= p.tolerance && d < bestD) {
+      bestD = d;
+      best = p.rarity;
+    }
   }
   return best;
 }
@@ -101,7 +112,7 @@ export function paletteFromSamples(samples) {
     const rarity = rarityFromItemCode(s?.code);
     const rgb = parseRgb(s?.color);
     if (!rarity || !rgb) continue;
-    const key = rgb.join(',');
+    const key = rgb.join(",");
     const m = votes.get(rarity) ?? new Map();
     const v = m.get(key) ?? { rgb, n: 0 };
     v.n++;
@@ -118,8 +129,13 @@ export function paletteFromSamples(samples) {
 
 /** "item-code-selector-boots5" -> "boots5": the id the market grid gives each tile (v0.26). */
 export function gridCodeFromId(id) {
-  const m = /^item-code-selector-([A-Za-z0-9]+)$/.exec(String(id ?? ''));
+  const m = /^item-code-selector-([A-Za-z0-9]+)$/.exec(String(id ?? ""));
   return m ? m[1] : null;
+}
+
+/** Preserve known hover/accessibility shades when live calibration is available. */
+export function withFallbackPalette(live) {
+  return [...(live ?? []), ...RARITY_PALETTE];
 }
 
 /**
@@ -130,7 +146,7 @@ export function gridCodeFromId(id) {
 export function selectedCodeFromTiles(tiles) {
   const list = (tiles ?? []).filter((t) => t?.code);
   if (!list.length) return null;
-  const onTop = list.filter((t) => String(t.zIndex) === '1');
+  const onTop = list.filter((t) => String(t.zIndex) === "1");
   if (onTop.length === 1) return onTop[0].code;
   if (onTop.length > 1) return null;
   const full = list.filter((t) => Number(t.opacity) >= 0.99);
@@ -140,7 +156,7 @@ export function selectedCodeFromTiles(tiles) {
 
 /** Rarity from an item code (gameConfig.getGameConfig, 2026-09-03): gear carries its tier digit, weapons are named. */
 export function rarityFromItemCode(code) {
-  const c = String(code ?? '');
+  const c = String(code ?? "");
   const gear = /^(helmet|chest|boots|gloves|pants)([1-6])$/.exec(c);
   if (gear) return RARITIES[Number(gear[2]) - 1];
   return WEAPON_RARITY[c] ?? null;
@@ -148,11 +164,12 @@ export function rarityFromItemCode(code) {
 
 // A skin name ends in the slot ("dieselBoots"); without skins the image is
 // named by the plain item code ("chest2", "tank") or a label ("Chest T2").
-const SLOT_RE = /(helmet|chest|gloves|pants|boots|jet|tank|sniper|rifle|gun|knife)(?:\s*t?\d+)?\s*$/i;
+const SLOT_RE =
+  /(helmet|chest|gloves|pants|boots|jet|tank|sniper|rifle|gun|knife)(?:\s*t?\d+)?\s*$/i;
 
 /** The slot off an item image name: "dieselBoots" -> boots, "chest2" -> chest, "winterJet" -> jet; null for avatars, flags, junk. */
 export function slotFromAlt(alt) {
-  const a = String(alt ?? '').trim();
+  const a = String(alt ?? "").trim();
   if (!isItemImageAlt(a)) return null;
   const m = SLOT_RE.exec(a);
   return m ? m[1].toLowerCase() : null;
@@ -170,22 +187,22 @@ export function targetFromCode(code) {
 /** "boots5" -> "legendary boots", "jet" -> "mythic jet"; unknown codes pass through. */
 export function itemLabel(code) {
   const t = targetFromCode(code);
-  return t ? `${t.rarity} ${t.slot}` : String(code ?? '');
+  return t ? `${t.rarity} ${t.slot}` : String(code ?? "");
 }
 
 /** "392.991", "1,234.5", "1.858K" -> number; anything else -> null. */
 export function parsePrice(text) {
-  const m = /^\s*([\d,]+(?:\.\d+)?)\s*([KkMm])?\s*$/.exec(String(text ?? ''));
+  const m = /^\s*([\d,]+(?:\.\d+)?)\s*([KkMm])?\s*$/.exec(String(text ?? ""));
   if (!m) return null;
-  const n = Number(m[1].replace(/,/g, ''));
+  const n = Number(m[1].replace(/,/g, ""));
   if (!Number.isFinite(n)) return null;
-  const mult = m[2] ? ({ k: 1e3, m: 1e6 })[m[2].toLowerCase()] : 1;
+  const mult = m[2] ? { k: 1e3, m: 1e6 }[m[2].toLowerCase()] : 1;
   return n * mult;
 }
 
 /** Item images carry a skin name; avatars and flags are the other images in a row. */
 export function isItemImageAlt(alt) {
-  const a = String(alt ?? '').trim();
+  const a = String(alt ?? "").trim();
   return a.length > 0 && !/avatar$/i.test(a) && !/flag$/i.test(a);
 }
 
@@ -204,52 +221,60 @@ export function priceFromLines(lines) {
  * Nothing is added or removed on either side (editor's rule).
  */
 export function verdict({ price, floor, minMarginPct = 0 }) {
-  if (price == null || floor == null || !(price > 0)) return { margin: null, marginPct: null, ratio: null, coverPct: null, hit: null };
+  if (price == null || floor == null || !(price > 0))
+    return {
+      margin: null,
+      marginPct: null,
+      ratio: null,
+      coverPct: null,
+      hit: null,
+    };
   const margin = floor - price;
   const marginPct = margin / price;
   return {
     margin,
     marginPct,
-    ratio: price / floor,               // how many times its scrap floor the offer costs
-    coverPct: (floor / price) * 100,    // how much of the price the scraps pay back
-    hit: marginPct >= (Number(minMarginPct) || 0) / 100,
+    ratio: price / floor, // how many times its scrap floor the offer costs
+    coverPct: (floor / price) * 100, // how much of the price the scraps pay back
+    hit:
+      margin >= 0 && marginPct >= Math.max(0, Number(minMarginPct) || 0) / 100,
+    near: margin < 0 && minMarginPct < 0 && marginPct >= minMarginPct / 100,
   };
 }
 
-/** Index of the readable verdict nearest its floor (smallest ratio), or -1. */
+/** Best relative value (smallest price/floor), not distance from break-even. */
 export function closestIndex(verdicts) {
   let best = -1;
   let bestRatio = Infinity;
   verdicts.forEach((v, i) => {
-    if (v?.ratio != null && v.ratio < bestRatio) { bestRatio = v.ratio; best = i; }
+    if (v?.ratio != null && v.ratio < bestRatio) {
+      bestRatio = v.ratio;
+      best = i;
+    }
   });
   return best;
 }
 
-/** 650675 -> "651k", 1858 -> "1.9k", 270 -> "270": the game's own shorthand. */
-export function fmtQty(n) {
-  if (n == null || !Number.isFinite(Number(n))) return '–';
-  const v = Number(n);
-  if (v >= 1e6) return `${(v / 1e6).toFixed(1)}M`;
-  if (v >= 1e4) return `${Math.round(v / 1e3)}k`;
-  if (v >= 1e3) return `${(v / 1e3).toFixed(1)}k`;
-  return String(Math.round(v));
-}
-
-// ---------- DOM-facing (exercised live on the page, not under vitest) ----------
+// ---------- DOM-facing ----------
 
 /** The element that paints the item tile: first ancestor with a background. */
 export function tileOf(img) {
   let e = img;
   while (e && e !== document.body) {
     const s = getComputedStyle(e);
-    if (s.backgroundImage !== 'none' || (s.backgroundColor !== 'rgba(0, 0, 0, 0)' && s.backgroundColor !== 'transparent')) return e;
+    if (
+      (s.backgroundImage && s.backgroundImage !== "none") ||
+      (s.backgroundColor &&
+        s.backgroundColor !== "rgba(0, 0, 0, 0)" &&
+        s.backgroundColor !== "transparent")
+    )
+      return e;
     e = e.parentElement;
   }
   return null;
 }
 
-const isBuyButton = (b) => /^buy$/i.test((b.innerText || '').trim());
+const isBuyButton = (b) => /^buy$/i.test((b.innerText || "").trim());
 
 /**
  * Every offer row on the page: walk up from each BUY button to the first
@@ -258,20 +283,37 @@ const isBuyButton = (b) => /^buy$/i.test((b.innerText || '').trim());
  */
 export function offerRows(root = document, palette = RARITY_PALETTE) {
   const out = [];
-  for (const button of [...root.querySelectorAll('button')].filter(isBuyButton)) {
+  for (const button of [...root.querySelectorAll("button")].filter(
+    isBuyButton,
+  )) {
     let row = button;
     let img = null;
     for (let k = 0; k < 12 && row.parentElement; k++) {
       row = row.parentElement;
-      img = [...row.querySelectorAll('img')].find((i) => isItemImageAlt(i.getAttribute('alt')));
+      img = [...row.querySelectorAll("img")].find((i) =>
+        isItemImageAlt(i.getAttribute("alt")),
+      );
       if (img) break;
     }
     if (!img) continue;
     const tile = tileOf(img);
     const border = tile ? getComputedStyle(tile).borderColor : null;
-    const lines = (row.innerText || '').split('\n').map((s) => s.trim()).filter(Boolean);
+    const lines = (row.innerText || "")
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
     const priceText = priceFromLines(lines);
-    out.push({ row, button, img, tile, border, rarity: rarityFromBorder(border, palette), priceText, price: parsePrice(priceText), lines });
+    out.push({
+      row,
+      button,
+      img,
+      tile,
+      border,
+      rarity: rarityFromBorder(border, palette),
+      priceText,
+      price: parsePrice(priceText),
+      lines,
+    });
   }
   return out;
 }
@@ -283,10 +325,17 @@ export function offerRows(root = document, palette = RARITY_PALETTE) {
  */
 export function taxNotice(root = document) {
   // textContent, not innerText: this sweeps every div and must not force layout.
-  return [...root.querySelectorAll('div')].find((e) => {
-    const t = e.textContent || '';
-    return /market tax/i.test(t) && t.length < 240 && e.children.length > 0 && !e.querySelector('button');
-  }) ?? null;
+  return (
+    [...root.querySelectorAll("div")].find((e) => {
+      const t = e.textContent || "";
+      return (
+        /market tax/i.test(t) &&
+        t.length < 240 &&
+        e.children.length > 0 &&
+        !e.querySelector("button")
+      );
+    }) ?? null
+  );
 }
 
 /**
@@ -295,16 +344,26 @@ export function taxNotice(root = document) {
  * rarity-bordered tile (450 of them for a full inventory, read 2026-09-03).
  */
 export function pickerDialog(root = document) {
-  return [...root.querySelectorAll('[role="dialog"]')].find((d) => {
-    const hasItems = [...d.querySelectorAll('img')].some((i) => isItemImageAlt(i.getAttribute('alt')));
-    // Once our bar is inside the card the text starts with the bar, so the bar itself is the proof.
-    return hasItems && (!!d.querySelector('.ss-pick-bar') || isPickerText(d.textContent));
-  }) ?? null;
+  return (
+    [...root.querySelectorAll('[role="dialog"]')].find((d) => {
+      const hasItems = [...d.querySelectorAll("img")].some((i) =>
+        isItemImageAlt(i.getAttribute("alt")),
+      );
+      // Once our bar is inside the card the text starts with the bar, so the bar itself is the proof.
+      return (
+        hasItems &&
+        (!!d.querySelector(".ss-pick-bar") || isPickerText(d.textContent))
+      );
+    }) ?? null
+  );
 }
 
 /** The picker's card: the dialog child that is not our bar (it carries the dark background). */
 export function pickerCard(dialog) {
-  return [...dialog.children].find((c) => !c.classList.contains('ss-pick-bar')) ?? dialog;
+  return (
+    [...dialog.children].find((c) => !c.classList.contains("ss-pick-bar")) ??
+    dialog
+  );
 }
 
 /**
@@ -313,8 +372,10 @@ export function pickerCard(dialog) {
  * is never hidden: 'unknown'.
  */
 export function pickerDecision(tile, target) {
-  if (!tile?.slot || !tile?.rarity) return 'unknown';
-  return tile.slot === target.slot && tile.rarity === target.rarity ? 'show' : 'hide';
+  if (!tile?.slot || !tile?.rarity) return "unknown";
+  return tile.slot === target.slot && tile.rarity === target.rarity
+    ? "show"
+    : "hide";
 }
 
 /**
@@ -323,7 +384,7 @@ export function pickerDecision(tile, target) {
  * does not exist there. Accept "Item" followed by anything but a letter.
  */
 export function isPickerText(text) {
-  return /^Item(?![A-Za-z])/.test(String(text ?? '').trim());
+  return /^Item(?![A-Za-z])/.test(String(text ?? "").trim());
 }
 
 /**
@@ -332,19 +393,40 @@ export function isPickerText(text) {
  * in the grid, hiding the cell does not).
  */
 export function pickerTiles(dialog, palette = RARITY_PALETTE) {
-  return [...dialog.querySelectorAll('img')]
-    .filter((i) => isItemImageAlt(i.getAttribute('alt')))
+  return [...dialog.querySelectorAll("img")]
+    .filter((i) => isItemImageAlt(i.getAttribute("alt")))
     .map((img) => {
       const tile = tileOf(img);
       const parent = tile?.parentElement;
-      const cell = parent && parent !== dialog && parent.children.length === 1 ? parent : tile;
-      return { img, tile, cell, slot: slotFromAlt(img.getAttribute('alt')), rarity: rarityFromBorder(tile ? getComputedStyle(tile).borderColor : null, palette) };
+      const cell =
+        parent && parent !== dialog && parent.children.length === 1
+          ? parent
+          : tile;
+      return {
+        img,
+        tile,
+        cell,
+        slot: slotFromAlt(img.getAttribute("alt")),
+        rarity: rarityFromBorder(
+          tile ? getComputedStyle(tile).borderColor : null,
+          palette,
+        ),
+      };
     })
     .filter((t) => t.tile);
 }
 
-const SECTION_SLOT = { Weapons: 'weapon', Helmets: 'helmet', Chests: 'chest', Gloves: 'gloves', Pants: 'pants', Boots: 'boots' };
-const WEAPON_BY_RARITY = { common: 'knife', uncommon: 'gun', rare: 'rifle', epic: 'sniper', legendary: 'tank', mythic: 'jet' };
+const SECTION_SLOT = {
+  Weapons: "weapon",
+  Helmets: "helmet",
+  Chests: "chest",
+  Gloves: "gloves",
+  Pants: "pants",
+  Boots: "boots",
+};
+const WEAPON_BY_RARITY = Object.fromEntries(
+  RARITIES.map((rarity, i) => [rarity, WEAPONS[i]]),
+);
 
 /**
  * Which tile of the market grid is selected, from the class lists of all its
@@ -354,36 +436,56 @@ const WEAPON_BY_RARITY = { common: 'knife', uncommon: 'gun', rare: 'rifle', epic
  */
 export function selectedTileIndex(classLists) {
   const counts = new Map();
-  const lists = classLists.map((s) => String(s ?? '').split(/\s+/).filter(Boolean));
-  for (const l of lists) for (const k of l) counts.set(k, (counts.get(k) ?? 0) + 1);
+  const lists = classLists.map((s) =>
+    String(s ?? "")
+      .split(/\s+/)
+      .filter(Boolean),
+  );
+  for (const l of lists)
+    for (const k of l) counts.set(k, (counts.get(k) ?? 0) + 1);
   const scores = lists.map((l) => l.filter((k) => counts.get(k) === 1).length);
   const best = Math.max(0, ...scores);
   if (best === 0) return -1;
-  const winners = scores.map((s, i) => (s === best ? i : -1)).filter((i) => i >= 0);
+  const winners = scores
+    .map((s, i) => (s === best ? i : -1))
+    .filter((i) => i >= 0);
   return winners.length === 1 ? winners[0] : -1;
 }
 
 /** A grid section heading ("Pants") and a tile rarity -> the item code ("pants2"). */
 export function codeFromSelection(section, rarity) {
-  const slot = SECTION_SLOT[String(section ?? '').trim()];
+  const slot = SECTION_SLOT[String(section ?? "").trim()];
   const tier = RARITIES.indexOf(rarity) + 1;
   if (!slot || tier === 0) return null;
-  return slot === 'weapon' ? WEAPON_BY_RARITY[rarity] : `${slot}${tier}`;
+  return slot === "weapon" ? WEAPON_BY_RARITY[rarity] : `${slot}${tier}`;
 }
 
 /** The market grid's 36 tiles as { section, tile, rarity }, in page order (pre-v0.26 build, no tile ids). */
 export function gridTiles(root = document, palette = RARITY_PALETTE) {
-  const grid = [...root.querySelectorAll('div')].find((e) => (e.textContent || '').trim().startsWith('Weapons') && (e.textContent || '').length < 700);
+  const grid = [...root.querySelectorAll("div")].find(
+    (e) =>
+      (e.textContent || "").trim().startsWith("Weapons") &&
+      (e.textContent || "").length < 700,
+  );
   if (!grid) return [];
   const out = [];
-  const heads = [...grid.querySelectorAll('*')].filter((e) => e.children.length === 0 && SECTION_SLOT[(e.textContent || '').trim()]);
+  const heads = [...grid.querySelectorAll("*")].filter(
+    (e) =>
+      e.children.length === 0 && SECTION_SLOT[(e.textContent || "").trim()],
+  );
   for (const h of heads) {
     let c = h.parentElement;
-    while (c && c !== grid && c.querySelectorAll('img').length < 6) c = c.parentElement;
+    while (c && c !== grid && c.querySelectorAll("img").length < 6)
+      c = c.parentElement;
     if (!c) continue;
-    for (const img of [...c.querySelectorAll('img')].slice(0, 6)) {
+    for (const img of [...c.querySelectorAll("img")].slice(0, 6)) {
       const tile = tileOf(img);
-      if (tile) out.push({ section: h.textContent.trim(), tile, rarity: rarityFromBorder(getComputedStyle(tile).borderColor, palette) });
+      if (tile)
+        out.push({
+          section: h.textContent.trim(),
+          tile,
+          rarity: rarityFromBorder(getComputedStyle(tile).borderColor, palette),
+        });
     }
   }
   return out;
@@ -406,17 +508,24 @@ export function gridFrames(root = document) {
  * when the grid is not on the page; callers fall back to RARITY_PALETTE.
  */
 export function calibrateRarityBorders(root = document) {
-  return paletteFromSamples(gridFrames(root).map((t) => ({ code: t.code, color: getComputedStyle(t.frame).borderColor })));
+  return paletteFromSamples(
+    gridFrames(root).map((t) => ({
+      code: t.code,
+      color: getComputedStyle(t.frame).borderColor,
+    })),
+  );
 }
 
 /** The item code the market is filtered to, read from the grid's selected tile; null when nothing is selected. */
 export function selectedItemCode(root = document) {
   const frames = gridFrames(root);
   if (frames.length) {
-    return selectedCodeFromTiles(frames.map((t) => {
-      const s = getComputedStyle(t.frame);
-      return { code: t.code, opacity: s.opacity, zIndex: s.zIndex };
-    }));
+    return selectedCodeFromTiles(
+      frames.map((t) => {
+        const s = getComputedStyle(t.frame);
+        return { code: t.code, opacity: s.opacity, zIndex: s.zIndex };
+      }),
+    );
   }
   const tiles = gridTiles(root);
   const i = selectedTileIndex(tiles.map((t) => t.tile.className));
@@ -425,7 +534,7 @@ export function selectedItemCode(root = document) {
 
 /** ?item=<code> from the current URL, when the list is filtered to one item. */
 export function filteredItemCode(search) {
-  const m = /[?&]item=([A-Za-z0-9]+)/.exec(String(search ?? ''));
+  const m = /[?&]item=([A-Za-z0-9]+)/.exec(String(search ?? ""));
   return m ? m[1] : null;
 }
 
@@ -439,7 +548,7 @@ export function lowestCommonAncestor(a, b) {
   return null;
 }
 
-const CASE_IMG_CODES = ['woodenCase', 'case1', 'case2'];
+const CASE_IMG_CODES = ["woodenCase", "case1", "case2"];
 
 /**
  * Where the case strip goes: before the block that holds the case tiles. On
@@ -448,26 +557,43 @@ const CASE_IMG_CODES = ['woodenCase', 'case1', 'case2'];
  * (cases have no skins). Null when no case tile is on the page.
  */
 export function casesAnchor(root = document) {
-  const byId = CASE_IMG_CODES.map((c) => root.querySelector(`[id="item-code-selector-${c}"]`)).filter(Boolean);
+  const byId = CASE_IMG_CODES.map((c) =>
+    root.querySelector(`[id="item-code-selector-${c}"]`),
+  ).filter(Boolean);
   if (byId.length) {
     // the grid: the case tiles and a tile of another section share the block that holds every section
-    const other = root.querySelector('[id="item-code-selector-scraps"], [id="item-code-selector-oil"], [id="item-code-selector-knife"]');
+    const other = root.querySelector(
+      '[id="item-code-selector-scraps"], [id="item-code-selector-oil"], [id="item-code-selector-knife"]',
+    );
     let anchor = byId[0];
-    for (const f of [...byId.slice(1), ...(other ? [other] : [])]) anchor = lowestCommonAncestor(anchor, f) ?? anchor;
-    if (!other) anchor = anchor.parentElement ?? anchor;   // only the cases section: step out to its section box
+    for (const f of [...byId.slice(1), ...(other ? [other] : [])])
+      anchor = lowestCommonAncestor(anchor, f) ?? anchor;
+    if (!other) anchor = anchor.parentElement ?? anchor; // only the cases section: step out to its section box
     return anchor;
   }
-  const frames = [...root.querySelectorAll('img')].filter((i) => CASE_IMG_CODES.includes(i.getAttribute('alt'))).map((i) => tileOf(i)).filter(Boolean);
+  const frames = [...root.querySelectorAll("img")]
+    .filter((i) => CASE_IMG_CODES.includes(i.getAttribute("alt")))
+    .map((i) => tileOf(i))
+    .filter(Boolean);
   if (!frames.length) return null;
   let anchor = frames[0];
-  for (const f of frames.slice(1)) anchor = lowestCommonAncestor(anchor, f) ?? anchor;
+  for (const f of frames.slice(1))
+    anchor = lowestCommonAncestor(anchor, f) ?? anchor;
   // one tile alone: step out of its cell so the strip does not land inside a tile
-  if (frames.length === 1) anchor = anchor.parentElement?.parentElement ?? anchor;
+  if (frames.length === 1)
+    anchor = anchor.parentElement?.parentElement ?? anchor;
   return anchor;
 }
 
-const NEAREST_CASE_LABEL = 'Nearest wooden case';   // lingui py72Hd, the same text in every catalog read (EN, SR)
-const REGIONS_AWAY_RE = /(\d+)\s*regions?\s+away/i;   // lingui sX+lDG
+const NEAREST_CASE_LABEL = "Nearest wooden case"; // lingui py72Hd, the same text in every catalog read (EN, SR)
+const REGIONS_AWAY_RE = /(\d+)\s*regions?\s+away/i; // lingui sX+lDG
+const mapCache = new WeakMap();
+function nativeText(el) {
+  const copy = el.cloneNode(true);
+  for (const node of copy.querySelectorAll("[data-lens], .ss-trip"))
+    node.remove();
+  return (copy.textContent || "").trim();
+}
 
 /**
  * The map menu's "Nearest wooden case" item: { item, text, hops }. `item` is
@@ -476,14 +602,31 @@ const REGIONS_AWAY_RE = /(\d+)\s*regions?\s+away/i;   // lingui sX+lDG
  * the km fallback or no case waits.
  */
 export function mapLootItem(root = document) {
-  const els = [...root.querySelectorAll('button, div, span, p, a')].filter((e) => {
-    const t = (e.textContent || '').trim();
-    return t.startsWith(NEAREST_CASE_LABEL) && t.length < 320;
-  });
+  const cached = mapCache.get(root);
+  if (cached?.isConnected) {
+    const text = nativeText(cached);
+    if (text.startsWith(NEAREST_CASE_LABEL))
+      return {
+        item: cached,
+        text,
+        hops: REGIONS_AWAY_RE.test(text)
+          ? Number(REGIONS_AWAY_RE.exec(text)[1])
+          : null,
+      };
+  }
+  const els = [...root.querySelectorAll("button, div, span, p, a")].filter(
+    (e) => {
+      if (e.closest("[data-lens], .ss-trip")) return false;
+      const t = (e.textContent || "").trim();
+      return t.startsWith(NEAREST_CASE_LABEL) && nativeText(e).length < 320;
+    },
+  );
   if (!els.length) return null;
-  const withHops = els.filter((e) => REGIONS_AWAY_RE.test(e.textContent || ''));
+  const withHops = els.filter((e) => REGIONS_AWAY_RE.test(nativeText(e)));
   const pool = withHops.length ? withHops : els;
-  const item = pool[pool.length - 1];   // document order lists ancestors first, so the last one is the deepest
-  const m = REGIONS_AWAY_RE.exec(item.textContent || '');
-  return { item, text: (item.textContent || '').trim(), hops: m ? Number(m[1]) : null };
+  const item = pool[pool.length - 1]; // document order lists ancestors first, so the last one is the deepest
+  const text = nativeText(item);
+  const m = REGIONS_AWAY_RE.exec(text);
+  if (m) mapCache.set(root, item);
+  return { item, text, hops: m ? Number(m[1]) : null };
 }

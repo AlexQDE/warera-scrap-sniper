@@ -8,7 +8,9 @@ export function makeSingleFlight() {
   const inflight = new Map();
   return (key, run) => {
     if (inflight.has(key)) return inflight.get(key);
-    const p = new Promise((resolve) => resolve(run())).finally(() => inflight.delete(key));   // run() starts now, not a tick later
+    const p = new Promise((resolve) => resolve(run())).finally(() =>
+      inflight.delete(key),
+    ); // run() starts now, not a tick later
     inflight.set(key, p);
     return p;
   };
