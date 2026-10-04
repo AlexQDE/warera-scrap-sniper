@@ -412,8 +412,10 @@ export function normalizeLedger(raw, now = Date.now()) {
  * keeps its stored copy against the writer's edit or deletion, reported as
  * a conflict: a stale tab stamps its edit with the clock, which says nothing
  * about what it knew, so a sale recorded elsewhere is not undone by a later
- * move on a crafted copy. Otherwise, by id, the newer `updatedAt` wins. The
- * ids this tab removed go and are remembered with the revision this write
+ * move on a crafted copy. Otherwise the writer's copy stands: it read the
+ * stored one, and no clock decides, so an entry imported with a stamp from
+ * the future stays editable. The ids this tab removed go and are remembered
+ * with the revision this write
  * produces; an id deleted at a revision the writer never read stays deleted
  * whatever its copy's timestamp, reported as dropped. A writer that read the
  * deletion and sends the id again does so on purpose (an import), so it
@@ -469,8 +471,9 @@ export function mergeLedgers({
       conflicts.add(e.id);
       continue;
     }
-    if (!old || Date.parse(e.updatedAt) >= Date.parse(old.updatedAt))
-      byId.set(e.id, { ...e, revision });
+    // The writer read the stored copy (its base is at or past the copy's revision): its edit stands, whatever
+    // the clocks say. A timestamp decides nothing here, so an entry imported with a future stamp stays editable.
+    byId.set(e.id, { ...e, revision });
   }
   for (const key of removing) byId.delete(key);
   return {

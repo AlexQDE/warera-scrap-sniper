@@ -323,11 +323,13 @@ describe("merging a second tab's list", () => {
     { ...form, label: "from tab A" },
     { now: NOW + 1000, id: "test-0002" },
   );
-  it("keeps both tabs' new entries, lets the newer edit win, honours removals and remembers them", () => {
+  it("keeps both tabs' new entries, refuses a stale copy of an entry edited since as a conflict, honours removals and remembers them", () => {
+    // tab A edited test-0001 in the write that made revision 2; tab B last read revision 1 and still holds the old copy
     const edited = {
       ...base,
       label: "edited later",
       updatedAt: new Date(NOW + 5000).toISOString(),
+      revision: 2,
     };
     const stale = {
       ...base,
@@ -335,14 +337,14 @@ describe("merging a second tab's list", () => {
       updatedAt: new Date(NOW + 1000).toISOString(),
     };
     const m = mergeLedgers({
-      stored: [edited, other],
+      stored: [edited, { ...other, revision: 1 }],
       incoming: [
         stale,
         { ...other, id: "test-0003", label: "tab B's new one" },
       ],
       removed: ["test-0002"],
       baseRevision: 1,
-      revision: 2,
+      revision: 3,
       now: NOW + 9000,
     });
     expect(m.entries.map((e) => e.id).sort()).toEqual([
@@ -352,13 +354,13 @@ describe("merging a second tab's list", () => {
     expect(m.entries.find((e) => e.id === "test-0001").label).toBe(
       "edited later",
     );
+    expect(m.conflicts).toEqual(["test-0001"]);
     expect(m.tombstones["test-0002"]).toEqual({
       at: new Date(NOW + 9000).toISOString(),
-      revision: 2,
+      revision: 3,
     });
     expect(m.dropped).toEqual([]);
-    expect(m.conflicts).toEqual([]);
-    expect(m.entries.find((e) => e.id === "test-0003").revision).toBe(2); // stored by this write
+    expect(m.entries.find((e) => e.id === "test-0003").revision).toBe(3); // stored by this write
   });
   it("keeps an entry changed since the writer read it against the writer's later-stamped edit or deletion, as a conflict", () => {
     // tab A sold it in the write that made revision 6
@@ -460,6 +462,29 @@ describe("merging a second tab's list", () => {
         revision: 5,
       }),
     ).toMatchObject({ dropped: ["test-0002"] });
+  });
+  it("lets a writer that read the stored copy edit it whatever the clocks say: an entry stamped in the future is still sold", () => {
+    const future = {
+      ...base,
+      updatedAt: new Date(NOW + 86_400e3).toISOString(), // an export from a fast clock
+      revision: 3,
+    };
+    const sold = transition(future, { type: "sell", proceeds: 9 }, NOW + 1000);
+    expect(Date.parse(sold.updatedAt)).toBeLessThan(
+      Date.parse(future.updatedAt),
+    );
+    const m = mergeLedgers({
+      stored: [future],
+      incoming: [sold],
+      baseRevision: 3,
+      revision: 4,
+    });
+    expect(m.entries[0]).toMatchObject({
+      state: "sold",
+      sale: { proceeds: 9 },
+      revision: 4,
+    });
+    expect(m.conflicts).toEqual([]);
   });
   it("normalizes a stored ledger with its revision and tombstones, bounded to the newest deletions", () => {
     const at = new Date(NOW).toISOString();

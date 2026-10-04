@@ -413,6 +413,40 @@ describe("background controller", () => {
       revision: 5,
     });
   });
+  it("stores a current tab's sale of an entry imported with a stamp from the future", async () => {
+    const { controller } = setup();
+    const future = {
+      id: "future-001",
+      createdAt: new Date(NOW).toISOString(),
+      updatedAt: new Date(NOW + 86_400e3).toISOString(),
+      code: "boots5",
+      inputs: { scraps: 1, steel: 0, scrapPrice: 0.2 },
+      state: "crafted",
+    };
+    const first = await controller.handle({
+      type: "ledgerSet",
+      changed: [future],
+      baseRevision: 0,
+    });
+    expect(first.ledger.entries[0].revision).toBe(1);
+    const sold = {
+      ...future,
+      state: "sold",
+      sale: { proceeds: 3, at: new Date(NOW).toISOString() },
+      updatedAt: new Date(NOW + 1000).toISOString(), // earlier than the stored stamp
+    };
+    const second = await controller.handle({
+      type: "ledgerSet",
+      changed: [sold],
+      baseRevision: 1,
+    });
+    expect(second.conflicts).toEqual([]);
+    expect(second.ledger.entries[0]).toMatchObject({
+      state: "sold",
+      sale: { proceeds: 3 },
+      revision: 2,
+    });
+  });
   it("merges two tabs' recipe saves instead of letting the second replace the first, and still lets the popup clear the table", async () => {
     const { controller } = setup();
     const a = await controller.handle({

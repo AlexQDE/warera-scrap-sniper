@@ -968,6 +968,36 @@ describe("second review round", () => {
     expect(cell("boots5").textContent).toBe("+115%");
     expect(el().textContent).not.toContain("last read failed");
   });
+  it("labels a failed read on an item whose cached sample is too small, in the EV line and the listing guidance", () => {
+    settings = preferences({
+      ...settings,
+      craftRecipes: { boots5: { scraps: 10, steel: 2 } },
+    });
+    state.salesByCode = {
+      boots5: {
+        code: "boots5",
+        at: iso(600e3),
+        complete: true,
+        fills: fills("boots5", [10, 11, 12]),
+      },
+    };
+    state.salesErrors = { boots5: "the API answered 503" };
+    render();
+    click('[data-action="desk-pick"][data-code="boots5"]');
+    render();
+    expect(
+      el().querySelector('[data-action="desk-pick"][data-code="boots5"]')
+        .textContent,
+    ).toBe("3/5 fills ⚠");
+    const text = el().textContent;
+    expect(text).toContain(
+      "no scenario yet · last read failed (the API answered 503): the last good read is shown",
+    );
+    expect(text).toContain("no outcomes · 3 of 5 comparable fills");
+    expect(text).toContain(
+      "last read failed (the API answered 503); showing the last good read",
+    );
+  });
   it("keeps a setting typed while an earlier save of the same field was still pending", async () => {
     render();
     const apply = save.getMockImplementation();

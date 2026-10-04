@@ -594,7 +594,7 @@ export function createCraftDesk({
     const evLine =
       ev.status === "ok"
         ? `<b>${fmt(ev.ev)} g</b><span>seller proceeds after ${tax.value}% tax · ${esc(o.note)}${ev.cost != null ? ` · ${Math.round((ev.pProfit ?? 0) * 100)}% of outcomes beat the cost` : ""}${o.outcomes.length > 1 ? ` · best ${fmt(ev.best)} · worst ${fmt(ev.worst)}` : ""}</span>`
-        : `<b>unavailable</b><span>${esc(ev.reason ?? o.note)}</span>`;
+        : `<b>unavailable</b><span>${esc(ev.reason ? `${ev.reason}${o.error ? ` · ${o.note}` : ""}` : o.note)}</span>`;
     out.push(
       `<div class="lens-grid2"><div><small>Expected proceeds per craft</small>${evLine}</div><div><small>Expected profit</small><b class="${ev.profit == null ? "" : ev.profit >= 0 ? "lens-pos" : "lens-neg"}">${ev.profit == null ? "–" : `${signed(ev.profit)} g`}</b><span>ROI ${pct(ev.roi, 1)} per craft · batch ${plan.batch.expectedProfit == null ? "–" : `${signed(plan.batch.expectedProfit)} g`} · an expectation over random outcomes, not a promise</span></div></div>`,
     );
@@ -628,7 +628,7 @@ export function createCraftDesk({
       );
     } else
       out.push(
-        `<h4>Listing guidance</h4><p class="lens-muted">${est ? `${est.n} of ${MIN_RESALE_SAMPLE} comparable fills in ${est.windowHours} h: no scenario yet` : esc(o.note)}.</p>${breakEvenLine}`,
+        `<h4>Listing guidance</h4><p class="lens-muted">${est ? `${est.n} of ${MIN_RESALE_SAMPLE} comparable fills in ${est.windowHours} h: no scenario yet${o.error ? ` · <b>last read failed</b> (${esc(o.error)}): the last good read is shown` : ""}` : esc(o.note)}.</p>${breakEvenLine}`,
       );
     out.push(
       `<p><button type="button" data-action="desk-ledger-new">Record a craft of this</button></p>`,
