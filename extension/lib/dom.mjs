@@ -1,4 +1,4 @@
-// WarEra Lens DOM adapter. Historical layout observations below are retained
+// WarEra Plus DOM adapter. Historical layout observations below are retained
 // from the repository; pure readers and synthetic DOM fixtures run in Vitest.
 //
 // What the equipment market page looks like (app.warera.io/market/equipments,
@@ -274,14 +274,40 @@ export function tileOf(img) {
   return null;
 }
 
-const isBuyButton = (b) => /^buy$/i.test((b.innerText || "").trim());
+// textContent, not innerText: this runs for every button on the page and must not force layout.
+const isBuyButton = (b) => /^\s*buy\s*$/i.test(b.textContent || "");
+
+/** A row's own text, without the nodes this extension appended to it: cheap (no layout) and stable across our own writes. */
+function nativeRowText(row) {
+  let t = "";
+  for (const c of row.childNodes) {
+    if (c.nodeType === 1 && c.hasAttribute("data-lens")) continue;
+    t += c.textContent;
+  }
+  return t;
+}
 
 /**
- * Every offer row on the page: walk up from each BUY button to the first
- * ancestor holding an item image; that ancestor is the row. Returns
- * { row, button, img, tile, border, rarity, priceText, price, lines }.
+ * The per-row read cache offerRows() fills: the layout-forcing innerText of a
+ * row is read once per distinct native text, not once per scan. `reads`
+ * counts the innerText reads, for the loader benchmark.
  */
-export function offerRows(root = document, palette = RARITY_PALETTE) {
+export function createRowCache() {
+  return { rows: new WeakMap(), reads: 0, styleReads: 0, epoch: 0 };
+}
+
+/**
+ * Every offer row under `root`: walk up from each BUY button to the first
+ * ancestor holding an item image; that ancestor is the row. Returns
+ * { row, button, img, alt, tile, border, rarity, priceText, price, lines }.
+ * With a cache (createRowCache) a row whose native text did not change
+ * reuses its parsed lines and price.
+ */
+export function offerRows(
+  root = document,
+  palette = RARITY_PALETTE,
+  cache = null,
+) {
   const out = [];
   for (const button of [...root.querySelectorAll("button")].filter(
     isBuyButton,
@@ -296,26 +322,65 @@ export function offerRows(root = document, palette = RARITY_PALETTE) {
       if (img) break;
     }
     if (!img) continue;
-    const tile = tileOf(img);
-    const border = tile ? getComputedStyle(tile).borderColor : null;
-    const lines = (row.innerText || "")
-      .split("\n")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    const priceText = priceFromLines(lines);
+    const text = nativeRowText(row);
+    let read = cache?.rows.get(row);
+    if (!read || read.text !== text) {
+      if (cache) cache.reads++;
+      const lines = (row.innerText || "")
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const priceText = priceFromLines(lines);
+      read = { text, lines, priceText, price: parsePrice(priceText) };
+      cache?.rows.set(row, read);
+    }
+    // The frame and its border colour (the rarity signal) are read once per
+    // cache epoch: a row keeps its frame, and the epoch turns on every full
+    // scan so a theme change (colorblind palette, hover shade) is picked up.
+    if (
+      !read.style ||
+      read.style.epoch !== (cache?.epoch ?? 0) ||
+      read.style.img !== img ||
+      !read.style.tile?.isConnected
+    ) {
+      if (cache) cache.styleReads++;
+      const tile = tileOf(img);
+      read.style = {
+        epoch: cache?.epoch ?? 0,
+        img,
+        tile,
+        border: tile ? getComputedStyle(tile).borderColor : null,
+      };
+    }
     out.push({
       row,
       button,
       img,
-      tile,
-      border,
-      rarity: rarityFromBorder(border, palette),
-      priceText,
-      price: parsePrice(priceText),
-      lines,
+      alt: img.getAttribute("alt"),
+      tile: read.style.tile,
+      border: read.style.border,
+      rarity: rarityFromBorder(read.style.border, palette),
+      priceText: read.priceText,
+      price: read.price,
+      lines: read.lines,
     });
   }
   return out;
+}
+
+/** The smallest element holding every row, or null: the scope later scans start from. */
+export function rowsContainer(rows) {
+  if (rows.length < 2) return null; // one row says nothing about where the others will go
+  let common = rows[0]?.row?.parentElement ?? null;
+  for (const r of rows.slice(1)) {
+    if (!common) break;
+    common = lowestCommonAncestor(common, r.row.parentElement);
+  }
+  return common &&
+    common !== document.body &&
+    common !== document.documentElement
+    ? common
+    : null;
 }
 
 /**
@@ -323,9 +388,17 @@ export function offerRows(root = document, palette = RARITY_PALETTE) {
  * anchor the toolbar is inserted after; the rate itself plays no part in the
  * maths (editor's rule: displayed prices are compared as they are).
  */
+let taxCache = null;
 export function taxNotice(root = document) {
+  // The notice found last time is reused while it is still on the page and still says so.
+  if (
+    taxCache?.isConnected &&
+    root.contains(taxCache) &&
+    /market tax/i.test(taxCache.textContent || "")
+  )
+    return taxCache;
   // textContent, not innerText: this sweeps every div and must not force layout.
-  return (
+  taxCache =
     [...root.querySelectorAll("div")].find((e) => {
       const t = e.textContent || "";
       return (
@@ -334,8 +407,18 @@ export function taxNotice(root = document) {
         e.children.length > 0 &&
         !e.querySelector("button")
       );
-    }) ?? null
+    }) ?? null;
+  return taxCache;
+}
+
+/** "Market tax 5%" -> 5: the rate the notice prints, when it prints one; null otherwise (the rate is then a manual input). */
+export function taxRateFromText(text) {
+  const m = /market tax[^0-9%]{0,40}?(\d+(?:[.,]\d+)?)\s*%/i.exec(
+    String(text ?? ""),
   );
+  if (!m) return null;
+  const n = Number(m[1].replace(",", "."));
+  return Number.isFinite(n) && n >= 0 && n <= 100 ? n : null;
 }
 
 /**
@@ -496,10 +579,31 @@ export function gridTiles(root = document, palette = RARITY_PALETTE) {
  * (item-code-selector-<code>, on the frame that carries the border):
  * { code, frame }. Empty on an older build, where gridTiles() still applies.
  */
+const framesCache = new WeakMap();
 export function gridFrames(root = document) {
-  return [...root.querySelectorAll('[id^="item-code-selector-"]')]
+  // Reused while every frame found last time is still on the page; a re-rendered grid leaves them disconnected.
+  const cached = framesCache.get(root);
+  if (cached?.length && cached.every((t) => t.frame.isConnected)) return cached;
+  const frames = [...root.querySelectorAll('[id^="item-code-selector-"]')]
     .map((frame) => ({ code: gridCodeFromId(frame.id), frame }))
     .filter((t) => t.code);
+  framesCache.set(root, frames);
+  return frames;
+}
+
+/**
+ * Where the equipment market's panels go: before the tax notice, else before
+ * the section that holds the item grid; null when neither is on the page, so
+ * callers clear. One rule for the equipment bar and the Craft Desk, so the
+ * desk still has a place when the Equipment module is off.
+ * @param {Document | Element} [root]
+ */
+export function marketAnchor(root = document) {
+  return (
+    taxNotice(root) ??
+    gridFrames(root)[0]?.frame?.parentElement?.parentElement ??
+    null
+  );
 }
 
 /**

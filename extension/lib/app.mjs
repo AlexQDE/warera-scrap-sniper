@@ -3,6 +3,7 @@ import { DEFAULTS } from "./settings.mjs";
 import { TTL, freshness, quote } from "./quality.mjs";
 import { snapshotSummary } from "./cases.mjs";
 import { createEquipment } from "./equipment.mjs";
+import { createCraftDesk } from "./craftdesk.mjs";
 import { casesStripHtml, tripLineHtml } from "./casesview.mjs";
 import { panel, setHtml, notice, clock } from "./ui.mjs";
 import { createScheduler } from "./scheduler.mjs";
@@ -19,9 +20,18 @@ export async function startLens(runtime = chrome.runtime) {
     cases: null,
     avg: null,
     sales: null,
+    salesByCode: {},
+    salesErrors: {},
+    salesReading: null,
+    ledger: null,
+    taxOnPage: null,
     errors: {},
     busy: new Set(),
   };
+  const SALES_CODES_KEPT = 12;
+  const SALES_RETRY_MS = 15_000; // a failed or empty sales read is not asked again at once
+  const salesAttempts = new Map(); // code -> last attempt
+  const salesPending = new Map(); // code -> forced?: sales reads asked for while another item's read was in flight
   let context = {};
   let disposed = false;
   let timer;
@@ -49,7 +59,7 @@ export async function startLens(runtime = chrome.runtime) {
     } catch (e) {
       if (/context invalidated|receiving end does not exist/i.test(e.message)) {
         state.invalidated = true;
-        state.setup = "WarEra Lens was updated. Reload this page.";
+        state.setup = "WarEra Plus was updated. Reload this page.";
         sched.schedule();
       } else {
         state.errors[msg.type] = e.message;
@@ -78,6 +88,10 @@ export async function startLens(runtime = chrome.runtime) {
         state.cases = null;
         state.avg = null;
         state.sales = null;
+        state.salesByCode = {};
+        state.salesErrors = {};
+        salesAttempts.clear();
+        salesPending.clear();
         state.errors = {};
         state.rejected = false;
       }
@@ -85,7 +99,7 @@ export async function startLens(runtime = chrome.runtime) {
     }
     if (r.rejected) state.rejected = true;
     state.setup = state.invalidated
-      ? "WarEra Lens was updated. Reload this page."
+      ? "WarEra Plus was updated. Reload this page."
       : state.rejected
         ? "API key rejected. Check and save your key in settings."
         : r.hasKey
@@ -94,27 +108,44 @@ export async function startLens(runtime = chrome.runtime) {
     if (previousSetup !== state.setup) sched.schedule();
   }
   const save = async (patch) => {
-    applySettings(await send({ type: "saveSettings", settings: patch }));
+    const r = await send({ type: "saveSettings", settings: patch });
+    applySettings(r);
     scan();
     void fetchVisible();
+    return r?.settings ?? null;
   };
   async function read(kind, force = false, code) {
-    if (
-      disposed ||
-      document.hidden ||
-      state.setup ||
-      state.invalidated ||
-      state.busy.has(kind)
-    )
+    if (disposed || document.hidden || state.setup || state.invalidated) return;
+    if (state.busy.has(kind)) {
+      // Sales reads are single-flight. One asked for while another item's read is in flight is kept, with
+      // whether it was forced, and runs when that read finishes; a plain repeat of the item being read is not.
+      if (kind === "sales" && code && (force || code !== state.salesReading))
+        salesPending.set(code, force || !!salesPending.get(code));
       return;
+    }
     const ttl = kind === "book" ? state.settings.intervalSec * 1000 : TTL[kind];
+    // Sales are fresh per item: the panel's item and the desk's item each keep their own read.
+    const held = kind === "sales" ? state.salesByCode[code] : state[kind];
+    // A recorded read error ends a snapshot's exemption: a refresh that failed over a still-fresh cached read is
+    // retried after the window below, so the warning clears on its own once a read succeeds.
+    const failed = kind === "sales" && !!state.salesErrors?.[code];
     if (
       !force &&
-      !Object.keys(state[kind]?.failures ?? {}).length &&
-      freshness(state[kind]?.at, ttl) === "fresh" &&
-      (kind !== "sales" || state.sales?.code === code)
+      !failed &&
+      !Object.keys(held?.failures ?? {}).length &&
+      freshness(held?.at, ttl) === "fresh"
     )
       return;
+    if (
+      kind === "sales" &&
+      !force &&
+      Date.now() - (salesAttempts.get(code) ?? 0) < SALES_RETRY_MS
+    )
+      return;
+    if (kind === "sales") {
+      salesAttempts.set(code, Date.now());
+      state.salesReading = code;
+    }
     state.busy.add(kind);
     const revision = state.authRevision;
     const r = await send({
@@ -123,6 +154,13 @@ export async function startLens(runtime = chrome.runtime) {
       ...(code ? { itemCode: code } : {}),
     });
     state.busy.delete(kind);
+    if (kind === "sales" && state.salesReading === code)
+      state.salesReading = null;
+    if (!r && kind === "sales")
+      state.salesErrors = {
+        ...state.salesErrors,
+        [code]: state.errors.sales ?? "The extension did not answer",
+      };
     if (revision !== state.authRevision || disposed) {
       sched.schedule();
       return;
@@ -135,19 +173,53 @@ export async function startLens(runtime = chrome.runtime) {
         state.cases = null;
         state.avg = null;
         state.sales = null;
+        state.salesByCode = {};
+        state.salesErrors = {};
       } else {
         if (r[kind]) state[kind] = r[kind];
+        if (kind === "sales" && r.sales?.code) {
+          // Keep the last few items' fills so rows of other codes keep their resale evidence.
+          const rest = { ...state.salesByCode };
+          delete rest[r.sales.code];
+          const kept = Object.entries(rest).slice(-(SALES_CODES_KEPT - 1));
+          state.salesByCode = Object.fromEntries([
+            ...kept,
+            [r.sales.code, r.sales],
+          ]);
+        }
         state.errors[kind] = r.error ? r.message : null;
+        if (kind === "sales")
+          state.salesErrors = {
+            ...state.salesErrors,
+            [code]: r.error ? r.message : null,
+          };
       }
     }
     sched.schedule();
-    if (
-      kind === "sales" &&
-      salesWanted &&
-      salesWanted !== code &&
-      !document.hidden
-    )
-      void read("sales", false, salesWanted);
+    if (kind === "sales" && !document.hidden) {
+      // The reads kept while this one ran go first, each with its force flag; the panel's item is asked for
+      // afterwards only when nothing is being read or waiting for it, so one refresh makes one read.
+      drainSales();
+      if (
+        salesWanted &&
+        salesWanted !== code &&
+        !state.busy.has("sales") &&
+        !salesPending.has(salesWanted)
+      )
+        void read("sales", false, salesWanted);
+    }
+  }
+  /** Run the sales reads kept while one was in flight, one at a time; the rest wait for the next completion. */
+  function drainSales() {
+    if (!context.equipment && !context.craft) {
+      salesPending.clear();
+      return;
+    }
+    for (const [pendingCode, forced] of [...salesPending]) {
+      salesPending.delete(pendingCode);
+      void read("sales", forced, pendingCode);
+      if (state.busy.has("sales")) return;
+    }
   }
   const equipment = createEquipment({
     settings: () => state.settings,
@@ -161,7 +233,56 @@ export async function startLens(runtime = chrome.runtime) {
       salesWanted = code;
       if (context.equipment) void read("sales", false, code);
     },
+    rescan: () => sched.schedule(),
   });
+  const desk = createCraftDesk({
+    settings: () => state.settings,
+    save,
+    refresh: () => {
+      void read("book", true);
+      void read("cases", true);
+      if (desk.selected) void read("sales", true, desk.selected);
+      sched.schedule();
+    },
+    requestSales: (code) => {
+      if (context.craft) void read("sales", false, code);
+    },
+    rescan: () => sched.schedule(),
+    onLedger: async ({ changed = [], removed = [], baseRevision } = {}) => {
+      const r = await send({
+        type: "ledgerSet",
+        // What the desk rendered its rows from, not the newest revision this tab holds: a refresh may have landed in between.
+        baseRevision: Number.isSafeInteger(baseRevision) ? baseRevision : 0,
+        changed,
+        removed,
+      });
+      adoptLedger(r?.ledger);
+      return r;
+    },
+  });
+  /** Take a ledger from the worker only when it is newer than the one held: answers can arrive out of order, and an old one must not roll the desk back. */
+  function adoptLedger(ledger) {
+    if (!ledger) return false;
+    if (state.ledger && !(ledger.revision > state.ledger.revision))
+      return false;
+    state.ledger = ledger;
+    return true;
+  }
+  let ledgerRequested = false;
+  async function loadLedger() {
+    if (ledgerRequested || disposed) return;
+    ledgerRequested = true;
+    const r = await send({ type: "ledgerGet" });
+    if (r?.ledger) adoptLedger(r.ledger);
+    else ledgerRequested = false; // asked again on the next scan
+    sched.schedule();
+  }
+  /** Another tab may have written: pick up a newer revision while the desk is open. */
+  async function refreshLedger() {
+    if (!state.ledger || disposed || document.hidden) return;
+    const r = await send({ type: "ledgerGet" });
+    if (adoptLedger(r?.ledger)) sched.schedule();
+  }
   const observer = new MutationObserver((muts) => {
     if (document.hidden || disposed) return;
     const own = (n) =>
@@ -211,6 +332,9 @@ export async function startLens(runtime = chrome.runtime) {
         ...state,
         error: state.errors.book,
         salesError: state.errors.sales,
+        salesErrors: state.salesErrors,
+        salesReading: state.salesReading,
+        salesBusy: state.busy.has("sales"),
         busy: state.busy.has("book"),
         action,
       });
@@ -218,6 +342,26 @@ export async function startLens(runtime = chrome.runtime) {
       const dialog = dom.pickerDialog();
       if (dialog) nextRoots.push(dialog);
     } else if (before.equipment) equipment.clear();
+    context.craft =
+      state.settings.craft &&
+      /^\/market\/equipments\/?$/.test(location.pathname);
+    if (context.craft) {
+      const bar = document.getElementById("scrap-sniper-bar");
+      state.taxOnPage = dom.taxRateFromText(dom.taxNotice()?.textContent);
+      if (!state.ledger && !state.setup && !state.settings.craftCollapsed)
+        void loadLedger();
+      // After the equipment bar; without that module, where the bar would go (the tax notice, else the grid's section).
+      const result = desk.render(
+        {
+          ...state,
+          busy: state.busy.has("cases") || state.busy.has("book"),
+          action,
+        },
+        bar ?? dom.marketAnchor(),
+        { after: !!bar },
+      );
+      if (result) nextRoots.push(...result.roots);
+    } else desk.clear();
     const onCases =
       /^\/market\/?$/.test(location.pathname) ||
       /\/inventory\/?$/.test(location.pathname);
@@ -310,8 +454,9 @@ export async function startLens(runtime = chrome.runtime) {
   async function fetchVisible() {
     if (state.setup || disposed || document.hidden) return;
     const jobs = [];
-    if (context.equipment) jobs.push(read("book"));
-    if (context.cases || context.travel) jobs.push(read("cases"));
+    const deskOpen = context.craft && !state.settings.craftCollapsed;
+    if (context.equipment || deskOpen) jobs.push(read("book"));
+    if (context.cases || context.travel || deskOpen) jobs.push(read("cases"));
     if (context.cases && wantsAverages()) jobs.push(read("avg"));
     await Promise.all(jobs);
   }
@@ -331,6 +476,7 @@ export async function startLens(runtime = chrome.runtime) {
       }
       clock();
       void fetchVisible();
+      if (context.craft && !state.settings.craftCollapsed) void refreshLedger();
     }
     ticking = false;
     if (!disposed) timer = setTimeout(tick, 5000);
@@ -338,6 +484,7 @@ export async function startLens(runtime = chrome.runtime) {
   const visible = () => {
     if (!document.hidden) {
       clearTimeout(timer);
+      drainSales(); // reads kept while the tab was hidden go first, with their force flags
       void tick();
     }
   };
@@ -348,10 +495,12 @@ export async function startLens(runtime = chrome.runtime) {
     sched.cancel();
     observer.disconnect();
     equipment.clear();
+    desk.clear();
     document.getElementById("scrap-sniper-cases")?.remove();
     for (const el of document.querySelectorAll(".ss-trip")) el.remove();
     document.removeEventListener("visibilitychange", visible);
   };
   await tick();
+  metrics.equipment = equipment.metrics;
   return { dispose, metrics, scan };
 }

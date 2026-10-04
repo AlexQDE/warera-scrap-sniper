@@ -7,6 +7,13 @@ export const TTL = Object.freeze({
 });
 export const CACHE_VERSION = 2;
 
+/** A non-negative finite number from form text or API JSON; null for nothing, booleans, NaN and negatives. @param {unknown} value */
+export function nonNegative(value) {
+  if (value == null || value === "" || typeof value === "boolean") return null;
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
 /** @param {unknown} value */
 export function positive(value) {
   if (value == null || value === "" || typeof value === "boolean") return null;

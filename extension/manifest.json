@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "WarEra Lens",
-  "version": "1.4.1",
+  "name": "WarEra Plus",
+  "version": "1.6.0",
   "minimum_chrome_version": "105",
-  "description": "Read-only equipment, case and travel insights for WarEra. Depth-aware quotes, explicit estimates and your own API key.",
+  "description": "Read-only decision support for WarEra: scrap profit and resale evidence on equipment offers, a Craft Desk with a personal ledger, case and travel values. Your own API key, explicit uncertainty.",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
@@ -17,7 +17,7 @@
     "type": "module"
   },
   "action": {
-    "default_title": "WarEra Lens settings",
+    "default_title": "WarEra Plus settings",
     "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon16.png",
@@ -53,7 +53,13 @@
         "lib/sales.mjs",
         "lib/ui.mjs",
         "lib/format.mjs",
-        "lib/scheduler.mjs"
+        "lib/scheduler.mjs",
+        "lib/resale.mjs",
+        "lib/offers.mjs",
+        "lib/craft.mjs",
+        "lib/craftdata.mjs",
+        "lib/craftdesk.mjs",
+        "lib/ledger.mjs"
       ],
       "matches": ["https://app.warera.io/*"]
     }

@@ -12,7 +12,7 @@
     const notice = document.createElement("div");
     notice.dataset.lens = "";
     notice.textContent =
-      "WarEra Lens could not start. Reload the game page after updating the extension.";
+      "WarEra Plus could not start. Reload the game page after updating the extension.";
     document.body.prepend(notice);
   }
 })();

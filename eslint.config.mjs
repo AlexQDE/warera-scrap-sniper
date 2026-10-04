@@ -29,6 +29,8 @@ export default [
           "Buffer",
           "structuredClone",
           "Event",
+          "Blob",
+          "File",
         ].map((k) => [k, "readonly"]),
       ),
     },

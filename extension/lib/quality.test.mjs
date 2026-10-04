@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { nonNegative } from "./quality.mjs";
 import { positive, quote, freshness } from "./quality.mjs";
 import { preferences } from "./settings.mjs";
 import { verdict } from "./dom.mjs";
@@ -130,5 +131,18 @@ describe("quote quality and safe decisions", () => {
     const r = await fetchEquipmentAvg(f, "fake", ["knife", "jet"]);
     expect(r.failures.knife).toBeUndefined();
     expect(r.failures.jet).toBeTruthy();
+  });
+});
+
+describe("nonNegative", () => {
+  it("reads zero and positive numbers from numbers or text, nothing else", () => {
+    expect(nonNegative(0)).toBe(0);
+    expect(nonNegative("1.5")).toBe(1.5);
+    expect(nonNegative(-1)).toBeNull();
+    expect(nonNegative("")).toBeNull();
+    expect(nonNegative(null)).toBeNull();
+    expect(nonNegative(true)).toBeNull();
+    expect(nonNegative("x")).toBeNull();
+    expect(nonNegative(Infinity)).toBeNull();
   });
 });

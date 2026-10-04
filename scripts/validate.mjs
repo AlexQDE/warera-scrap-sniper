@@ -72,5 +72,5 @@ for (const path of await readdir(resolve(extension, "lib"))) {
     );
 }
 console.log(
-  `Validated WarEra Lens ${manifest.version}: ${seen.size} modules, ${publicFiles.size} public modules, no runtime dependencies.`,
+  `Validated WarEra Plus ${manifest.version}: ${seen.size} modules, ${publicFiles.size} public modules, no runtime dependencies.`,
 );

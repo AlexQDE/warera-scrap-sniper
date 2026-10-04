@@ -1,4 +1,4 @@
-/* WarEra Lens: scoped UI, native game layout stays in control. */
+/* WarEra Plus: scoped UI, native game layout stays in control. */
 [data-lens] {
   --lens-bg: #161e2b;
   --lens-line: #344255;
@@ -41,7 +41,8 @@
   cursor: wait;
 }
 #scrap-sniper-bar,
-#scrap-sniper-cases {
+#scrap-sniper-cases,
+#warera-plus-craft {
   container-type: inline-size;
   background: var(--lens-bg);
   border: 1px solid var(--lens-line);
@@ -175,20 +176,72 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 12px;
+  gap: 4px 12px;
   max-width: 100%;
-  padding: 7px 9px;
+  padding: 6px 9px;
   margin: 4px;
   background: #182231;
   border: 1px solid #344255;
   border-radius: 8px;
-  pointer-events: none;
+  pointer-events: none; /* clicks fall through to the row as in 1.4; only our controls catch them */
+}
+.ss-verdict[data-lens] > button,
+.ss-verdict[data-lens] .lens-details {
+  pointer-events: auto;
+}
+[data-lens] .lens-kv {
+  display: inline-grid;
+  line-height: 1.25;
+  min-width: 0;
+}
+[data-lens] .lens-kv b {
+  font-size: 13px;
+}
+[data-lens] .lens-kv small {
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+[data-lens] .lens-pos {
+  color: #a4ecc7;
+}
+[data-lens] .lens-neg {
+  color: #f0b7a6;
+}
+.ss-verdict[data-lens] > button {
+  min-height: 26px;
+  padding: 2px 9px;
+  font-size: 11px;
+  margin-left: auto;
+}
+.ss-verdict[data-lens] .lens-details {
+  flex-basis: 100%;
+  display: grid;
+  gap: 3px;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--lens-muted);
+  border-top: 1px solid var(--lens-line);
+  padding-top: 6px;
+  margin-top: 2px;
+}
+.ss-verdict[data-lens] .lens-details b {
+  color: #e9eef6;
 }
 [data-scrap-sniper="hit"] > .ss-verdict .lens-tag {
   color: #a4ecc7;
 }
 [data-scrap-sniper="near"] > .ss-verdict .lens-tag {
   color: #f3d291;
+}
+[data-scrap-sniper="stale"] > .ss-verdict .lens-tag,
+[data-scrap-sniper="loading"] > .ss-verdict .lens-tag {
+  color: #d3bc87;
+}
+[data-scrap-sniper="error"] > .ss-verdict .lens-tag {
+  color: #f0b7a6;
+}
+[data-lens] .lens-status[data-status="loading"] {
+  color: #b9dcff;
 }
 .ss-trip[data-lens] {
   display: block;
@@ -222,12 +275,189 @@
 [data-ss-pick="hide"] {
   display: none !important;
 }
+/* Craft Desk */
+[data-lens] .lens-desk {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+[data-lens] .lens-inputs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: end;
+}
+[data-lens] .lens-inputs label,
+[data-lens] .lens-recipe label,
+[data-lens] .lens-form label,
+[data-lens] .lens-actions label {
+  display: grid;
+  gap: 3px;
+  font-size: 11.5px;
+  color: var(--lens-muted);
+}
+[data-lens] input,
+[data-lens] select,
+[data-lens] textarea {
+  font: inherit;
+  color: #e9eef6;
+  background: #0f1520;
+  border: 1px solid var(--lens-line);
+  border-radius: 6px;
+  padding: 4px 7px;
+  min-height: 28px;
+  max-width: 100%;
+}
+[data-lens] input[type="number"] {
+  width: 7.5em;
+}
+[data-lens] input:focus-visible,
+[data-lens] select:focus-visible,
+[data-lens] textarea:focus-visible {
+  outline: 2px solid #91ccff;
+  outline-offset: 2px;
+}
+[data-lens] .lens-matrix {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+[data-lens] .lens-matrix caption {
+  text-align: left;
+  color: var(--lens-muted);
+  font-size: 11.5px;
+  padding-bottom: 6px;
+}
+[data-lens] .lens-matrix th,
+[data-lens] .lens-matrix td {
+  padding: 3px 4px;
+  text-align: center;
+  border-bottom: 1px solid var(--lens-line);
+}
+[data-lens] .lens-matrix thead th {
+  color: var(--lens-muted);
+  font-weight: 600;
+  text-transform: capitalize;
+  font-size: 11px;
+}
+[data-lens] .lens-matrix th[scope="row"] {
+  text-align: left;
+  text-transform: capitalize;
+  color: var(--lens-muted);
+  font-weight: 600;
+}
+[data-lens] .lens-matrix td button {
+  width: 100%;
+  min-height: 28px;
+  padding: 2px 4px;
+  font-size: 11.5px;
+  background: transparent;
+}
+[data-lens] .lens-matrix td button[aria-pressed="true"] {
+  background: #2b3a52;
+  border-color: #6a8bb3;
+}
+[data-lens] .lens-detail h3,
+[data-lens] .lens-detail h4,
+[data-lens] .lens-ledger-box h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+[data-lens] .lens-detail h3 small,
+[data-lens] .lens-detail h4 small,
+[data-lens] .lens-ledger-box h3 small {
+  display: inline;
+  font-weight: 400;
+}
+[data-lens] .lens-grid2,
+[data-lens] .lens-grid3 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 8px;
+}
+[data-lens] .lens-grid3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+[data-lens] .lens-grid2 > div,
+[data-lens] .lens-grid3 > div {
+  display: grid;
+  gap: 2px;
+  align-content: start;
+  border: 1px solid var(--lens-line);
+  border-radius: 7px;
+  padding: 8px;
+  min-width: 0;
+}
+[data-lens] .lens-grid2 > div > span,
+[data-lens] .lens-grid3 > div > span {
+  font-size: 11px;
+  color: var(--lens-muted);
+  overflow-wrap: anywhere;
+}
+[data-lens] .lens-recipe {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: end;
+  margin-bottom: 8px;
+}
+[data-lens] .lens-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+  border: 1px solid var(--lens-line);
+  border-radius: 7px;
+  padding: 8px;
+  margin: 8px 0;
+}
+[data-lens] .lens-wide {
+  grid-column: 1 / -1;
+}
+[data-lens] .lens-ledger {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+[data-lens] .lens-ledger li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 6px 12px;
+  border: 1px solid var(--lens-line);
+  border-radius: 7px;
+  padding: 7px 9px;
+}
+[data-lens] .lens-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: end;
+}
+[data-lens] .lens-actions button {
+  min-height: 26px;
+  padding: 2px 8px;
+  font-size: 11.5px;
+}
 @container (max-width:650px) {
   [data-lens] .lens-case {
     grid-template-columns: 1fr 1fr;
   }
   [data-lens] .lens-floors {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  [data-lens] .lens-grid2,
+  [data-lens] .lens-grid3 {
+    grid-template-columns: 1fr;
+  }
+  [data-lens] .lens-matrix {
+    font-size: 11px;
+  }
+  [data-lens] .lens-matrix td button {
+    padding: 2px 1px;
+    font-size: 10.5px;
   }
 }
 @container (max-width:360px) {

@@ -1,0 +1,35 @@
+{
+  "measuredAt": "2026-10-04T17:44:31.569Z",
+  "engine": "jsdom (diagnostic: no layout, innerText shimmed)",
+  "fixture": "fixtures/market.html?item=jet&rows=60",
+  "results": [
+    {
+      "build": "before (1.4.1)",
+      "rows": 60,
+      "bursts40": {
+        "scans": 40,
+        "scanMs": 11008,
+        "innerTextReads": 45840,
+        "getComputedStyle": 8640,
+        "querySelectorAll": 2763
+      },
+      "equipment": null
+    },
+    {
+      "build": "after (1.6.0)",
+      "rows": 60,
+      "bursts40": {
+        "scans": 40,
+        "scanMs": 4190.2,
+        "innerTextReads": 0,
+        "getComputedStyle": 1440,
+        "querySelectorAll": 2641
+      },
+      "equipment": {
+        "scopedScans": 41,
+        "fullScans": 1,
+        "rowsWritten": 120
+      }
+    }
+  ]
+}
