@@ -486,6 +486,40 @@ describe("merging a second tab's list", () => {
     });
     expect(m.conflicts).toEqual([]);
   });
+  it("takes no new entry into a full ledger, never drops a stored one to make room, reports what it could not hold, and still takes edits and removals", () => {
+    const full = Array.from({ length: MAX_ENTRIES }, (_, i) => ({
+      ...base,
+      id: `full-${String(i).padStart(4, "0")}`,
+      createdAt: new Date(NOW + 1000 + i).toISOString(),
+      revision: 1,
+    }));
+    const fresh = { ...base, id: "fresh-0001" }; // created before every stored entry, as after a clock that moved back
+    const edit = { ...full[7], label: "edited" };
+    const m = mergeLedgers({
+      stored: full,
+      incoming: [fresh, edit],
+      baseRevision: 1,
+      revision: 2,
+    });
+    expect(m.entries).toHaveLength(MAX_ENTRIES);
+    expect(m.capped).toEqual(["fresh-0001"]);
+    expect(m.entries.find((e) => e.id === "full-0007")).toMatchObject({
+      label: "edited",
+      revision: 2,
+    });
+    expect(m.entries.every((e) => e.id.startsWith("full-"))).toBe(true);
+    // a removal in the same write makes room
+    const n = mergeLedgers({
+      stored: full,
+      incoming: [fresh],
+      removed: ["full-0000"],
+      baseRevision: 1,
+      revision: 2,
+    });
+    expect(n.capped).toEqual([]);
+    expect(n.entries).toHaveLength(MAX_ENTRIES);
+    expect(n.entries.map((e) => e.id)).toContain("fresh-0001");
+  });
   it("normalizes a stored ledger with its revision and tombstones, bounded to the newest deletions", () => {
     const at = new Date(NOW).toISOString();
     const l = normalizeLedger(

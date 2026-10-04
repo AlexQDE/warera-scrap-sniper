@@ -35,6 +35,7 @@ import {
   summarize,
   exportLedger,
   importLedger,
+  MAX_ENTRIES,
 } from "./ledger.mjs";
 import { RARITIES, SLOTS } from "./items.mjs";
 import { itemLabel } from "./dom.mjs";
@@ -132,24 +133,35 @@ export function createCraftDesk({
       else if (!r?.ledger)
         status = "Ledger: not saved, the extension did not answer; try again";
       else {
-        // The worker refuses an edit of an entry another tab deleted or changed since this tab last read; say so instead of claiming the move.
+        // The worker refuses an edit of an entry another tab deleted or changed since this tab last read, and takes
+        // no new entry into a full ledger; say so instead of claiming the move.
         const dropped = Array.isArray(r.dropped) ? r.dropped.length : 0;
         const conflicts = Array.isArray(r.conflicts) ? r.conflicts.length : 0;
-        const lost = dropped + conflicts;
-        const why =
-          dropped && conflicts
-            ? "deleted or changed in another tab meanwhile"
-            : dropped
-              ? "deleted in another tab meanwhile"
-              : `changed in another tab meanwhile; ${lost === 1 ? "its" : "their"} current state is shown`;
+        const capped = Array.isArray(r.capped) ? r.capped.length : 0;
+        const lost = dropped + conflicts + capped;
+        const why = [
+          dropped ? "deleted in another tab meanwhile" : "",
+          conflicts
+            ? `changed in another tab meanwhile; ${conflicts === 1 ? "its" : "their"} current state is shown`
+            : "",
+          capped
+            ? `not kept: the ledger is full (${MAX_ENTRIES} entries), export it and delete old entries`
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" · ");
         if (lost && lost >= changed.length + removed.length)
-          status = `Ledger: not applied, ${lost === 1 ? "the entry was" : "the entries were"} ${why}`;
+          status =
+            capped === lost
+              ? `Ledger: ${capped === 1 ? "the entry was not kept" : `${capped} entries were not kept`}, the ledger is full (${MAX_ENTRIES} entries); export it and delete old entries`
+              : `Ledger: not applied, ${lost === 1 ? "the entry was" : "the entries were"} ${why}`;
         else if (lost) status = `${message} · ${lost} not applied: ${why}`;
         else
           status = r.merged
             ? `${message} · merged with changes another tab made meanwhile`
             : message;
-        ok = true;
+        // A write the ledger could not hold at all is not done: the form stays for another try once there is room.
+        ok = !(capped && capped >= changed.length);
       }
     } catch (e) {
       status = `Ledger: ${e?.message ?? "could not save"}`;

@@ -9,7 +9,12 @@ import { CASE_CODES, WOODEN_CODES, ALL_GEAR_CODES } from "./cases.mjs";
 import { makeSingleFlight } from "./flight.mjs";
 import { preferences } from "./settings.mjs";
 import { CACHE_VERSION, TTL, freshness } from "./quality.mjs";
-import { normalizeLedger, mergeLedgers, LEDGER_VERSION } from "./ledger.mjs";
+import {
+  normalizeLedger,
+  normalizeEntry,
+  mergeLedgers,
+  LEDGER_VERSION,
+} from "./ledger.mjs";
 import { applyRecipeOps } from "./craftdata.mjs";
 
 /** The craft ledger is the player's own record: validated, bounded, kept across key changes, never sent anywhere. */
@@ -363,10 +368,10 @@ export function createController({
           // ids were dropped or conflicted.
           const { craftLedger } = await storage.get(["craftLedger"]);
           const stored = normalizeLedger(craftLedger, now());
-          const changed = normalizeLedger(
-            { entries: msg.changed },
-            now(),
-          ).entries;
+          // Each entry is validated on its own, not as a bounded ledger: what the cap cannot hold is reported, never cut here.
+          const changed = (Array.isArray(msg.changed) ? msg.changed : [])
+            .map((e) => normalizeEntry(e, now()))
+            .filter((e) => e != null);
           const removed = (Array.isArray(msg.removed) ? msg.removed : [])
             .map(String)
             .slice(0, 500);
@@ -400,6 +405,7 @@ export function createController({
               Number(msg.baseRevision) !== stored.revision,
             dropped: merged.dropped,
             conflicts: merged.conflicts,
+            capped: merged.capped,
           };
         });
       if (["book", "cases", "avg", "sales"].includes(msg?.type)) {

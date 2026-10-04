@@ -170,14 +170,23 @@ export function createEquipment({
     }
     return est;
   }
-  function resaleCell(dims, est) {
+  function resaleCell(dims, est, readFailed) {
     const kv = (b, small) =>
       `<span class="lens-kv"><b>${b}</b><small>${escapeHtml(small)}</small></span>`;
+    // The last good read stays the evidence after a failed refresh, marked as such.
+    const mark = readFailed ? " ⚠" : "";
+    const failed = readFailed ? " · last read failed" : "";
     switch (dims.resale) {
       case "ok":
-        return kv(`~${fmt(est.estimate)} g`, `resale · ${est.n} fills`);
+        return kv(
+          `~${fmt(est.estimate)} g${mark}`,
+          `resale · ${est.n} fills${failed}`,
+        );
       case "insufficient":
-        return kv("–", `resale · ${est.n} of ${MIN_RESALE_SAMPLE} fills`);
+        return kv(
+          `–${mark}`,
+          `resale · ${est.n} of ${MIN_RESALE_SAMPLE} fills${failed}`,
+        );
       case "loading":
         return kv("…", "resale · reading sales");
       case "error":
@@ -188,7 +197,10 @@ export function createEquipment({
         return kv("–", "resale · no comparable fills");
     }
   }
-  function detailsHtml(r, { fresh, book, dims, est, rank, salesError }) {
+  function detailsHtml(
+    r,
+    { fresh, book, dims, est, rank, salesError, readFailed },
+  ) {
     const lines = [];
     if (r.rarity)
       lines.push(
@@ -223,6 +235,10 @@ export function createEquipment({
     else if (dims.resale === "other-item")
       lines.push("Resale: select this item in the grid to read its sales");
     else lines.push("Resale: no comparable fills in the window");
+    if (readFailed && (dims.resale === "ok" || dims.resale === "insufficient"))
+      lines.push(
+        `Resale: last read failed · ${escapeHtml(readFailed)} · the last good read is shown`,
+      );
     if (r.stats.readable)
       lines.push(
         `Durability ${r.stats.durability}% · stat ${r.stats.stat} · ${r.statRank?.status === "ok" ? `${r.statRank.percentile.toFixed(0)}th percentile among ${r.statRank.n} listed peers` : `stat rank needs ${MIN_PERCENTILE_PEERS} listed peers (${r.statRank?.n ?? 0} now)`}`,
@@ -251,7 +267,7 @@ export function createEquipment({
       r.v.margin == null
         ? `<span class="lens-kv"><b>–</b><small>${escapeHtml(why)}</small></span>`
         : `<span class="lens-kv"><b class="${r.v.margin >= 0 ? "lens-pos" : "lens-neg"}">${signed(r.v.margin)} g</b><small>scrap profit · ROI ${signed(r.v.marginPct * 100, 1)}%</small></span>`;
-    return `<span class="lens-tag">${TAGS[kind]}</span>${scrap}${resaleCell(dims, est)}${best ? '<span class="lens-muted lens-best">Best value</span>' : ""}<button type="button" data-action="details" aria-expanded="${open}" aria-label="${open ? "Hide" : "Show"} details for this offer">${open ? "Hide" : "Details"}</button>${open ? detailsHtml(r, ctx) : ""}`;
+    return `<span class="lens-tag">${TAGS[kind]}</span>${scrap}${resaleCell(dims, est, ctx.readFailed)}${best ? '<span class="lens-muted lens-best">Best value</span>' : ""}<button type="button" data-action="details" aria-expanded="${open}" aria-label="${open ? "Hide" : "Show"} details for this offer">${open ? "Hide" : "Details"}</button>${open ? detailsHtml(r, ctx) : ""}`;
   }
   function render(state) {
     // A scoped scan is trusted only when it finds a list (two rows or more);
@@ -414,7 +430,7 @@ export function createEquipment({
         open,
         i === best && fresh,
         key,
-        open ? (salesErrorFor(r.code) ?? "") : "",
+        salesErrorFor(r.code) ?? "", // a failed refresh marks the row, open or not
         open ? Math.floor(now() / 60000) : "",
       ].join("|");
       if (rowMemo.get(el) === memo) continue;
@@ -431,6 +447,7 @@ export function createEquipment({
           book,
           rank,
           salesError: salesErrorFor(r.code),
+          readFailed: ownItem && r.sales ? salesErrorFor(r.code) : null,
         }),
       );
     }
@@ -463,9 +480,9 @@ export function createEquipment({
       : selectedError && !selectedSales
         ? "sales read failed"
         : selectedEst?.status === "ok"
-          ? `${selectedEst.n} fills · median ${fmt(selectedEst.estimate)} g`
+          ? `${selectedEst.n} fills · median ${fmt(selectedEst.estimate)} g${selectedError ? " ⚠ last read failed" : ""}`
           : selectedEst
-            ? `${selectedEst.n} of ${MIN_RESALE_SAMPLE} fills`
+            ? `${selectedEst.n} of ${MIN_RESALE_SAMPLE} fills${selectedError ? " ⚠ last read failed" : ""}`
             : salesReadingFor(code)
               ? "reading…"
               : "no sales yet";

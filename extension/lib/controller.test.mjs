@@ -302,6 +302,8 @@ describe("background controller", () => {
     });
     expect(bounded.error).toBeUndefined();
     expect(bounded.ledger.entries).toHaveLength(500);
+    expect(bounded.capped).toHaveLength(3); // the stored entry stays; 499 of the 502 fit, the rest are reported
+    expect(bounded.ledger.entries.map((e) => e.id)).toContain("test-0001");
     expect(bounded.ledger.entries[0].notes).toHaveLength(200);
     expect(JSON.stringify(storage.data.craftLedger).length).toBeLessThan(
       LEDGER_BYTES,

@@ -301,6 +301,35 @@ describe("summary line and states", () => {
     expect(bar()).toContain("0 readable stats");
     expect(row.dataset.scrapSniper).toBe("hit");
   });
+  it("marks a cached estimate after a failed refresh on the row, in Details and in the summary, and clears the mark once a read succeeds", () => {
+    state.salesByCode = {
+      knife: {
+        code: "knife",
+        at: iso(),
+        complete: true,
+        fills: [1, 1.1, 0.9, 1.2, 1.05].map((p, i) => fill(p, i + 1)),
+      },
+    };
+    equipment.render(state);
+    expect(annotation().textContent).toContain("resale · 5 fills");
+    expect(annotation().textContent).not.toContain("⚠");
+    state.salesErrors = { knife: "the API answered 503" };
+    equipment.render(state);
+    expect(annotation().textContent).toContain("~1.050 g ⚠");
+    expect(annotation().textContent).toContain("last read failed");
+    const bar = () => document.getElementById("scrap-sniper-bar").textContent;
+    expect(bar()).toContain("5 fills · median 1.050 g ⚠ last read failed");
+    details().click();
+    equipment.render(state);
+    expect(annotation().querySelector(".lens-details").textContent).toContain(
+      "Resale: last read failed · the API answered 503 · the last good read is shown",
+    );
+    state.salesErrors = {};
+    equipment.render(state);
+    expect(annotation().textContent).not.toContain("⚠");
+    expect(annotation().textContent).not.toContain("last read failed");
+    expect(bar()).not.toContain("last read failed");
+  });
   it("shows reading, failed and stale quote states without action labels", () => {
     state.book = null;
     state.busy = true;

@@ -420,7 +420,10 @@ export function normalizeLedger(raw, now = Date.now()) {
  * whatever its copy's timestamp, reported as dropped. A writer that read the
  * deletion and sends the id again does so on purpose (an import), so it
  * comes back. Both sides keep their new entries; every entry stored carries
- * this write's revision. Pure; the worker applies it on every write.
+ * this write's revision. A full ledger (`MAX_ENTRIES`) takes no new entry and
+ * never drops a stored one to make room: the ids it could not hold are
+ * reported as capped, and edits of stored entries always fit. Pure; the
+ * worker applies it on every write.
  * @param {{ stored: ReadonlyArray<Entry>, incoming: ReadonlyArray<Entry>, removed?: ReadonlyArray<string>, tombstones?: Record<string, Tombstone>, baseRevision?: number, revision?: number, now?: number }} input
  *   `baseRevision` is the revision the writer last read, `revision` the one this write produces.
  */
@@ -459,7 +462,10 @@ export function mergeLedgers({
     }
     dead[key] = { at, revision };
     removing.add(key);
+    byId.delete(key); // gone first, so a removal makes room for this write's new entries
   }
+  /** @type {string[]} */
+  const capped = [];
   for (const e of incoming) {
     const buried = dead[e.id];
     if (buried && base < buried.revision) {
@@ -471,17 +477,22 @@ export function mergeLedgers({
       conflicts.add(e.id);
       continue;
     }
+    // A full ledger takes no new entry and never drops a stored one to make room; the writer is told instead.
+    if (!old && byId.size >= MAX_ENTRIES) {
+      capped.push(e.id);
+      continue;
+    }
     // The writer read the stored copy (its base is at or past the copy's revision): its edit stands, whatever
     // the clocks say. A timestamp decides nothing here, so an entry imported with a future stamp stays editable.
     byId.set(e.id, { ...e, revision });
   }
-  for (const key of removing) byId.delete(key);
   return {
-    entries: [...byId.values()]
-      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
-      .slice(0, MAX_ENTRIES),
+    entries: [...byId.values()].sort(
+      (a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt),
+    ),
     tombstones: normalizeTombstones(dead),
     dropped,
     conflicts: [...conflicts],
+    capped,
   };
 }

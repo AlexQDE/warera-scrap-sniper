@@ -998,6 +998,32 @@ describe("second review round", () => {
       "last read failed (the API answered 503); showing the last good read",
     );
   });
+  it("keeps the craft form open and says the ledger is full when the worker could not hold the entry", async () => {
+    settings = preferences({
+      ...settings,
+      craftRecipes: { boots5: { scraps: 10, steel: 2 } },
+    });
+    render();
+    click('[data-action="desk-pick"][data-code="boots5"]');
+    render();
+    click('[data-action="desk-ledger-new"]');
+    render();
+    onLedger.mockImplementationOnce(async (ops) => ({
+      ledger: { ...state.ledger, revision: 2 },
+      merged: false,
+      dropped: [],
+      conflicts: [],
+      capped: ops.changed.map((e) => e.id),
+    }));
+    click('[data-action="desk-ledger-add"]');
+    await flush();
+    render();
+    expect(el().querySelector(".lens-form")).not.toBeNull(); // the form stays for another try once there is room
+    expect(el().textContent).toContain(
+      "Ledger: the entry was not kept, the ledger is full (500 entries); export it and delete old entries",
+    );
+    expect(el().textContent).not.toContain("Recorded");
+  });
   it("keeps a setting typed while an earlier save of the same field was still pending", async () => {
     render();
     const apply = save.getMockImplementation();
