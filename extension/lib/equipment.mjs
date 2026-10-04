@@ -132,9 +132,11 @@ export function createEquipment({
   const rowKey = (r) =>
     `${r.code ?? r.alt ?? ""}|${r.priceText ?? ""}|${r.stats.stat ?? ""}|${r.stats.durability ?? ""}`;
   function onAnnotationClick(e) {
-    // Nothing clicked inside the annotation (the button, selected Details text) reaches the game's row.
-    e.stopPropagation();
+    // Only our own controls catch a click: the Details button and the Details text (selectable). The rest of the
+    // annotation, verdict, profit and resale, is the row's, in this handler as in the stylesheet (pointer-events).
     const button = e.target.closest?.("[data-action='details']");
+    if (!button && !e.target.closest?.(".lens-details")) return;
+    e.stopPropagation();
     if (!button) return;
     e.preventDefault();
     const key = e.currentTarget.dataset.ssKey;

@@ -152,6 +152,10 @@ describe("compact annotation", () => {
     expect(region.textContent).toContain("fills/day");
     region.click(); // selecting or clicking the Details text is ours, not the row's
     expect(rowClicks).not.toHaveBeenCalled();
+    annotation().querySelector(".lens-kv").click(); // the profit text is the row's: the click falls through
+    expect(rowClicks).toHaveBeenCalledTimes(1);
+    annotation().click(); // so is the annotation's own box
+    expect(rowClicks).toHaveBeenCalledTimes(2);
     details().click();
     equipment.render(state);
     expect(annotation().querySelector(".lens-details")).toBeNull();

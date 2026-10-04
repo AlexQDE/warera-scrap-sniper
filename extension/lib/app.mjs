@@ -126,8 +126,12 @@ export async function startLens(runtime = chrome.runtime) {
     const ttl = kind === "book" ? state.settings.intervalSec * 1000 : TTL[kind];
     // Sales are fresh per item: the panel's item and the desk's item each keep their own read.
     const held = kind === "sales" ? state.salesByCode[code] : state[kind];
+    // A recorded read error ends a snapshot's exemption: a refresh that failed over a still-fresh cached read is
+    // retried after the window below, so the warning clears on its own once a read succeeds.
+    const failed = kind === "sales" && !!state.salesErrors?.[code];
     if (
       !force &&
+      !failed &&
       !Object.keys(held?.failures ?? {}).length &&
       freshness(held?.at, ttl) === "fresh"
     )

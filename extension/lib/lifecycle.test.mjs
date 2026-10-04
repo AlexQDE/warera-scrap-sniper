@@ -494,6 +494,34 @@ describe("SPA lifecycle and DOM work", () => {
     await settle(3000);
     expect(salesCalls(runtime, "boots5")).toBe(2); // once
   });
+  it("retries a failed forced refresh of a cached item after the retry window, and the warning clears", async () => {
+    window.history.replaceState({}, "", "/market/equipments?item=jet");
+    marketFixture();
+    const runtime = marketRuntime({}, (msg) =>
+      msg.force
+        ? { error: "http", message: "the API answered 503" }
+        : {
+            sales: {
+              code: msg.itemCode,
+              at: new Date().toISOString(),
+              complete: true,
+              fills: [],
+            },
+          },
+    );
+    app = await startLens(runtime);
+    await settle(3000);
+    expect(salesCalls(runtime, "jet")).toBe(1);
+    const bar = () => document.getElementById("scrap-sniper-bar").textContent;
+    document.querySelector('#scrap-sniper-bar [data-action="refresh"]').click();
+    await settle(500);
+    expect(salesCalls(runtime, "jet")).toBe(2);
+    expect(bar()).toContain("last read failed");
+    // the cached read is still fresh, but the error ends its exemption: the next discovery scan past the window asks again, once
+    await settle(40_000);
+    expect(salesCalls(runtime, "jet")).toBe(3);
+    expect(bar()).not.toContain("last read failed");
+  });
   it("retries a failing sales read after a pause, not on every scan", async () => {
     window.history.replaceState({}, "", "/market/equipments?item=jet");
     marketFixture();
