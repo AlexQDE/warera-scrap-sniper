@@ -357,6 +357,13 @@
   background: #2b3a52;
   border-color: #6a8bb3;
 }
+[data-lens] .lens-matrix td.lens-random {
+  min-height: 28px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border-left: 1px solid var(--lens-line);
+  cursor: help;
+}
 [data-lens] .lens-detail h3,
 [data-lens] .lens-detail h4,
 [data-lens] .lens-ledger-box h3 {

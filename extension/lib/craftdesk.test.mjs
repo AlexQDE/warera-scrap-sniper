@@ -1172,4 +1172,69 @@ describe("second review round", () => {
     render();
     expect(el().querySelector('[data-field="batch"]').value).toBe("7");
   });
+  it("prices the random craft of a tier at half the steel over the six slots' estimates, and says how many slots are covered", () => {
+    const legendary = [
+      "tank",
+      "helmet5",
+      "chest5",
+      "gloves5",
+      "pants5",
+      "boots5",
+    ];
+    const medians = {
+      tank: 200,
+      helmet5: 100,
+      chest5: 100,
+      gloves5: 100,
+      pants5: 100,
+      boots5: 150,
+    };
+    state.salesByCode = Object.fromEntries(
+      legendary.map((c) => [
+        c,
+        {
+          code: c,
+          at: iso(),
+          complete: true,
+          fills: fills(c, Array(5).fill(medians[c])),
+        },
+      ]),
+    );
+    render();
+    const randomCell = () =>
+      [...el().querySelectorAll(".lens-matrix tbody tr")]
+        .find((r) => r.textContent.startsWith("legendary"))
+        .querySelector("td.lens-random");
+    // cost 486 × 0.21 + 16 × 1.6 = 127.66 g; EV 0.3 × 200 + 0.14 × (100 + 100 + 100 + 100 + 150) = 137 g; ROI +7.3%
+    expect(randomCell().textContent).toBe("+7%");
+    expect(randomCell().title).toContain("486 scraps + 16 steel");
+    expect(randomCell().title).toContain("6 of 6 slots have a sales estimate");
+    expect(randomCell().title).toContain("expected profit +9.340 g per craft");
+    expect(el().querySelectorAll(".lens-matrix td button")).toHaveLength(36); // the random cell is no pick
+    expect(el().querySelectorAll("td.lens-random")).toHaveLength(6);
+    // The common tier has no fills: the cell says how many slots are covered instead of guessing.
+    expect(
+      [...el().querySelectorAll(".lens-matrix tbody tr")]
+        .find((r) => r.textContent.startsWith("common"))
+        .querySelector("td.lens-random").textContent,
+    ).toBe("0/6 slots");
+    click('[data-action="desk-pick"][data-code="boots5"]');
+    render();
+    expect(el().textContent).toContain(
+      "Random craft of this tier instead: 486 scraps + 16 steel = 127.660 g; the game picks the slot: 30% weapon, 14% each armour slot. Expected 137.000 g, ROI +7.3% over the six slots' estimates.",
+    );
+    // An override of one cell describes a chosen-slot craft; the random craft keeps the game's table.
+    settings = preferences({
+      ...settings,
+      craftRecipes: { boots5: { scraps: 10, steel: 2 } },
+    });
+    render();
+    expect(randomCell().textContent).toBe("+7%");
+    delete state.salesByCode.boots5;
+    render();
+    expect(randomCell().textContent).toBe("5/6 slots");
+    expect(el().textContent).toContain(
+      "EV unavailable: 5 of 6 slots have a sales estimate",
+    );
+  });
 });

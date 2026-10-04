@@ -29,6 +29,7 @@ import {
   outcomesFor,
   normalizeRecipes,
   recipeFor,
+  randomCraft,
 } from "./craftdata.mjs";
 import { listingScenarios, liquidity, MIN_RESALE_SAMPLE } from "./resale.mjs";
 import {
@@ -577,6 +578,51 @@ export function createCraftDesk({
       : null;
     return { inputs, recipe, plan };
   }
+  /**
+   * The random craft of a tier: half the steel, the slot picked by the game,
+   * one outcome per slot valued at that slot's sales-weighted listing. The
+   * game's table applies whatever the player overrode per cell.
+   */
+  function randomPlanFor(tier, state, s, tax, prices) {
+    const random = randomCraft(tier, (code) => {
+      const o = outcomesOf(code, state, tax).outcomes;
+      return o.estimate?.status === "ok" ? o.estimate.estimate : null;
+    });
+    if (!random) return null;
+    const plan = craftPlan({
+      recipe: random.recipe,
+      batch: s.craftBatch,
+      scrapPrice: prices.scrap.value,
+      steelPrice: prices.steel.value,
+      outcomes: random.outcomes.map((o) => ({
+        label: o.label,
+        p: o.p,
+        proceeds:
+          o.listing == null
+            ? null
+            : proceeds({
+                listing: o.listing,
+                taxPct: tax.value,
+                mode: TAX_MODE,
+              }).sellerGets,
+      })),
+      targetMarginPct: s.craftTargetPct,
+    });
+    return { random, plan };
+  }
+  const RANDOM_ODDS_TEXT =
+    "the game picks the slot: 30% weapon, 14% each armour slot";
+  function randomCellHtml(rp) {
+    if (!rp)
+      return `<td class="lens-random lens-muted" title="no random craft for this tier">–</td>`;
+    const { random, plan } = rp;
+    const title = `random craft: ${random.recipe.scraps} scraps + ${random.recipe.steel} steel (half the chosen-slot steel); ${RANDOM_ODDS_TEXT}; ${random.covered} of 6 slots have a sales estimate`;
+    if (plan.ev.status === "ok" && plan.ev.roi != null)
+      return `<td class="lens-random ${plan.ev.roi >= 0 ? "lens-pos" : "lens-neg"}" title="${esc(title)} · expected profit ${signed(plan.ev.profit)} g per craft">${esc(pct(plan.ev.roi))}</td>`;
+    if (plan.cost.total == null)
+      return `<td class="lens-random lens-muted" title="${esc(title)} · missing: ${esc(plan.cost.missing.join(", "))}">no price</td>`;
+    return `<td class="lens-random lens-muted" title="${esc(title)}">${random.covered}/6 slots</td>`;
+  }
 
   function detailHtml(code, state, s, tax, prices, recipes) {
     const { inputs, recipe, plan } = planFor(
@@ -645,6 +691,14 @@ export function createCraftDesk({
     out.push(
       `<div class="lens-grid2"><div><small>Expected proceeds per craft</small>${evLine}</div><div><small>Expected profit</small><b class="${ev.profit == null ? "" : ev.profit >= 0 ? "lens-pos" : "lens-neg"}">${ev.profit == null ? "–" : `${signed(ev.profit)} g`}</b><span>ROI ${pct(ev.roi, 1)} per craft · batch ${plan.batch.expectedProfit == null ? "–" : `${signed(plan.batch.expectedProfit)} g`} · an expectation over random outcomes, not a promise</span></div></div>`,
     );
+    // The same tier crafted at random, for the comparison the game's craft menu invites.
+    const rp = item?.tier
+      ? randomPlanFor(item.tier, state, s, tax, prices)
+      : null;
+    if (rp)
+      out.push(
+        `<p class="lens-muted">Random craft of this tier instead: ${rp.random.recipe.scraps} scraps + ${rp.random.recipe.steel} steel = ${rp.plan.cost.perCraft == null ? "no price" : `${fmt(rp.plan.cost.perCraft)} g`}; ${RANDOM_ODDS_TEXT}. ${rp.plan.ev.status === "ok" ? `Expected ${fmt(rp.plan.ev.ev)} g, ROI ${pct(rp.plan.ev.roi, 1)} over the six slots' estimates` : `EV unavailable: ${rp.random.covered} of 6 slots have a sales estimate`}.</p>`,
+      );
     const ceiling = (c) =>
       c.value == null ? `– (${esc(c.reason)})` : `${fmt(c.value)} g`;
     out.push(
@@ -847,7 +901,11 @@ export function createCraftDesk({
         if (cell.plan) ranked.push({ code, plan: cell.plan });
         return cell.html;
       });
-      return `<tr><th scope="row">${rarity}</th>${cells.join("")}</tr>`;
+      // The seventh column: the tier crafted at random (not a pick: it is no single item to read sales for or to record).
+      const randomCell = randomCellHtml(
+        randomPlanFor(i + 1, state, s, tax, prices),
+      );
+      return `<tr><th scope="row">${rarity}</th>${cells.join("")}${randomCell}</tr>`;
     });
     const overrides = Object.keys(recipes).length;
     const top = rankPlans(ranked)[0];
@@ -858,7 +916,7 @@ export function createCraftDesk({
     const html =
       head +
       `<div class="lens-desk"><div class="lens-inputs"><label>Scrap price ${numberField("scrapPrice", manual.scrapPrice ?? prices.scrap.value ?? "")}<small>${esc(prices.scrap.note)}</small></label><label>Steel price ${numberField("steelPrice", manual.steelPrice ?? prices.steel.value ?? "")}<small>${esc(prices.steel.note)}</small></label><label>Batch ${numberField("batch", s.craftBatch, "1", 'max="1000" inputmode="numeric"')}<small>crafts</small></label><label>Market tax % ${numberField("taxPct", s.taxPct ?? (tax.source === "page" ? tax.value : ""), "0.01", 'max="100" placeholder="' + esc(tax.source === "page" ? `${tax.value} (page)` : "0") + '"')}<small>${esc(tax.source === "manual" ? "your rate (the buyer's, by country)" : tax.source === "page" ? "read off the page notice" : "none read; the tax is the buyer's, so the listing is what you keep")}</small></label><label>Target ROI % ${numberField("targetPct", s.craftTargetPct, "1", 'min="-50" max="500"')}<small>for the ceilings</small></label><button type="button" data-action="desk-quotes">Use quotes</button></div>` +
-      `<table class="lens-matrix"><caption>Expected ROI by tier and slot · the game's recipes, slot chosen${overrides ? ` (${overrides} overridden by you)` : ""}${best}</caption><thead><tr><th>Tier</th>${SLOT_HEADS.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${matrix.join("")}</tbody></table>` +
+      `<table class="lens-matrix"><caption>Expected ROI by tier and slot · the game's recipes, slot chosen${overrides ? ` (${overrides} overridden by you)` : ""}; random = the game picks the slot at half the steel${best}</caption><thead><tr><th>Tier</th>${SLOT_HEADS.map((h) => `<th>${h}</th>`).join("")}<th title="${esc(RANDOM_ODDS_TEXT)}">random</th></tr></thead><tbody>${matrix.join("")}</tbody></table>` +
       `<section class="lens-detail">${selected ? detailHtml(selected, state, s, tax, prices, recipes) : '<p class="lens-muted">Pick a cell to work a craft through: recipe, cost, buying now or bidding, expected value over its outcomes, break-even ceilings and listing guidance.</p>'}</section>` +
       `<section class="lens-ledger-box">${ledgerHtml(state, tax)}</section>` +
       `<p class="lens-muted">Read-only decision support: nothing is bought, crafted or listed for you. Input prices are the best asks (buying now) unless you type your own; expected values weight every outcome by its probability; comparable sales are the last 72 h of fills for the same item. Recipes are the game's table (the tier's scrap value in scraps, the steel fee doubled for a chosen slot); override a cell from the game's craft screen if it disagrees.</p></div>`;

@@ -9,6 +9,7 @@ import {
   taxRate,
   outcomesFor,
   applyRecipeOps,
+  randomCraft,
 } from "./craftdata.mjs";
 import { craftRecipe, SCRAP_LADDER, CRAFT_STEEL } from "./ladder.mjs";
 
@@ -201,6 +202,38 @@ describe("outcomesFor", () => {
     expect(outcomesFor("boots5", { salesByCode: {}, now: NOW }).fills).toEqual(
       [],
     );
+  });
+});
+
+describe("randomCraft", () => {
+  it("prices a random craft at the base steel with the slot odds over the tier's six codes, and counts the covered slots", () => {
+    const listings = {
+      tank: 200,
+      helmet5: 100,
+      chest5: 100,
+      gloves5: 100,
+      pants5: 100,
+      boots5: 150,
+    };
+    const r = randomCraft(5, (code) => listings[code] ?? null);
+    expect(r.rarity).toBe("legendary");
+    expect(r.recipe).toEqual({ scraps: 486, steel: 16 });
+    expect(r.outcomes.map((o) => o.p)).toEqual([
+      0.3, 0.14, 0.14, 0.14, 0.14, 0.14,
+    ]);
+    expect(r.outcomes[0]).toEqual({
+      code: "tank",
+      label: "tank (30%)",
+      p: 0.3,
+      listing: 200,
+    });
+    expect(r.outcomes[5].code).toBe("boots5");
+    expect(r.covered).toBe(6);
+    expect(
+      randomCraft(5, (code) => (code === "boots5" ? null : 100)).covered,
+    ).toBe(5);
+    expect(randomCraft(7, () => 1)).toBeNull();
+    expect(randomCraft(0, () => 1)).toBeNull();
   });
 });
 

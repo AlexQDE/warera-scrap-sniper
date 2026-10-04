@@ -6,11 +6,11 @@
 // table in ladder.mjs, see docs/GAME-FACTS.md), and existing extension data
 // (the scrap book, the resource books, the recent fills). Nothing here
 // invents a number: a missing input stays missing and is named.
-import { RARITIES, WEAPONS, GEAR_CODES } from "./items.mjs";
+import { RARITIES, WEAPONS, SLOTS, GEAR_CODES } from "./items.mjs";
 import { freshness, TTL, nonNegative as money } from "./quality.mjs";
 import { normalizeRecipe } from "./craft.mjs";
 import { comparableFills, resaleEstimate } from "./resale.mjs";
-import { craftRecipe, CHOSEN_SLOT_STEEL } from "./ladder.mjs";
+import { craftRecipe, CHOSEN_SLOT_STEEL, RANDOM_SLOT_ODDS } from "./ladder.mjs";
 
 /** @typedef {{ scraps: number, steel: number }} Recipe */
 /** @typedef {{ value: number | null, source: "manual" | "page" | "quote" | "fixture" | "none", note?: string }} Sourced */
@@ -255,5 +255,40 @@ export function outcomesFor(
     estimate: est,
     fills,
     note: `sales-weighted: assumes a crafted piece sells like recent fills${basis} (median of ${est.n})`,
+  };
+}
+
+/**
+ * A random craft of `tier`: the tier's scraps with the base steel fee (half
+ * the chosen-slot fee), the slot picked by the game at RANDOM_SLOT_ODDS. The
+ * outcomes are the six codes of the tier, each valued by `listingFor(code)`
+ * (that slot's sales-weighted listing, or null when it has no estimate);
+ * craftEV then gives the EV, or "unavailable" with the covered share. The
+ * game's table is used whatever the player overrode per cell: an override
+ * describes a chosen-slot craft, not this one. null for an unknown tier.
+ * @param {number} tier @param {(code: string) => unknown} listingFor
+ */
+export function randomCraft(tier, listingFor) {
+  const rarity = RARITIES[tier - 1];
+  const recipe = rarity ? craftRecipe(rarity, { chosen: false }) : null;
+  if (!rarity || !recipe) return null;
+  const codes = [GEAR_CODES[rarity].weapon, ...GEAR_CODES[rarity].gear];
+  const odds = [
+    RANDOM_SLOT_ODDS.weapon,
+    ...SLOTS.map(
+      (s) => RANDOM_SLOT_ODDS[/** @type {keyof typeof RANDOM_SLOT_ODDS} */ (s)],
+    ),
+  ];
+  const outcomes = codes.map((code, i) => ({
+    code,
+    label: `${code} (${Math.round(odds[i] * 100)}%)`,
+    p: odds[i],
+    listing: money(listingFor(code)),
+  }));
+  return {
+    rarity,
+    recipe,
+    outcomes,
+    covered: outcomes.filter((o) => o.listing != null).length,
   };
 }
