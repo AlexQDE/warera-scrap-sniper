@@ -326,6 +326,8 @@ describe("merging a second tab's list", () => {
         { ...other, id: "test-0003", label: "tab B's new one" },
       ],
       removed: ["test-0002"],
+      baseRevision: 1,
+      revision: 2,
       now: NOW + 9000,
     });
     expect(m.entries.map((e) => e.id).sort()).toEqual([
@@ -335,47 +337,98 @@ describe("merging a second tab's list", () => {
     expect(m.entries.find((e) => e.id === "test-0001").label).toBe(
       "edited later",
     );
-    expect(m.tombstones["test-0002"]).toBe(new Date(NOW + 9000).toISOString());
+    expect(m.tombstones["test-0002"]).toEqual({
+      at: new Date(NOW + 9000).toISOString(),
+      revision: 2,
+    });
+    expect(m.dropped).toEqual([]);
   });
-  it("does not let a stale copy bring back an entry deleted elsewhere, unless it was edited after the deletion", () => {
-    const tombstones = { "test-0002": new Date(NOW + 5000).toISOString() };
-    const stale = { ...other, updatedAt: new Date(NOW + 1000).toISOString() };
+  it("keeps an entry deleted against an edit from a tab that never read the deletion, however late it is stamped, and lets a tab that read it bring the id back on purpose", () => {
+    // deleted by the write that made revision 4
+    const tombstones = {
+      "test-0002": { at: new Date(NOW + 5000).toISOString(), revision: 4 },
+    };
+    // a tab that last read revision 3 lists its copy later than the deletion: the clock says nothing about what it knew
+    const late = { ...other, updatedAt: new Date(NOW + 6000).toISOString() };
+    const stale = mergeLedgers({
+      stored: [base],
+      incoming: [base, late],
+      tombstones,
+      baseRevision: 3,
+      revision: 5,
+    });
+    expect(stale.entries.map((e) => e.id)).toEqual(["test-0001"]);
+    expect(stale.dropped).toEqual(["test-0002"]);
+    expect(stale.tombstones).toEqual(tombstones);
+    // a tab that read revision 4 saw the entry gone: sending it again is deliberate (an import), whatever its stamp
+    const old = { ...other, updatedAt: new Date(NOW + 1000).toISOString() };
+    const back = mergeLedgers({
+      stored: [base],
+      incoming: [base, old],
+      tombstones,
+      baseRevision: 4,
+      revision: 5,
+    });
+    expect(back.entries.map((e) => e.id).sort()).toEqual([
+      "test-0001",
+      "test-0002",
+    ]);
+    expect(back.dropped).toEqual([]);
+    // no base, or a base no tab can have read, is no base: the deletion wins
+    for (const baseRevision of [undefined, NaN, -1, 5, 99])
+      expect(
+        mergeLedgers({
+          stored: [base],
+          incoming: [late],
+          tombstones,
+          baseRevision,
+          revision: 5,
+        }).dropped,
+      ).toEqual(["test-0002"]);
+    // an id removed and sent back in the same write stays removed
     expect(
       mergeLedgers({
-        stored: [base],
-        incoming: [base, stale],
-        tombstones,
-      }).entries.map((e) => e.id),
-    ).toEqual(["test-0001"]);
-    const revived = { ...other, updatedAt: new Date(NOW + 6000).toISOString() };
-    expect(
-      mergeLedgers({ stored: [base], incoming: [base, revived], tombstones })
-        .entries,
-    ).toHaveLength(2);
+        stored: [base, other],
+        incoming: [late],
+        removed: ["test-0002"],
+        baseRevision: 4,
+        revision: 5,
+      }),
+    ).toMatchObject({ dropped: ["test-0002"] });
   });
-  it("normalizes a stored ledger with its revision and tombstones, bounded", () => {
+  it("normalizes a stored ledger with its revision and tombstones, bounded to the newest deletions", () => {
+    const at = new Date(NOW).toISOString();
     const l = normalizeLedger(
       {
         revision: 3,
         entries: [base],
         tombstones: {
-          "test-0009": new Date(NOW).toISOString(),
-          bad: "x",
+          "test-0009": { at, revision: 2 },
+          bad: { at, revision: 1 },
           "test-0008": "junk",
+          "test-0007": at, // the shape before deletions carried a revision
+          "test-0006": { at: "junk", revision: 1 },
+          "test-0005": { at, revision: -1 },
+          "test-0004": { at, revision: 1.5 },
         },
       },
       NOW,
     );
     expect(l.revision).toBe(3);
-    expect(Object.keys(l.tombstones)).toEqual(["test-0009"]);
+    expect(l.tombstones).toEqual({ "test-0009": { at, revision: 2 } });
     expect(normalizeLedger({ revision: -1 }).revision).toBe(0);
     const many = Object.fromEntries(
       Array.from({ length: MAX_TOMBSTONES + 5 }, (_, i) => [
         `dead-${String(i).padStart(4, "0")}`,
-        new Date(NOW + i * 1000).toISOString(),
+        { at: new Date(NOW + i * 1000).toISOString(), revision: i + 1 },
       ]),
     );
-    expect(Object.keys(normalizeTombstones(many))).toHaveLength(MAX_TOMBSTONES);
+    const kept = Object.keys(normalizeTombstones(many));
+    expect(kept).toHaveLength(MAX_TOMBSTONES);
+    expect(kept).toContain(
+      `dead-${String(MAX_TOMBSTONES + 4).padStart(4, "0")}`,
+    );
+    expect(kept).not.toContain("dead-0000");
     expect(MAX_TOMBSTONES).toBeGreaterThanOrEqual(1000);
   });
 });

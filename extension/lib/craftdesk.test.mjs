@@ -680,4 +680,99 @@ describe("second review round", () => {
         .textContent,
     ).toBe("no recipe");
   });
+  it("clears only the numbers the completed recipe save carried: another item's numbers typed meanwhile stay", async () => {
+    render();
+    click('[data-action="desk-pick"][data-code="boots5"]');
+    render();
+    type("recipe-scraps", "10");
+    type("recipe-steel", "2");
+    const apply = save.getMockImplementation();
+    let confirm;
+    save.mockImplementationOnce(
+      (patch) =>
+        new Promise((resolve) => {
+          confirm = () => resolve(apply(patch));
+        }),
+    );
+    click('[data-action="desk-save-recipe"]');
+    render();
+    // while the worker is busy, the player moves on to the helmet and types its recipe
+    click('[data-action="desk-pick"][data-code="helmet5"]');
+    render();
+    type("recipe-scraps", "7");
+    type("recipe-steel", "1");
+    confirm();
+    await flush();
+    render();
+    expect(desk.selected).toBe("helmet5");
+    expect(el().querySelector('[data-field="recipe-scraps"]').value).toBe("7");
+    expect(el().querySelector('[data-field="recipe-steel"]').value).toBe("1");
+    expect(el().textContent).toContain(
+      "Recipe for legendary boots saved on this browser",
+    );
+    expect(settings.craftRecipes).toEqual({ boots5: { scraps: 10, steel: 2 } });
+    click('[data-action="desk-save-recipe"]');
+    await flush();
+    expect(settings.craftRecipes.helmet5).toEqual({ scraps: 7, steel: 1 });
+  });
+  it("keeps numbers retyped for the same item while its save was in flight", async () => {
+    render();
+    click('[data-action="desk-pick"][data-code="boots5"]');
+    render();
+    type("recipe-scraps", "10");
+    type("recipe-steel", "2");
+    const apply = save.getMockImplementation();
+    let confirm;
+    save.mockImplementationOnce(
+      (patch) =>
+        new Promise((resolve) => {
+          confirm = () => resolve(apply(patch));
+        }),
+    );
+    click('[data-action="desk-save-recipe"]');
+    render();
+    type("recipe-scraps", "12");
+    confirm();
+    await flush();
+    render();
+    expect(settings.craftRecipes.boots5).toEqual({ scraps: 10, steel: 2 });
+    expect(el().querySelector('[data-field="recipe-scraps"]').value).toBe("12");
+    expect(el().querySelector('[data-field="recipe-steel"]').value).toBe("2");
+    // nothing typed since: the confirmed save clears its own numbers and the stored recipe shows
+    click('[data-action="desk-save-recipe"]');
+    await flush();
+    render();
+    expect(settings.craftRecipes.boots5).toEqual({ scraps: 12, steel: 2 });
+    expect(el().querySelector('[data-field="recipe-scraps"]').value).toBe("12");
+  });
+  it("says when a move was not applied because the entry was deleted in another tab, instead of claiming it", async () => {
+    settings = preferences({
+      ...settings,
+      craftRecipes: { boots5: { scraps: 10, steel: 2 } },
+    });
+    render();
+    click('[data-action="desk-pick"][data-code="boots5"]');
+    render();
+    click('[data-action="desk-ledger-new"]');
+    render();
+    click('[data-action="desk-ledger-add"]');
+    await flush();
+    render();
+    const id = onLedger.mock.calls[0][0].changed[0].id;
+    // the worker: another tab deleted the entry since this tab read, so the edit is dropped
+    onLedger.mockImplementationOnce(async () => {
+      state.ledger = { ...state.ledger, revision: 9, entries: [] };
+      return { ledger: state.ledger, merged: true, dropped: [id] };
+    });
+    click(
+      `[data-action="desk-ledger-move"][data-type="scrap"][data-id="${id}"]`,
+    );
+    await flush();
+    render();
+    expect(el().textContent).toContain(
+      "Ledger: not applied, the entry was deleted in another tab meanwhile",
+    );
+    expect(el().textContent).not.toContain("Marked scrapped");
+    expect(el().textContent).toContain("No crafts recorded yet");
+  });
 });

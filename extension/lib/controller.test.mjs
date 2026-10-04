@@ -331,18 +331,36 @@ describe("background controller", () => {
       "tab-a-001",
       "tab-b-001",
     ]);
-    // a deletion on the current revision, then a stale edit of the deleted entry and of the other one
+    // a deletion on the current revision: remembered with the revision it made
     const third = await write([], 2, ["tab-a-001"]);
     expect(third.ledger.entries.map((e) => e.id)).toEqual(["tab-b-001"]);
-    const fourth = await write([entry("tab-a-001"), entry("tab-b-001")], 1);
+    expect(third.ledger.tombstones["tab-a-001"]).toEqual({
+      at: new Date(NOW).toISOString(),
+      revision: 3,
+    });
+    // a tab that last read revision 1 lists its copy of the deleted entry, stamped later than the deletion: it stays deleted and the tab is told
+    const late = {
+      ...entry("tab-a-001", "listed from a stale tab"),
+      updatedAt: new Date(NOW + 60_000).toISOString(),
+    };
+    const fourth = await write([late, entry("tab-b-001")], 1);
     expect(fourth.merged).toBe(true);
     expect(fourth.ledger.entries.map((e) => e.id)).toEqual(["tab-b-001"]);
-    // an untouched stale copy is never sent, so it can neither overwrite nor revive: only changes travel
-    const fifth = await write([], 0);
+    expect(fourth.dropped).toEqual(["tab-a-001"]);
+    // without a base it is no better off; an untouched stale copy is never sent anyway, only changes travel
+    const fifth = await write([late]);
     expect(fifth.ledger.entries.map((e) => e.id)).toEqual(["tab-b-001"]);
+    expect(fifth.dropped).toEqual(["tab-a-001"]);
+    // a tab that read the deletion (revision 5 now) and sends the id again did so on purpose: an import brings it back
+    const sixth = await write([entry("tab-a-001", "imported back")], 5);
+    expect(sixth.dropped).toEqual([]);
+    expect(sixth.ledger.entries.map((e) => e.id).sort()).toEqual([
+      "tab-a-001",
+      "tab-b-001",
+    ]);
     expect(
       (await controller.handle({ type: "ledgerGet" })).ledger.revision,
-    ).toBe(5); // five writes, whatever they carried
+    ).toBe(6); // six writes, whatever they carried
   });
   it("merges two tabs' recipe saves instead of letting the second replace the first, and still lets the popup clear the table", async () => {
     const { controller } = setup();

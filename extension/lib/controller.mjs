@@ -356,7 +356,9 @@ export function createController({
           // edited and the ids it removed, with the revision it read. They
           // are merged onto what is stored, so a tab's untouched (and maybe
           // stale) copy of the rest can neither overwrite nor revive anything;
-          // deletions are remembered so a stale edit of a deleted entry loses.
+          // deletions are remembered with the revision they made, so an edit
+          // from a tab that read an older revision loses however it is
+          // stamped, and the tab is told which ids were dropped.
           const { craftLedger } = await storage.get(["craftLedger"]);
           const stored = normalizeLedger(craftLedger, now());
           const changed = normalizeLedger(
@@ -366,16 +368,19 @@ export function createController({
           const removed = (Array.isArray(msg.removed) ? msg.removed : [])
             .map(String)
             .slice(0, 500);
+          const revision = stored.revision + 1;
           const merged = mergeLedgers({
             stored: stored.entries,
             incoming: changed,
             removed,
             tombstones: stored.tombstones,
+            baseRevision: Number(msg.baseRevision),
+            revision,
             now: now(),
           });
           const ledger = {
             version: LEDGER_VERSION,
-            revision: stored.revision + 1,
+            revision,
             entries: merged.entries,
             tombstones: merged.tombstones,
           };
@@ -391,6 +396,7 @@ export function createController({
             merged:
               craftLedger != null &&
               Number(msg.baseRevision) !== stored.revision,
+            dropped: merged.dropped,
           };
         });
       if (["book", "cases", "avg", "sales"].includes(msg?.type)) {

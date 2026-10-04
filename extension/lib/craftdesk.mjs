@@ -126,9 +126,16 @@ export function createCraftDesk({
       else if (!r?.ledger)
         status = "Ledger: not saved, the extension did not answer; try again";
       else {
-        status = r.merged
-          ? `${message} · merged with changes another tab made meanwhile`
-          : message;
+        // The worker drops an edit of an entry another tab deleted since this tab last read; say so instead of claiming the move.
+        const dropped = Array.isArray(r.dropped) ? r.dropped.length : 0;
+        if (dropped && dropped >= changed.length)
+          status = `Ledger: not applied, ${dropped === 1 ? "the entry was" : "the entries were"} deleted in another tab meanwhile`;
+        else if (dropped)
+          status = `${message} · ${dropped} not applied: deleted in another tab meanwhile`;
+        else
+          status = r.merged
+            ? `${message} · merged with changes another tab made meanwhile`
+            : message;
         ok = true;
       }
     } catch (e) {
@@ -175,12 +182,23 @@ export function createCraftDesk({
         return;
       }
       const code = selected;
-      // One code travels, not the whole table, so another tab's recipe is never overwritten; the inputs clear only once the worker confirmed.
+      const typed = {
+        scraps: fields["recipe-scraps"],
+        steel: fields["recipe-steel"],
+      };
+      // One code travels, not the whole table, so another tab's recipe is never overwritten; the inputs clear only once the worker confirmed,
+      // and only while they still hold this save's numbers for this item: numbers typed meanwhile, for another item or this one, are not this save's to clear.
       Promise.resolve(save({ craftRecipeOps: { set: { [code]: r } } })).then(
         (applied) => {
           if (applied) {
-            delete fields["recipe-scraps"];
-            delete fields["recipe-steel"];
+            if (
+              selected === code &&
+              fields["recipe-scraps"] === typed.scraps &&
+              fields["recipe-steel"] === typed.steel
+            ) {
+              delete fields["recipe-scraps"];
+              delete fields["recipe-steel"];
+            }
             status = `Recipe for ${itemLabel(code)} saved on this browser`;
           } else
             status =
