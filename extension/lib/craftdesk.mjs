@@ -5,7 +5,15 @@
 // rules in ledger.mjs. Every number on the desk names where it came from.
 import { fmt, signed, escapeHtml as esc } from "./format.mjs";
 import { setHtml, header, notice as noticeHtml, timeLabel } from "./ui.mjs";
-import { craftPlan, acquisition, proceeds, normalizeRecipe } from "./craft.mjs";
+import { nonNegative } from "./quality.mjs";
+import {
+  craftPlan,
+  acquisition,
+  proceeds,
+  listingForProceeds,
+  rankPlans,
+  normalizeRecipe,
+} from "./craft.mjs";
 import {
   CRAFT_CODES,
   describeCode,
@@ -28,13 +36,18 @@ import { itemLabel } from "./dom.mjs";
 export const DESK_ID = "warera-plus-craft";
 const SLOT_HEADS = ["weapon", ...SLOTS];
 const LEDGER_ROWS = 20;
+/** Ledger writes that must not overlap: each waits for the previous save. */
+const LEDGER_WRITES = new Set([
+  "desk-ledger-add",
+  "desk-ledger-move",
+  "desk-ledger-confirm",
+  "desk-import-paste",
+  "desk-import-file",
+]);
 
 const pct = (v, d = 0) => (v == null ? "–" : `${signed(v * 100, d)}%`);
-const num = (v) => {
-  if (v == null || v === "" || typeof v === "boolean") return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-};
+/** The player's local calendar date, not the UTC one. */
+const localDate = (iso) => new Date(iso).toLocaleDateString("en-CA");
 
 /** Browser download of a text file; replaced in tests. */
 function saveFile(name, text) {
@@ -71,6 +84,8 @@ export function createCraftDesk({
   let status = null; // one-line ledger feedback
   let lastState = null;
   let busy = false;
+  const outcomesMemo = new Map(); // code|sales.at|tax -> outcomes
+  const cellMemo = new Map(); // code -> { key, html, plan }
 
   function reset() {
     manual = {};
@@ -80,6 +95,7 @@ export function createCraftDesk({
     pending = null;
     importOpen = false;
     status = null;
+    cellMemo.clear();
   }
   function clear() {
     document.getElementById(DESK_ID)?.remove();
@@ -87,23 +103,33 @@ export function createCraftDesk({
   }
   const el = () => document.getElementById(DESK_ID);
 
+  /** Save the ledger; true only when the worker confirmed the stored list. */
   async function persist(entries, message) {
     busy = true;
     rescan();
+    let ok = false;
     try {
       const r = await onLedger(entries);
-      status = r?.error ? `Ledger: ${r.message ?? r.error}` : message;
+      if (r?.error) status = `Ledger: ${r.message ?? r.error}`;
+      else if (!r?.ledger)
+        status = "Ledger: not saved, the extension did not answer; try again";
+      else {
+        status = message;
+        ok = true;
+      }
     } catch (e) {
       status = `Ledger: ${e?.message ?? "could not save"}`;
     }
     busy = false;
     rescan();
+    return ok;
   }
 
   function onClick(e) {
     const t = e.target.closest("[data-action]");
     if (!t || !el()?.contains(t)) return;
     const a = t.dataset.action;
+    if (busy && LEDGER_WRITES.has(a)) return; // one save at a time
     const s = settings();
     const entries = lastState?.ledger?.entries ?? [];
     const byId = (id) => entries.find((x) => x.id === id);
@@ -112,11 +138,8 @@ export function createCraftDesk({
     else if (a === "settings" || a === "reload") lastState?.action?.(a);
     else if (a === "desk-pick") {
       selected = t.dataset.code;
-      fields = {
-        ...fields,
-        "recipe-scraps": undefined,
-        "recipe-steel": undefined,
-      };
+      delete fields["recipe-scraps"];
+      delete fields["recipe-steel"];
       rescan();
     } else if (a === "desk-quotes") {
       manual = {};
@@ -132,6 +155,8 @@ export function createCraftDesk({
         rescan();
         return;
       }
+      delete fields["recipe-scraps"];
+      delete fields["recipe-steel"];
       status = `Recipe for ${itemLabel(selected)} saved on this browser`;
       save({ craftRecipes: { ...s.craftRecipes, [selected]: r } });
     } else if (a === "desk-forget-recipe" && selected) {
@@ -148,10 +173,7 @@ export function createCraftDesk({
         steel: fields["recipe-steel"] ?? s.craftRecipes[selected]?.steel ?? "",
         scrapPrice: p.scrap.value ?? "",
         steelPrice: p.steel.value ?? "",
-        priceSource:
-          p.scrap.source === "manual" || p.steel.source === "manual"
-            ? "manual"
-            : "inferred",
+        sources: { scrap: p.scrap.source, steel: p.steel.source },
         rarity: describeCode(selected)?.rarity ?? "",
         stat: "",
         durability: "100",
@@ -163,17 +185,22 @@ export function createCraftDesk({
       form = null;
       rescan();
     } else if (a === "desk-ledger-add" && form) {
-      const entry = createEntry(form, { now: now() });
+      const entry = createEntry(
+        { ...form, priceSource: formPriceSource(form) },
+        { now: now() },
+      );
       if (!entry) {
         status = "Ledger: the craft needs whole input quantities";
         rescan();
         return;
       }
-      form = null;
       void persist(
         [entry, ...entries],
         `Recorded ${entry.label || itemLabel(entry.code) || "a craft"} (${entry.inputs.priceSource} prices)`,
-      );
+      ).then((ok) => {
+        if (ok) form = null; // a failed save keeps the form for another try
+        rescan();
+      });
     } else if (a === "desk-ledger-move") {
       const type = t.dataset.type;
       const entry = byId(t.dataset.id);
@@ -200,7 +227,7 @@ export function createCraftDesk({
         );
     } else if (a === "desk-ledger-confirm" && pending) {
       const entry = byId(pending.id);
-      const price = num(fields["pending-price"]);
+      const price = nonNegative(fields["pending-price"]);
       const next =
         entry &&
         transition(
@@ -219,19 +246,21 @@ export function createCraftDesk({
         return;
       }
       const done = pending.type;
-      pending = null;
       void persist(
         entries.map((x) => (x.id === next.id ? next : x)),
         done === "sell"
           ? `Sale recorded: ${fmt(next.sale.proceeds)} g received`
           : `Listed at ${fmt(next.listing.price)} g`,
-      );
+      ).then((ok) => {
+        if (ok) pending = null;
+        rescan();
+      });
     } else if (a === "desk-ledger-pending-cancel") {
       pending = null;
       rescan();
     } else if (a === "desk-export") {
       download(
-        `warera-plus-ledger-${new Date(now()).toISOString().slice(0, 10)}.json`,
+        `warera-plus-ledger-${localDate(new Date(now()).toISOString())}.json`,
         exportLedger(entries, now()),
       );
       status = `Exported ${entries.length} entries`;
@@ -245,6 +274,14 @@ export function createCraftDesk({
       applyImport(fields["import-text"] ?? "");
     }
   }
+  /** Manual only when every input the craft used was priced by hand; one quote-filled price makes the basis inferred. */
+  function formPriceSource(f) {
+    const used = [
+      Number(f.scraps) > 0 ? f.sources?.scrap : null,
+      Number(f.steel) > 0 ? f.sources?.steel : null,
+    ].filter(Boolean);
+    return used.every((src) => src === "manual") ? "manual" : "inferred";
+  }
   function applyImport(text) {
     const entries = lastState?.ledger?.entries ?? [];
     const r = importLedger(text, entries, now());
@@ -253,12 +290,16 @@ export function createCraftDesk({
       rescan();
       return;
     }
-    importOpen = false;
-    fields["import-text"] = "";
     void persist(
       r.entries,
       `Imported: ${r.added} added, ${r.updated} updated, ${r.skipped} skipped`,
-    );
+    ).then((ok) => {
+      if (ok) {
+        importOpen = false;
+        delete fields["import-text"];
+      }
+      rescan();
+    });
   }
   function onInput(e) {
     const f = e.target?.dataset?.field;
@@ -272,11 +313,16 @@ export function createCraftDesk({
     const v = e.target.value;
     if (f === "scrapPrice" || f === "steelPrice") {
       manual = { ...manual, [f]: v === "" ? undefined : v };
+      delete fields[f];
       rescan();
-    } else if (f === "batch") save({ craftBatch: v });
-    else if (f === "taxPct") save({ taxPct: v === "" ? null : v });
-    else if (f === "targetPct") save({ craftTargetPct: v });
-    else if (f === "import-file") {
+    } else if (f === "batch" || f === "taxPct" || f === "targetPct") {
+      // Settings own these from here on; the typed text must not shadow a later change made elsewhere.
+      delete fields[f];
+      if (f === "batch") save({ craftBatch: v });
+      else if (f === "taxPct") save({ taxPct: v === "" ? null : v });
+      else save({ craftTargetPct: v });
+    } else if (f === "import-file") {
+      if (busy) return;
       const file = e.target.files?.[0];
       if (!file) return;
       file.text().then(applyImport, () => {
@@ -285,8 +331,9 @@ export function createCraftDesk({
       });
     } else if (form && f.startsWith("form-")) {
       form[f.slice(5)] = v;
-      if (f === "form-scrapPrice" || f === "form-steelPrice")
-        form.priceSource = "manual";
+      if (f === "form-scrapPrice") form.sources.scrap = "manual";
+      if (f === "form-steelPrice") form.sources.steel = "manual";
+      rescan();
     } else rescan();
   }
   function mount(anchor, after = false) {
@@ -339,10 +386,67 @@ export function createCraftDesk({
     return { text: "–", title: plan.ev.reason ?? "unavailable" };
   }
 
-  function detailHtml(code, state, s, tax, prices) {
-    const inputs = { ...buildInputs(code, state, s), prices };
-    const item = inputs.item;
+  /** The outcomes of crafting `code`, memoised per sales snapshot and tax rate. */
+  function outcomesOf(code, state, tax) {
+    const sales = state.salesByCode?.[code];
+    const key = `${code}|${sales?.at ?? ""}|${tax.value}`;
+    let o = outcomesMemo.get(key);
+    if (!o) {
+      const outcomes = outcomesFor(code, {
+        salesByCode: state.salesByCode,
+        now: now(),
+      });
+      o = {
+        outcomes,
+        outcomeList: outcomes.outcomes.map((x) => ({
+          label: x.label,
+          p: x.p,
+          proceeds:
+            x.listing == null
+              ? null
+              : proceeds({ listing: x.listing, taxPct: tax.value }).sellerGets,
+        })),
+      };
+      if (outcomesMemo.size > 200) outcomesMemo.clear();
+      outcomesMemo.set(key, o);
+    }
+    return o;
+  }
+  function buildInputs(code, state, recipes, tax) {
+    return {
+      item: describeCode(code),
+      recipe: recipes[code]
+        ? { value: recipes[code], source: "manual" }
+        : { value: null, source: "none", note: "recipe not entered" },
+      ...outcomesOf(code, state, tax),
+    };
+  }
+  function planFor(code, state, s, recipes, tax, prices) {
+    const inputs = buildInputs(code, state, recipes, tax);
     const recipe = inputs.recipe.value;
+    const plan = recipe
+      ? craftPlan({
+          recipe,
+          batch: s.craftBatch,
+          scrapPrice: prices.scrap.value,
+          steelPrice: prices.steel.value,
+          outcomes: inputs.outcomeList,
+          targetMarginPct: s.craftTargetPct,
+        })
+      : null;
+    return { inputs, recipe, plan };
+  }
+
+  function detailHtml(code, state, s, tax, prices, recipes) {
+    const { inputs, recipe, plan } = planFor(
+      code,
+      state,
+      s,
+      recipes,
+      tax,
+      prices,
+    );
+    const item = inputs.item;
     const rs = fields["recipe-scraps"] ?? recipe?.scraps ?? "";
     const rst = fields["recipe-steel"] ?? recipe?.steel ?? "";
     const out = [];
@@ -350,20 +454,12 @@ export function createCraftDesk({
       `<h3>${esc(itemLabel(code))} <small>tier ${item?.tier ?? "?"} ${esc(item?.slot ?? "")}</small></h3>`,
       `<div class="lens-recipe"><label>Scraps <input data-field="recipe-scraps" type="number" inputmode="numeric" min="0" step="1" value="${esc(rs)}"></label><label>Steel <input data-field="recipe-steel" type="number" inputmode="numeric" min="0" step="1" value="${esc(rst)}"></label><button type="button" data-action="desk-save-recipe">Save recipe</button>${recipe ? '<button type="button" data-action="desk-forget-recipe">Forget</button>' : ""}<small>${recipe ? "your recipe, stored on this browser" : "not entered: read it off the game's craft screen; nothing is assumed"}</small></div>`,
     );
-    if (!recipe) {
+    if (!recipe || !plan) {
       out.push(
         `<p class="lens-muted">Cost, EV and ceilings need the recipe.</p>`,
       );
       return out.join("");
     }
-    const plan = craftPlan({
-      recipe,
-      batch: s.craftBatch,
-      scrapPrice: prices.scrap.value,
-      steelPrice: prices.steel.value,
-      outcomes: inputs.outcomeList,
-      targetMarginPct: s.craftTargetPct,
-    });
     const acq = acquisition({
       recipe,
       batch: s.craftBatch,
@@ -395,6 +491,17 @@ export function createCraftDesk({
     );
     const est = o.estimate;
     const scenarios = est ? listingScenarios(est) : {};
+    const breakEvenListing =
+      plan.cost.perCraft == null
+        ? null
+        : listingForProceeds({
+            sellerGets: plan.cost.perCraft,
+            taxPct: tax.value,
+          });
+    const breakEvenLine =
+      breakEvenListing == null
+        ? ""
+        : `<p class="lens-muted">Break-even listing <b>${fmt(breakEvenListing)} g</b>: the lowest listing that nets your cost of ${fmt(plan.cost.perCraft)} g per craft at ${tax.value}% tax, snapped up to the tick.</p>`;
     if (est?.status === "ok") {
       const sales = state.salesByCode?.[code];
       const liq = sales ? liquidity(sales.fills, { now: now() }) : null;
@@ -403,49 +510,24 @@ export function createCraftDesk({
           ? `<div><small>${name}</small><b>${fmt(sc.price)} g</b><span>nets ${fmt(proceeds({ listing: sc.price, taxPct: tax.value }).sellerGets)} g after tax · ${esc(sc.basis)}</span></div>`
           : `<div><small>${name}</small><b>–</b><span>needs 8 comparable fills (${est.n} now)</span></div>`;
       out.push(
-        `<h4>Listing guidance <small>listing = the price shown on the market; "nets" = what you keep at ${tax.value}% tax (${esc(tax.source === "none" ? "no rate read" : tax.source === "page" ? "rate read off the page" : "your rate")})</small></h4><div class="lens-grid3">${row("Quick sale", scenarios.quick)}${row("Balanced", scenarios.balanced)}${row("Patient", scenarios.patient)}</div><p class="lens-muted">Evidence: ${est.n} comparable fills in ${est.windowHours} h${est.capped ? " (capped sample)" : ""} · low ${fmt(est.low)} · high ${fmt(est.high)}${est.uncertaintyPct != null ? ` · ±${est.uncertaintyPct.toFixed(0)}% spread (MAD)` : ""} · last fill ${timeLabel(est.lastAt, now())}${liq?.medianGapHours != null ? ` · pace ${liq.perDay.toFixed(1)}/day, median gap ${liq.medianGapHours.toFixed(1)} h (recent pace, not your queue)` : ""}${sales ? ` · read ${timeLabel(sales.at, now())}` : ""}</p>`,
+        `<h4>Listing guidance <small>listing = the price shown on the market; "nets" = what you keep at ${tax.value}% tax (${esc(tax.source === "none" ? "no rate read" : tax.source === "page" ? "rate read off the page" : "your rate")})</small></h4><div class="lens-grid3">${row("Quick sale", scenarios.quick)}${row("Balanced", scenarios.balanced)}${row("Patient", scenarios.patient)}</div><p class="lens-muted">Evidence: ${est.n} comparable fills in ${est.windowHours} h${est.capped ? " (capped sample)" : ""} · low ${fmt(est.low)} · high ${fmt(est.high)}${est.uncertaintyPct != null ? ` · ±${est.uncertaintyPct.toFixed(0)}% spread (MAD)` : ""} · last fill ${timeLabel(est.lastAt, now())}${liq?.medianGapHours != null ? ` · pace ${liq.perDay.toFixed(1)}/day, median gap ${liq.medianGapHours.toFixed(1)} h (recent pace, not your queue)` : ""}${sales ? ` · read ${timeLabel(sales.at, now())}` : ""}</p>${breakEvenLine}`,
       );
     } else
       out.push(
-        `<h4>Listing guidance</h4><p class="lens-muted">${est ? `${est.n} of ${MIN_RESALE_SAMPLE} comparable fills in ${est.windowHours} h: no scenario yet` : esc(o.note)}.</p>`,
+        `<h4>Listing guidance</h4><p class="lens-muted">${est ? `${est.n} of ${MIN_RESALE_SAMPLE} comparable fills in ${est.windowHours} h: no scenario yet` : esc(o.note)}.</p>${breakEvenLine}`,
       );
     out.push(
       `<p><button type="button" data-action="desk-ledger-new">Record a craft of this</button></p>`,
     );
     return out.join("");
   }
-  function buildInputs(code, state, s) {
-    const recipes = normalizeRecipes(s.craftRecipes);
-    const outcomes = outcomesFor(code, {
-      salesByCode: state.salesByCode,
-      now: now(),
-    });
-    const tax = taxRate({ settings: s.taxPct, page: state.taxOnPage });
-    return {
-      item: describeCode(code),
-      recipe: recipes[code]
-        ? { value: recipes[code], source: "manual" }
-        : { value: null, source: "none", note: "recipe not entered" },
-      outcomes,
-      outcomeList: outcomes.outcomes.map((o) => ({
-        label: o.label,
-        p: o.p,
-        proceeds:
-          o.listing == null
-            ? null
-            : proceeds({ listing: o.listing, taxPct: tax.value }).sellerGets,
-      })),
-    };
-  }
-  function ledgerHtml(state) {
+  function ledgerHtml(state, tax) {
     const ledger = state.ledger;
     if (!ledger)
       return `<h3>Craft ledger</h3><p class="lens-muted">Loading your ledger…</p>`;
     const entries = ledger.entries;
     const estimateFor = (code) => {
-      const o = code
-        ? outcomesFor(code, { salesByCode: state.salesByCode, now: now() })
-        : null;
+      const o = code ? outcomesOf(code, state, tax).outcomes : null;
       return o?.estimate?.status === "ok" ? o.estimate.estimate : null;
     };
     const sum = summarize(entries, { estimateFor });
@@ -457,11 +539,13 @@ export function createCraftDesk({
     );
     if (status)
       out.push(`<p class="lens-notice" role="status">${esc(status)}</p>`);
+    const dis = busy ? "disabled" : "";
     if (form) {
       const sel = (name, options, value) =>
         `<select data-field="${name}">${options.map((o) => `<option value="${esc(o)}" ${o === value ? "selected" : ""}>${esc(o || "–")}</option>`).join("")}</select>`;
+      const source = formPriceSource(form);
       out.push(
-        `<div class="lens-form"><label>Item ${sel("form-code", ["", ...CRAFT_CODES], form.code)}</label><label>Scraps used <input data-field="form-scraps" type="number" min="0" step="1" value="${esc(form.scraps)}"></label><label>Steel used <input data-field="form-steel" type="number" min="0" step="1" value="${esc(form.steel)}"></label><label>Scrap price <input data-field="form-scrapPrice" type="number" min="0" step="0.001" value="${esc(form.scrapPrice)}"></label><label>Steel price <input data-field="form-steelPrice" type="number" min="0" step="0.001" value="${esc(form.steelPrice)}"></label><label>Result rarity ${sel("form-rarity", ["", ...RARITIES], form.rarity)}</label><label>Stat <input data-field="form-stat" type="number" min="0" step="1" value="${esc(form.stat)}"></label><label>Durability % <input data-field="form-durability" type="number" min="0" max="100" step="1" value="${esc(form.durability)}"></label><label class="lens-wide">Note <input data-field="form-note" maxlength="120" value="${esc(form.note)}"></label><p class="lens-muted lens-wide">Prices are <b>${form.priceSource}</b>: ${form.priceSource === "inferred" ? "filled from the quotes of this moment; edit them to what you really paid" : "typed by you"}.</p><div class="lens-wide"><button type="button" data-action="desk-ledger-add" ${busy ? "disabled" : ""}>Add to ledger</button> <button type="button" data-action="desk-ledger-cancel">Cancel</button></div></div>`,
+        `<div class="lens-form"><label>Item ${sel("form-code", ["", ...CRAFT_CODES], form.code)}</label><label>Scraps used <input data-field="form-scraps" type="number" min="0" step="1" value="${esc(form.scraps)}"></label><label>Steel used <input data-field="form-steel" type="number" min="0" step="1" value="${esc(form.steel)}"></label><label>Scrap price <input data-field="form-scrapPrice" type="number" min="0" step="0.001" value="${esc(form.scrapPrice)}"></label><label>Steel price <input data-field="form-steelPrice" type="number" min="0" step="0.001" value="${esc(form.steelPrice)}"></label><label>Result rarity ${sel("form-rarity", ["", ...RARITIES], form.rarity)}</label><label>Stat <input data-field="form-stat" type="number" min="0" step="1" value="${esc(form.stat)}"></label><label>Durability % <input data-field="form-durability" type="number" min="0" max="100" step="1" value="${esc(form.durability)}"></label><label class="lens-wide">Note <input data-field="form-note" maxlength="120" value="${esc(form.note)}"></label><p class="lens-muted lens-wide">Prices are <b>${source}</b>: ${source === "inferred" ? "at least one used price was filled from the quotes of this moment; edit it to what you really paid" : "every used price was typed by you"}.</p><div class="lens-wide"><button type="button" data-action="desk-ledger-add" ${dis}>Add to ledger</button> <button type="button" data-action="desk-ledger-cancel">Cancel</button></div></div>`,
       );
     }
     const rows = entries.slice(0, LEDGER_ROWS).map((e) => {
@@ -485,7 +569,7 @@ export function createCraftDesk({
             : e.state;
       const isPending = pending?.id === e.id;
       const actions = isPending
-        ? `<label>${pending.type === "sell" ? "Proceeds received" : "Listing price"} <input data-field="pending-price" type="number" min="0" step="0.001" value="${esc(fields["pending-price"] ?? "")}"></label><button type="button" data-action="desk-ledger-confirm">Confirm</button><button type="button" data-action="desk-ledger-pending-cancel">Cancel</button>`
+        ? `<label>${pending.type === "sell" ? "Proceeds received" : "Listing price"} <input data-field="pending-price" type="number" min="0" step="0.001" value="${esc(fields["pending-price"] ?? "")}"></label><button type="button" data-action="desk-ledger-confirm" ${dis}>Confirm</button><button type="button" data-action="desk-ledger-pending-cancel">Cancel</button>`
         : e.state === "crafted"
           ? move(e.id, "list", "List…") +
             move(e.id, "sell", "Sold…") +
@@ -494,7 +578,7 @@ export function createCraftDesk({
           : e.state === "listed"
             ? move(e.id, "sell", "Sold…") + move(e.id, "unlist", "Unlist")
             : move(e.id, "delete", "Delete");
-      return `<li><div><b>${esc(name)}</b> <small>${esc(result)}</small><br><small>${new Date(e.createdAt).toISOString().slice(0, 10)} · ${e.inputs.scraps} scraps + ${e.inputs.steel} steel · ${basis} · ${money}</small></div><div class="lens-actions">${actions}</div></li>`;
+      return `<li><div><b>${esc(name)}</b> <small>${esc(result)}</small><br><small>${localDate(e.createdAt)} · ${e.inputs.scraps} scraps + ${e.inputs.steel} steel · ${basis} · ${money}</small></div><div class="lens-actions">${actions}</div></li>`;
     });
     out.push(
       rows.length
@@ -502,12 +586,12 @@ export function createCraftDesk({
         : `<p class="lens-muted">No crafts recorded yet. Record one from an item above, or import a file.</p>`,
     );
     out.push(
-      `<div class="lens-actions">${form ? "" : '<button type="button" data-action="desk-ledger-new">Record a craft</button>'}<button type="button" data-action="desk-export" ${entries.length ? "" : "disabled"}>Export JSON</button><button type="button" data-action="desk-import-toggle" aria-expanded="${importOpen}">Import…</button></div>${importOpen ? `<div class="lens-form"><div class="lens-wide"><button type="button" data-action="desk-import-file">Choose a file</button><input data-field="import-file" type="file" accept="application/json,.json" hidden> or paste an export:</div><textarea data-field="import-text" class="lens-wide" rows="3">${esc(fields["import-text"] ?? "")}</textarea><div class="lens-wide"><button type="button" data-action="desk-import-paste">Import pasted</button></div><p class="lens-muted lens-wide">Entries are merged by id; the newer copy wins; malformed entries are skipped and counted.</p></div>` : ""}`,
+      `<div class="lens-actions">${form ? "" : '<button type="button" data-action="desk-ledger-new">Record a craft</button>'}<button type="button" data-action="desk-export" ${entries.length ? "" : "disabled"}>Export JSON</button><button type="button" data-action="desk-import-toggle" aria-expanded="${importOpen}">Import…</button></div>${importOpen ? `<div class="lens-form"><div class="lens-wide"><button type="button" data-action="desk-import-file" ${dis}>Choose a file</button><input data-field="import-file" type="file" accept="application/json,.json" hidden> or paste an export:</div><textarea data-field="import-text" class="lens-wide" rows="3">${esc(fields["import-text"] ?? "")}</textarea><div class="lens-wide"><button type="button" data-action="desk-import-paste" ${dis}>Import pasted</button></div><p class="lens-muted lens-wide">Entries are merged by id; the newer copy wins; malformed entries are skipped and counted.</p></div>` : ""}`,
     );
     return out.join("");
   }
   const move = (id, type, label) =>
-    `<button type="button" data-action="desk-ledger-move" data-type="${type}" data-id="${esc(id)}">${label}</button>`;
+    `<button type="button" data-action="desk-ledger-move" data-type="${type}" data-id="${esc(id)}" ${busy ? "disabled" : ""}>${label}</button>`;
 
   function render(state, anchor, { after = false } = {}) {
     lastState = state;
@@ -553,37 +637,67 @@ export function createCraftDesk({
     }
     if (selected) requestSales(selected);
     const recipes = normalizeRecipes(s.craftRecipes);
+    const ranked = [];
     const matrix = RARITIES.map((rarity, i) => {
       const cells = SLOT_HEADS.map((slot) => {
         const code = slot === "weapon" ? CRAFT_CODES[i * 6] : `${slot}${i + 1}`;
-        const inputs = { ...buildInputs(code, state, s), prices };
         const recipe = recipes[code];
-        const plan = recipe
-          ? craftPlan({
-              recipe,
-              batch: s.craftBatch,
-              scrapPrice: prices.scrap.value,
-              steelPrice: prices.steel.value,
-              outcomes: inputs.outcomeList,
-              targetMarginPct: s.craftTargetPct,
-            })
-          : null;
-        const c = plan
-          ? cellText(plan, inputs)
-          : { text: "no recipe", title: inputs.recipe.note };
-        const ok = plan?.ev.status === "ok";
-        return `<td><button type="button" data-action="desk-pick" data-code="${code}" aria-pressed="${selected === code}" title="${esc(c.title)}" class="${ok ? (plan.ev.roi >= 0 ? "lens-pos" : "lens-neg") : "lens-muted"}">${esc(c.text)}</button></td>`;
+        // One cell is rebuilt only when something it shows changed.
+        const key = [
+          state.salesByCode?.[code]?.at ?? "",
+          prices.scrap.value,
+          prices.steel.value,
+          tax.value,
+          recipe?.scraps ?? "",
+          recipe?.steel ?? "",
+          s.craftBatch,
+          s.craftTargetPct,
+          selected === code,
+        ].join("|");
+        let cell = cellMemo.get(code);
+        if (!cell || cell.key !== key) {
+          const { inputs, plan } = planFor(
+            code,
+            state,
+            s,
+            recipes,
+            tax,
+            prices,
+          );
+          const c = plan
+            ? cellText(plan, inputs)
+            : { text: "no recipe", title: inputs.recipe.note };
+          const cls =
+            plan?.ev.status === "ok" && plan.ev.roi != null
+              ? plan.ev.roi >= 0
+                ? "lens-pos"
+                : "lens-neg"
+              : "lens-muted";
+          cell = {
+            key,
+            plan,
+            html: `<td><button type="button" data-action="desk-pick" data-code="${code}" aria-pressed="${selected === code}" title="${esc(c.title)}" class="${cls}">${esc(c.text)}</button></td>`,
+          };
+          cellMemo.set(code, cell);
+        }
+        if (cell.plan) ranked.push({ code, plan: cell.plan });
+        return cell.html;
       });
       return `<tr><th scope="row">${rarity}</th>${cells.join("")}</tr>`;
     });
     const recipeCount = Object.keys(recipes).length;
+    const top = rankPlans(ranked)[0];
+    const best =
+      top?.plan.ev.roi != null
+        ? ` · best ${esc(itemLabel(top.code))} ${pct(top.plan.ev.roi)}`
+        : "";
     const html =
       head +
       `<div class="lens-desk"><div class="lens-inputs"><label>Scrap price ${numberField("scrapPrice", manual.scrapPrice ?? prices.scrap.value ?? "")}<small>${esc(prices.scrap.note)}</small></label><label>Steel price ${numberField("steelPrice", manual.steelPrice ?? prices.steel.value ?? "")}<small>${esc(prices.steel.note)}</small></label><label>Batch ${numberField("batch", s.craftBatch, "1", 'max="1000" inputmode="numeric"')}<small>crafts</small></label><label>Market tax % ${numberField("taxPct", s.taxPct ?? (tax.source === "page" ? tax.value : ""), "0.01", 'max="100" placeholder="' + esc(tax.source === "page" ? `${tax.value} (page)` : "0") + '"')}<small>${esc(tax.source === "manual" ? "your rate" : tax.source === "page" ? "read off the page notice" : "none read: proceeds = listing")}</small></label><label>Target ROI % ${numberField("targetPct", s.craftTargetPct, "1", 'min="-50" max="500"')}<small>for the ceilings</small></label><button type="button" data-action="desk-quotes">Use quotes</button></div>` +
-      `<table class="lens-matrix"><caption>Expected ROI by tier and slot${recipeCount ? ` · ${recipeCount} of 36 recipes entered` : " · no recipes entered yet: pick a cell and enter its recipe"}</caption><thead><tr><th>Tier</th>${SLOT_HEADS.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${matrix.join("")}</tbody></table>` +
-      `<section class="lens-detail">${selected ? detailHtml(selected, state, s, tax, prices) : '<p class="lens-muted">Pick a cell to work a craft through: recipe, cost, buying now or bidding, expected value over its outcomes, break-even ceilings and listing guidance.</p>'}</section>` +
-      `<section class="lens-ledger-box">${ledgerHtml(state)}</section>` +
-      `<p class="lens-muted">Read-only decision support: nothing is bought, crafted or listed for you. Input prices are the best asks (buying now) unless you type your own; expected values weight every outcome by its probability; comparable sales are the last 72 h of fills for the same item. Recipes and outcome tables are yours to verify against the game.</p></div>`;
+      `<table class="lens-matrix"><caption>Expected ROI by tier and slot${recipeCount ? ` · ${recipeCount} of 36 recipes entered${best}` : " · no recipes entered yet: pick a cell and enter its recipe"}</caption><thead><tr><th>Tier</th>${SLOT_HEADS.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${matrix.join("")}</tbody></table>` +
+      `<section class="lens-detail">${selected ? detailHtml(selected, state, s, tax, prices, recipes) : '<p class="lens-muted">Pick a cell to work a craft through: recipe, cost, buying now or bidding, expected value over its outcomes, break-even ceilings and listing guidance.</p>'}</section>` +
+      `<section class="lens-ledger-box">${ledgerHtml(state, tax)}</section>` +
+      `<p class="lens-muted">Read-only decision support: nothing is bought, crafted or listed for you. Input prices are the best asks (buying now) unless you type your own; expected values weight every outcome by its probability; comparable sales are the last 72 h of fills for the same item. Recipes are yours to verify against the game.</p></div>`;
     setHtml(desk, html);
     return { roots: [desk.parentElement] };
   }

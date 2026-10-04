@@ -370,6 +370,7 @@ export function offerRows(
 
 /** The smallest element holding every row, or null: the scope later scans start from. */
 export function rowsContainer(rows) {
+  if (rows.length < 2) return null; // one row says nothing about where the others will go
   let common = rows[0]?.row?.parentElement ?? null;
   for (const r of rows.slice(1)) {
     if (!common) break;

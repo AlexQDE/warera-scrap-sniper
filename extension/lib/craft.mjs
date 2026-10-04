@@ -12,7 +12,7 @@
 //   cost        what the crafter paid for the inputs (scraps, steel)
 // EV, profit and ROI are always in sellerGets minus cost. A fee is applied
 // exactly once, on the sale leg; input prices are taken as paid.
-import { positive, quote } from "./quality.mjs";
+import { positive, quote, nonNegative as money } from "./quality.mjs";
 
 /** The market's smallest price step: every recorded price carries at most three decimals. */
 export const TICK = 0.001;
@@ -65,13 +65,6 @@ export function normalizeRecipe(recipe) {
   if (scraps < 0 || steel < 0 || scraps + steel === 0) return null;
   return { scraps, steel };
 }
-
-/** @param {unknown} v */
-const money = (v) => {
-  if (v == null || v === "" || typeof v === "boolean") return null;
-  const n = Number(v);
-  return Number.isFinite(n) && n >= 0 ? n : null;
-};
 
 /**
  * What a batch of crafts costs at given unit prices. An input the recipe

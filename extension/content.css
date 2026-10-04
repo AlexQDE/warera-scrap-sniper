@@ -183,6 +183,11 @@
   background: #182231;
   border: 1px solid #344255;
   border-radius: 8px;
+  pointer-events: none; /* clicks fall through to the row as in 1.4; only our controls catch them */
+}
+.ss-verdict[data-lens] > button,
+.ss-verdict[data-lens] .lens-details {
+  pointer-events: auto;
 }
 [data-lens] .lens-kv {
   display: inline-grid;

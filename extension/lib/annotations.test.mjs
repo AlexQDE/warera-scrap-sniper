@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 import { beforeEach, afterEach, describe, it, expect, vi } from "vitest";
 import { createEquipment } from "./equipment.mjs";
+import { rowsContainer } from "./dom.mjs";
 import { DEFAULTS } from "./settings.mjs";
 
-// One offer row of a common knife on the equipment market, filtered to the
-// knife, with the game's visible lines (stat, durability, price, BUY).
+// One (or more) offer rows of a common knife on the equipment market,
+// filtered to the knife, with the game's visible lines (stat, durability,
+// price, BUY).
 const NOW = Date.parse("2026-10-03T12:00:00Z");
 const iso = (msAgo = 0) => new Date(NOW - msAgo).toISOString();
 const fill = (price, hoursAgo, state = 100) => ({
@@ -16,16 +18,25 @@ const fill = (price, hoursAgo, state = 100) => ({
 let equipment, settings, state, row, rescan;
 let lines = ["Item", "270", "100%", "Seller", "1", "BUY"];
 
-function mount(selected = "knife") {
-  document.body.innerHTML = `<main><div id="tax"><span>Market tax 5%</span></div><div><div id="item-code-selector-${selected}" style="z-index:1;border-color:rgb(28,46,49)"></div><div id="item-code-selector-jet" style="border-color:rgb(57,15,16)"></div></div><div id="offers"><article id="offer"><div style="background:rgb(12,12,12);border:1px solid rgb(28,46,49)"><img alt="knife"></div><button id="buy">BUY</button></article></div></main>`;
-  row = document.getElementById("offer");
-  Object.defineProperty(row, "innerText", {
+function offerHtml(id) {
+  return `<article id="${id}" class="offer"><div style="background:rgb(12,12,12);border:1px solid rgb(28,46,49)"><img alt="knife"></div><button class="buy">BUY</button></article>`;
+}
+function fakeText(article) {
+  Object.defineProperty(article, "innerText", {
     configurable: true,
     get: () =>
-      [...lines, row.querySelector(".ss-verdict")?.textContent ?? ""].join(
+      [...lines, article.querySelector(".ss-verdict")?.textContent ?? ""].join(
         "\n",
       ),
   });
+}
+function mount(selected = "knife", count = 1) {
+  document.body.innerHTML = `<main><div id="tax"><span>Market tax 5%</span></div><div><div id="item-code-selector-${selected}" style="z-index:1;border-color:rgb(28,46,49)"></div><div id="item-code-selector-jet" style="border-color:rgb(57,15,16)"></div></div><div id="offers">${Array.from(
+    { length: count },
+    (_, i) => offerHtml(i ? `offer${i + 1}` : "offer"),
+  ).join("")}</div></main>`;
+  for (const article of document.querySelectorAll("article")) fakeText(article);
+  row = document.getElementById("offer");
 }
 beforeEach(() => {
   vi.useFakeTimers();
@@ -58,8 +69,9 @@ afterEach(() => {
   document.body.innerHTML = "";
   vi.useRealTimers();
 });
-const annotation = () => row.querySelector(":scope > .ss-verdict");
-const details = () => annotation().querySelector("[data-action='details']");
+const annotation = (r = row) => r.querySelector(":scope > .ss-verdict");
+const details = (r = row) =>
+  annotation(r).querySelector("[data-action='details']");
 
 describe("compact annotation", () => {
   it("shows scrap profit and ROI next to the native price and keeps BUY untouched", () => {
@@ -68,8 +80,8 @@ describe("compact annotation", () => {
     expect(a.textContent).toContain("SNIPE");
     expect(a.textContent).toContain("+0.200 g");
     expect(a.textContent).toContain("ROI +20.0%");
-    expect(document.getElementById("buy").disabled).toBe(false);
-    expect(document.getElementById("buy").textContent).toBe("BUY");
+    expect(row.querySelector(".buy").disabled).toBe(false);
+    expect(row.querySelector(".buy").textContent).toBe("BUY");
     expect(a.querySelector(".lens-details")).toBeNull();
     expect(details().getAttribute("aria-expanded")).toBe("false");
   });
@@ -138,6 +150,8 @@ describe("compact annotation", () => {
       "stat rank needs 8 listed peers (0 now)",
     );
     expect(region.textContent).toContain("fills/day");
+    region.click(); // selecting or clicking the Details text is ours, not the row's
+    expect(rowClicks).not.toHaveBeenCalled();
     details().click();
     equipment.render(state);
     expect(annotation().querySelector(".lens-details")).toBeNull();
@@ -163,6 +177,30 @@ describe("compact annotation", () => {
     expect(text).toContain("quartiles need 8 fills");
     expect(text).toContain("a price rank needs 8 fills");
   });
+  it("ranks the price and measures the pace over the comparable fills only, never over every fill of the item", () => {
+    state.salesByCode = {
+      knife: {
+        code: "knife",
+        at: iso(),
+        complete: true,
+        fills: [
+          ...[1, 1.1, 0.9, 1.2, 1.05].map((p, i) => fill(p, i + 1, 100)),
+          ...[0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8].map((p, i) =>
+            fill(p, i + 10, 40),
+          ),
+        ],
+      },
+    };
+    equipment.render(state);
+    expect(annotation().textContent).toContain("resale · 5 fills");
+    details().click();
+    equipment.render(state);
+    const text = annotation().querySelector(".lens-details").textContent;
+    expect(text).toContain("of 5 comparable fills");
+    expect(text).toContain("quartiles need 8 fills");
+    expect(text).toContain("a price rank needs 8 fills"); // 12 fills exist, 5 compare: no rank
+    expect(text).toContain("comparables within ±10 durability");
+  });
   it("compares durability only when the fills carry one", () => {
     const worn = [1, 1.1, 0.9, 1.2, 1.05].map((p, i) => fill(p, i + 1, 40));
     state.salesByCode = {
@@ -180,6 +218,16 @@ describe("compact annotation", () => {
     };
     equipment.render(state);
     expect(annotation().textContent).toContain("resale · 5 fills");
+  });
+  it("keeps Details per row when two listings look identical", () => {
+    mount("knife", 2);
+    const second = document.getElementById("offer2");
+    equipment.render(state);
+    details().click();
+    equipment.render(state);
+    expect(details().getAttribute("aria-expanded")).toBe("true");
+    expect(details(second).getAttribute("aria-expanded")).toBe("false");
+    expect(annotation(second).querySelector(".lens-details")).toBeNull();
   });
 });
 
@@ -227,6 +275,7 @@ describe("summary line and states", () => {
     );
   });
   it("does not rewrite an unchanged annotation and reads a row's layout text once", () => {
+    mount("knife", 2);
     equipment.render(state);
     const written = equipment.metrics.rowsWritten;
     const reads = equipment.metrics.innerTextReads;
@@ -237,5 +286,17 @@ describe("summary line and states", () => {
     expect(equipment.metrics.innerTextReads).toBe(reads);
     expect(annotation().firstChild).toBe(node);
     expect(equipment.metrics.scopedScans).toBeGreaterThan(0);
+  });
+  it("scopes later scans to a list container only when two rows or more agree on one", () => {
+    equipment.render(state);
+    expect(equipment.metrics.scopedScans).toBe(0); // one row: every scan is a full scan
+    equipment.render(state);
+    expect(equipment.metrics.scopedScans).toBe(0);
+    expect(rowsContainer([{ row }])).toBeNull();
+    mount("knife", 2);
+    const rows = [...document.querySelectorAll("article")].map((r) => ({
+      row: r,
+    }));
+    expect(rowsContainer(rows)).toBe(document.getElementById("offers"));
   });
 });

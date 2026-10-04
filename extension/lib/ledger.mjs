@@ -8,6 +8,7 @@
 // desk filled from the quotes of the moment is "inferred"; only a recorded
 // sale is realized profit, an unsold piece is at most an estimate, labelled.
 import { RARITIES, ALL_GEAR_CODES } from "./items.mjs";
+import { nonNegative as money } from "./quality.mjs";
 
 export const LEDGER_VERSION = 1;
 export const MAX_ENTRIES = 500;
@@ -26,12 +27,6 @@ const text = (v, max = 120) =>
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, max);
-/** @param {unknown} v */
-const money = (v) => {
-  if (v == null || v === "" || typeof v === "boolean") return null;
-  const n = Number(v);
-  return Number.isFinite(n) && n >= 0 ? n : null;
-};
 /** @param {unknown} v */
 const count = (v) => {
   if (v == null || v === "" || typeof v === "boolean") return null;

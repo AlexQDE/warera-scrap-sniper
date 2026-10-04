@@ -1,13 +1,13 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
   CRAFT_CODES,
-  FIXTURE,
   describeCode,
   normalizeRecipes,
   inputPrices,
   taxRate,
   outcomesFor,
-  craftInputs,
 } from "./craftdata.mjs";
 
 const NOW = Date.parse("2026-10-03T12:00:00.000Z");
@@ -27,6 +27,13 @@ const state = {
     craftRecipes: { boots5: { scraps: 10, steel: 2 } },
   },
 };
+const fills = (prices, state = 100) =>
+  prices.map((price, i) => ({
+    price,
+    at: iso((i + 1) * 3600e3),
+    state,
+    code: "boots5",
+  }));
 
 describe("describeCode and recipes", () => {
   it("describes the 36 craftable codes and nothing else", () => {
@@ -57,11 +64,18 @@ describe("describeCode and recipes", () => {
     expect(normalizeRecipes(null)).toEqual({});
     expect(normalizeRecipes([])).toEqual({});
   });
-  it("ships a fixture that says it is synthetic", () => {
-    expect(Object.keys(FIXTURE.recipes)).toHaveLength(36);
-    expect(FIXTURE.label).toContain("synthetic");
-    expect(FIXTURE.recipes.knife).toEqual({ scraps: 10, steel: 1 });
-    expect(FIXTURE.recipes.jet).toEqual({ scraps: 2430, steel: 6 });
+  it("accepts the synthetic screenshot fixture as 36 recipes and the fixture says it is synthetic", () => {
+    const file = JSON.parse(
+      readFileSync(
+        fileURLToPath(new URL("../../fixtures/recipes.json", import.meta.url)),
+        "utf8",
+      ),
+    );
+    expect(file._comment).toMatch(/NOT the game's recipes/);
+    const recipes = normalizeRecipes(file);
+    expect(Object.keys(recipes)).toHaveLength(36);
+    expect(recipes.knife).toEqual({ scraps: 10, steel: 1 });
+    expect(recipes.jet).toEqual({ scraps: 2430, steel: 6 });
   });
 });
 
@@ -110,25 +124,8 @@ describe("inputPrices and taxRate", () => {
 });
 
 describe("outcomesFor", () => {
-  const fills = (prices) =>
-    prices.map((price, i) => ({
-      price,
-      at: iso((i + 1) * 3600e3),
-      state: 100,
-      code: "boots5",
-    }));
-  it("uses the player's bucket table when given, as fractions", () => {
-    const o = outcomesFor("boots5", {
-      buckets: [
-        { label: "good", pct: 20, listing: 100 },
-        { label: "plain", pct: 80, listing: "40" },
-      ],
-    });
-    expect(o.source).toBe("manual");
-    expect(o.outcomes).toEqual([
-      { label: "good", p: 0.2, listing: 100 },
-      { label: "plain", p: 0.8, listing: 40 },
-    ]);
+  const sales = (list, complete = true) => ({
+    boots5: { code: "boots5", at: iso(), complete, fills: list },
   });
   it("has no distribution without fills, or with too few, and says so", () => {
     expect(outcomesFor("boots5", { salesByCode: {}, now: NOW })).toMatchObject({
@@ -136,58 +133,43 @@ describe("outcomesFor", () => {
       outcomes: [],
     });
     const few = outcomesFor("boots5", {
-      salesByCode: {
-        boots5: {
-          code: "boots5",
-          at: iso(),
-          complete: true,
-          fills: fills([10, 11, 12]),
-        },
-      },
+      salesByCode: sales(fills([10, 11, 12])),
       now: NOW,
     });
     expect(few.source).toBe("none");
-    expect(few.note).toBe("3 of 5 comparable fills in 72 h");
+    expect(few.note).toBe(
+      "3 of 5 comparable fills at 90–100% durability in 72 h",
+    );
   });
   it("makes one sales-weighted outcome at the median once five comparable fills exist", () => {
     const o = outcomesFor("boots5", {
-      salesByCode: {
-        boots5: {
-          code: "boots5",
-          at: iso(),
-          complete: true,
-          fills: fills([10, 11, 12, 13, 14]),
-        },
-      },
+      salesByCode: sales(fills([10, 11, 12, 13, 14])),
       now: NOW,
     });
     expect(o.source).toBe("sales");
     expect(o.outcomes).toEqual([
       { label: "sells like the last 5 fills", p: 1, listing: 12 },
     ]);
-    expect(o.note).toContain("assumes a crafted piece sells like recent fills");
-  });
-});
-
-describe("craftInputs", () => {
-  it("composes recipe, prices and outcomes for one code with their provenance", () => {
-    const c = craftInputs("boots5", state, {}, NOW);
-    expect(c.item.rarity).toBe("legendary");
-    expect(c.recipe).toEqual({
-      value: { scraps: 10, steel: 2 },
-      source: "manual",
-    });
-    expect(c.prices.scrap.value).toBe(0.21);
-    expect(c.outcomes.source).toBe("none");
-    const missing = craftInputs("jet", state, {}, NOW);
-    expect(missing.recipe.value).toBeNull();
-    expect(missing.recipe.note).toContain("recipe not entered");
-    const fixture = craftInputs(
-      "jet",
-      state,
-      { recipes: FIXTURE.recipes },
-      NOW,
+    expect(o.note).toContain(
+      "assumes a crafted piece sells like recent fills at 90–100% durability",
     );
-    expect(fixture.recipe.value).toEqual({ scraps: 2430, steel: 6 });
+  });
+  it("compares a new craft with fills near full durability only, unless the fills carry none", () => {
+    const worn = fills([10, 11, 12, 13, 14], 40);
+    const o = outcomesFor("boots5", { salesByCode: sales(worn), now: NOW });
+    expect(o.source).toBe("none");
+    expect(o.estimate.n).toBe(0);
+    const unknown = outcomesFor("boots5", {
+      salesByCode: sales(worn.map((f) => ({ ...f, state: null }))),
+      now: NOW,
+    });
+    expect(unknown.source).toBe("sales");
+    expect(unknown.note).not.toContain("durability");
+    const mixed = outcomesFor("boots5", {
+      salesByCode: sales([...worn, ...fills([20, 21, 22, 23, 24])]),
+      now: NOW,
+    });
+    expect(mixed.outcomes[0].listing).toBe(22);
+    expect(mixed.estimate.n).toBe(5);
   });
 });

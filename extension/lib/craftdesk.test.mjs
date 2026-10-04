@@ -34,6 +34,11 @@ const type = (field, value, event = "input") => {
   input.dispatchEvent(new Event(event, { bubbles: true }));
 };
 const render = () => desk.render(state, bar, { after: true });
+const flush = async () => {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+};
 
 beforeEach(() => {
   document.body.innerHTML =
@@ -133,6 +138,7 @@ describe("Craft Desk panel", () => {
     expect(text()).toContain("saves 0.300 g against buying now if it does");
     expect(text()).toContain("unavailable");
     expect(text()).toContain("no recent fills read for this item");
+    expect(text()).toContain("Break-even listing 5.579 g"); // 5.3 / 0.95, up to the tick
     expect(
       el().querySelector('[data-action="desk-pick"][data-code="boots5"]')
         .textContent,
@@ -154,6 +160,7 @@ describe("Craft Desk panel", () => {
       el().querySelector('[data-action="desk-pick"][data-code="boots5"]')
         .textContent,
     ).toBe("+115%");
+    expect(text()).toContain("best legendary boots +115%");
     expect(text()).toContain("scraps ≤ 0.820 g"); // (11.4 − 3.2) / 10
     expect(text()).toContain("steel ≤ 4.650 g"); // (11.4 − 2.1) / 2
     expect(text()).toContain("For 20% ROI");
@@ -163,6 +170,27 @@ describe("Craft Desk panel", () => {
     expect(text()).toContain("12.000 g");
     expect(text()).toContain("needs 8 comparable fills (5 now)");
     expect(text()).toContain("5 comparable fills in 72 h");
+  });
+  it("paints a cell without a usable price as muted, never as profitable", () => {
+    settings = preferences({
+      ...settings,
+      craftRecipes: { boots5: { scraps: 10, steel: 2 } },
+    });
+    state.cases = null; // no steel quote
+    state.salesByCode = {
+      boots5: {
+        code: "boots5",
+        at: iso(),
+        complete: true,
+        fills: fills("boots5", [10, 11, 12, 13, 14]),
+      },
+    };
+    render();
+    const cell = el().querySelector(
+      '[data-action="desk-pick"][data-code="boots5"]',
+    );
+    expect(cell.textContent).toBe("no price");
+    expect(cell.className).toBe("lens-muted");
   });
   it("takes a typed price over the quote, says so, keeps the caret on the field, and returns to quotes on request", () => {
     render();
@@ -183,6 +211,26 @@ describe("Craft Desk panel", () => {
     expect(save).toHaveBeenCalledWith({ craftBatch: "4" });
     type("taxPct", "", "change");
     expect(save).toHaveBeenCalledWith({ taxPct: null });
+  });
+  it("shows settings-backed fields from the settings once saved, so a change made elsewhere is not shadowed", () => {
+    render();
+    type("batch", "4", "change");
+    render();
+    expect(el().querySelector('[data-field="batch"]').value).toBe("4");
+    settings = preferences({ ...settings, craftBatch: 10 }); // changed in the popup
+    render();
+    expect(el().querySelector('[data-field="batch"]').value).toBe("10");
+  });
+  it("keeps keyboard focus on the picked cell, not the first cell, across the re-render", () => {
+    render();
+    const cell = el().querySelector(
+      '[data-action="desk-pick"][data-code="boots5"]',
+    );
+    cell.focus();
+    cell.click();
+    render();
+    expect(document.activeElement.dataset.code).toBe("boots5");
+    expect(document.activeElement.getAttribute("aria-pressed")).toBe("true");
   });
   it("says when quotes are missing or stale instead of pricing", () => {
     state.cases = null;
@@ -215,7 +263,7 @@ describe("craft ledger in the desk", () => {
     expect(el().textContent).toContain("Prices are inferred");
     type("form-stat", "271");
     click('[data-action="desk-ledger-add"]');
-    await Promise.resolve();
+    await flush();
     expect(onLedger).toHaveBeenCalledTimes(1);
     const entry = onLedger.mock.calls[0][0][0];
     expect(entry).toMatchObject({
@@ -231,8 +279,8 @@ describe("craft ledger in the desk", () => {
       },
       result: { rarity: "legendary", stat: 271, durability: 100 },
     });
-    await Promise.resolve();
     render();
+    expect(el().querySelector(".lens-form")).toBeNull(); // the form closed on a confirmed save
     expect(el().textContent).toContain(
       "Recorded legendary boots (inferred prices)",
     );
@@ -242,16 +290,21 @@ describe("craft ledger in the desk", () => {
     expect(el().textContent).toContain("Realized (sold)");
     expect(el().textContent).toContain("+0.000 g");
   });
-  it("marks a manual price, lists, sells with proceeds, and realizes the difference", async () => {
+  it("calls the basis manual only when every used price was typed, lists, sells with proceeds, and realizes the difference", async () => {
     recordBoots();
     type("form-scrapPrice", "0.25", "change");
+    render();
+    expect(el().textContent).toContain("Prices are inferred"); // steel still comes from the quote
+    type("form-steelPrice", "1.6", "change");
+    render();
+    expect(el().textContent).toContain("Prices are manual");
     click('[data-action="desk-ledger-add"]');
-    await Promise.resolve();
+    await flush();
     expect(onLedger.mock.calls[0][0][0].inputs).toMatchObject({
       scrapPrice: 0.25,
+      steelPrice: 1.6,
       priceSource: "manual",
     });
-    await Promise.resolve();
     render();
     const id = onLedger.mock.calls[0][0][0].id;
     click(
@@ -260,8 +313,7 @@ describe("craft ledger in the desk", () => {
     render();
     type("pending-price", "12");
     click('[data-action="desk-ledger-confirm"]');
-    await Promise.resolve();
-    await Promise.resolve();
+    await flush();
     render();
     expect(el().textContent).toContain(
       "listed at 12.000 g · unsold: nothing realized",
@@ -277,18 +329,71 @@ describe("craft ledger in the desk", () => {
     );
     type("pending-price", "11.4");
     click('[data-action="desk-ledger-confirm"]');
-    await Promise.resolve();
-    await Promise.resolve();
+    await flush();
     render();
     expect(el().textContent).toContain("sold for 11.400 g");
     expect(el().textContent).toContain("+5.700 g"); // 11.4 − (10 × 0.25 + 2 × 1.6)
     expect(el().textContent).toContain("1 sold");
   });
+  it("never reports a save the worker did not confirm, and keeps the form for another try", async () => {
+    onLedger.mockImplementation(async () => null); // the extension did not answer
+    recordBoots();
+    click('[data-action="desk-ledger-add"]');
+    await flush();
+    render();
+    expect(el().textContent).toContain("Ledger: not saved");
+    expect(el().textContent).not.toContain("Recorded");
+    expect(el().querySelector(".lens-form")).not.toBeNull();
+    expect(state.ledger.entries).toHaveLength(0);
+    onLedger.mockImplementation(async () => ({
+      error: "too-large",
+      message: "The craft ledger is too large",
+    }));
+    click('[data-action="desk-ledger-add"]');
+    await flush();
+    render();
+    expect(el().textContent).toContain("Ledger: The craft ledger is too large");
+    expect(el().querySelector(".lens-form")).not.toBeNull();
+  });
+  it("takes one ledger write at a time: a second move during a save is ignored and the buttons are disabled", async () => {
+    recordBoots();
+    click('[data-action="desk-ledger-add"]');
+    await flush();
+    render();
+    const id = onLedger.mock.calls[0][0][0].id;
+    let release;
+    onLedger.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = () => {
+            state.ledger = { version: 1, entries: [] };
+            resolve({ ledger: state.ledger });
+          };
+        }),
+    );
+    click(
+      `[data-action="desk-ledger-move"][data-type="scrap"][data-id="${id}"]`,
+    );
+    render();
+    expect(
+      el().querySelector(`[data-action="desk-ledger-move"][data-id="${id}"]`)
+        .disabled,
+    ).toBe(true);
+    click(
+      `[data-action="desk-ledger-move"][data-type="keep"][data-id="${id}"]`,
+    );
+    expect(onLedger).toHaveBeenCalledTimes(2); // the second move did not start a save
+    release();
+    await flush();
+    render();
+    expect(
+      el().querySelector(`[data-action="desk-ledger-move"]`)?.disabled ?? false,
+    ).toBe(false);
+  });
   it("exports a ledger file and merges a pasted export, skipping junk", async () => {
     recordBoots();
     click('[data-action="desk-ledger-add"]');
-    await Promise.resolve();
-    await Promise.resolve();
+    await flush();
     render();
     click('[data-action="desk-export"]');
     expect(download).toHaveBeenCalledTimes(1);
@@ -312,8 +417,7 @@ describe("craft ledger in the desk", () => {
       JSON.stringify({ kind: "craft-ledger", entries: [other, { id: "x" }] }),
     );
     click('[data-action="desk-import-paste"]');
-    await Promise.resolve();
-    await Promise.resolve();
+    await flush();
     render();
     expect(el().textContent).toContain(
       "Imported: 1 added, 0 updated, 1 skipped",

@@ -85,10 +85,12 @@ function median(prices) {
  * quartiles once eight do, and the spread around the median as the stated
  * uncertainty. Never an estimate from fewer fills than the bar.
  * @param {ReadonlyArray<Fill> | null | undefined} fills  already comparable (see comparableFills) or raw
- * @param {ComparableOptions & { capped?: boolean, filter?: boolean }} [options]
+ * @param {ComparableOptions & { capped?: boolean, filter?: boolean, total?: number }} [options]
  */
 export function resaleEstimate(fills, options = {}) {
   const { capped = false, filter = true, now = Date.now() } = options;
+  // How many fills were read at all; a caller passing a pre-filtered list says, so an empty comparable set reads as 0 of 5 rather than as nothing read.
+  const total = options.total ?? (fills ?? []).length;
   const list = filter
     ? comparableFills(fills, { ...options, now })
     : [...(fills ?? [])];
@@ -107,7 +109,7 @@ export function resaleEstimate(fills, options = {}) {
   if (n === 0)
     return {
       ...base,
-      status: (fills ?? []).length ? "insufficient" : "none",
+      status: total ? "insufficient" : "none",
       estimate: null,
       low: null,
       high: null,

@@ -6,8 +6,8 @@
 // recent fills), the player's own inputs (manual), and fixtures (synthetic,
 // for tests and screenshots). Nothing here invents a number: a missing input
 // stays missing and is named.
-import { RARITIES, SLOTS, WEAPONS, GEAR_CODES } from "./items.mjs";
-import { freshness, TTL } from "./quality.mjs";
+import { RARITIES, WEAPONS, GEAR_CODES } from "./items.mjs";
+import { freshness, TTL, nonNegative as money } from "./quality.mjs";
 import { normalizeRecipe } from "./craft.mjs";
 import { resaleEstimate } from "./resale.mjs";
 
@@ -61,15 +61,8 @@ export function normalizeRecipes(raw) {
 /**
  * @typedef {{ bid?: number | null, ask?: number | null, bids?: Array<{price:number, quantity:number}> | null, asks?: Array<{price:number, quantity:number}> | null }} BookLike
  * @typedef {{ book?: { at?: string | null, bids?: Array<{price:number, quantity:number}>, asks?: Array<{price:number, quantity:number}>, bid?: number | null, ask?: number | null } | null, cases?: { at?: string | null, books?: Record<string, BookLike> } | null, salesByCode?: Record<string, { code: string, at: string, complete: boolean, fills: Array<{ price: number, at: string, state?: number | null, code?: string | null }> }> | null, settings?: { intervalSec?: number, craftRecipes?: unknown, taxPct?: unknown } | null }} LensState
- * @typedef {{ scrapPrice?: unknown, steelPrice?: unknown, taxPct?: unknown, batch?: unknown, recipes?: unknown }} Manual
+ * @typedef {{ scrapPrice?: unknown, steelPrice?: unknown }} Manual
  */
-
-/** @param {unknown} v */
-const money = (v) => {
-  if (v == null || v === "" || typeof v === "boolean") return null;
-  const n = Number(v);
-  return Number.isFinite(n) && n >= 0 ? n : null;
-};
 
 /**
  * Both input prices, manual first, else the live best ask (what buying now
@@ -143,32 +136,20 @@ export function taxRate({ manual = null, page = null, settings = null } = {}) {
 }
 
 /**
- * The outcome distribution for crafting `code`, from the evidence at hand.
- * With comparable fills the result is one sales-weighted outcome: "sells
- * like recent fills", valued at their median, i.e. the roll distribution is
- * taken to be whatever the fills already reflect. A manual bucket table
- * (label, probability %, listing) replaces it when the player knows the
- * odds. Without either there is no distribution, and the EV is unavailable.
+ * The outcome distribution for crafting `code`, from the evidence at hand:
+ * with five comparable fills the result is one sales-weighted outcome,
+ * "sells like recent fills", valued at their median, i.e. the roll
+ * distribution is taken to be whatever the fills already reflect. A crafted
+ * piece is new, so when the fills carry a durability only those within ten
+ * points of 100% compare. Without the evidence there is no distribution and
+ * the EV is unavailable; nothing is assumed.
  * @param {string} code
- * @param {{ salesByCode?: LensState["salesByCode"], buckets?: ReadonlyArray<{ label?: unknown, pct?: unknown, listing?: unknown }> | null, now?: number }} input
+ * @param {{ salesByCode?: LensState["salesByCode"], now?: number }} [input]
  */
 export function outcomesFor(
   code,
-  { salesByCode = null, buckets = null, now = Date.now() } = {},
+  { salesByCode = null, now = Date.now() } = {},
 ) {
-  if (Array.isArray(buckets) && buckets.length) {
-    const list = buckets.map((b) => ({
-      label: String(b?.label ?? "outcome").slice(0, 40),
-      p: (Number(b?.pct) || 0) / 100,
-      listing: money(b?.listing),
-    }));
-    return {
-      source: /** @type {const} */ ("manual"),
-      outcomes: list,
-      estimate: null,
-      note: "your outcome table",
-    };
-  }
   const sales = salesByCode?.[code];
   if (!sales)
     return {
@@ -177,17 +158,20 @@ export function outcomesFor(
       estimate: null,
       note: "no recent fills read for this item; select it on the market",
     };
+  const anyState = sales.fills.some((f) => f?.state != null);
   const est = resaleEstimate(sales.fills, {
     code,
     now,
     capped: !sales.complete,
+    state: anyState ? 100 : null,
   });
+  const basis = anyState ? " at 90–100% durability" : "";
   if (est.status !== "ok")
     return {
       source: /** @type {const} */ ("none"),
       outcomes: [],
       estimate: est,
-      note: `${est.n} of ${est.needed} comparable fills in ${est.windowHours} h`,
+      note: `${est.n} of ${est.needed} comparable fills${basis} in ${est.windowHours} h`,
     };
   return {
     source: /** @type {const} */ ("sales"),
@@ -199,50 +183,6 @@ export function outcomesFor(
       },
     ],
     estimate: est,
-    note: `sales-weighted: assumes a crafted piece sells like recent fills (median of ${est.n})`,
+    note: `sales-weighted: assumes a crafted piece sells like recent fills${basis} (median of ${est.n})`,
   };
 }
-
-/**
- * Everything the desk needs for one craft code, labelled.
- * @param {string} code @param {LensState} state @param {Manual} [manual] @param {number} [now]
- */
-export function craftInputs(code, state, manual = {}, now = Date.now()) {
-  const recipes = {
-    ...normalizeRecipes(state.settings?.craftRecipes),
-    ...normalizeRecipes(manual.recipes),
-  };
-  const recipe = recipes[code] ?? null;
-  return {
-    code,
-    item: describeCode(code),
-    recipe: recipe
-      ? { value: recipe, source: /** @type {const} */ ("manual") }
-      : {
-          value: null,
-          source: /** @type {const} */ ("none"),
-          note: "recipe not entered: read it off the game's craft screen",
-        },
-    prices: inputPrices(state, manual, now),
-    outcomes: outcomesFor(code, { salesByCode: state.salesByCode, now }),
-  };
-}
-
-/**
- * A synthetic fixture for tests and screenshots: recipes that are NOT the
- * game's, flagged as such in every label that shows them.
- */
-export const FIXTURE = Object.freeze({
-  label: "synthetic fixture (not the game's recipe)",
-  recipes: Object.freeze(
-    Object.fromEntries(
-      RARITIES.flatMap((r, i) =>
-        [GEAR_CODES[r].weapon, ...GEAR_CODES[r].gear].map((code) => [
-          code,
-          { scraps: 10 * 3 ** i, steel: i + 1 },
-        ]),
-      ),
-    ),
-  ),
-  slots: ["weapon", ...SLOTS],
-});

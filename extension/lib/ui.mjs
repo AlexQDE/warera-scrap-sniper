@@ -1,16 +1,23 @@
 import { escapeHtml, ago } from "./format.mjs";
 
 const lastHtml = new WeakMap();
+/** What makes a control the same control after a rewrite: its action or field plus the code, id or type it carries. */
+const controlKey = (node) =>
+  ["action", "field", "code", "id", "type"]
+    .map((k) => node.dataset[k] ?? "")
+    .join("\u0000");
+/** Age labels ("12s ago") are kept current by clock(); a passing second must not count as new markup. */
+const AGE_TEXT = /(<span data-lens-time="[^"]*">)[^<]*(<\/span>)/g;
 export function setHtml(el, html) {
-  if (lastHtml.get(el) === html) return false;
+  const key = html.replace(AGE_TEXT, "$1$2");
+  if (lastHtml.get(el) === key) return false;
   // Keep keyboard focus (and a text field's caret) on the same control across a rewrite.
   const active = el.contains(document.activeElement)
     ? document.activeElement
     : null;
-  const focused = active?.dataset?.action
-    ? ["action", active.dataset.action]
-    : active?.dataset?.field
-      ? ["field", active.dataset.field]
+  const focused =
+    active?.dataset && (active.dataset.action || active.dataset.field)
+      ? controlKey(active)
       : null;
   const caret =
     active && typeof active.selectionStart === "number"
@@ -18,8 +25,8 @@ export function setHtml(el, html) {
       : null;
   el.innerHTML = html;
   if (focused) {
-    const next = [...el.querySelectorAll(`[data-${focused[0]}]`)].find(
-      (node) => node.dataset[focused[0]] === focused[1],
+    const next = [...el.querySelectorAll("[data-action], [data-field]")].find(
+      (node) => controlKey(node) === focused,
     );
     next?.focus({ preventScroll: true });
     if (next && caret && typeof next.setSelectionRange === "function")
@@ -29,7 +36,7 @@ export function setHtml(el, html) {
         /* a number field refuses a caret: keep focus only */
       }
   }
-  lastHtml.set(el, html);
+  lastHtml.set(el, key);
   return true;
 }
 export function panel(id, anchor, action) {
@@ -40,9 +47,17 @@ export function panel(id, anchor, action) {
     el.dataset.lens = "";
     el.addEventListener("click", action);
     anchor.insertAdjacentElement("beforebegin", el);
-  } else if (el.nextElementSibling !== anchor)
+  } else if (!reaches(el.nextElementSibling, anchor))
     anchor.insertAdjacentElement("beforebegin", el);
   return el;
+}
+/** Only this extension's own panels may sit between a panel and its anchor; anything else means the page moved and the panel follows. */
+function reaches(from, anchor) {
+  for (let n = from; n; n = n.nextElementSibling) {
+    if (n === anchor) return true;
+    if (!n.hasAttribute("data-lens")) return false;
+  }
+  return false;
 }
 export const timeLabel = (at, now = Date.now()) =>
   `<span data-lens-time="${escapeHtml(at)}">${escapeHtml(ago(at, now))}</span>`;

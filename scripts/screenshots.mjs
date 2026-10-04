@@ -232,6 +232,7 @@ async function bench(prefix) {
   const quietStart = Date.now();
   await page.waitForTimeout(3000);
   const quiet = await read();
+  const quietMs = Date.now() - quietStart;
   await page.evaluate(
     `(async () => { for (let i = 0; i < 40; i++) { for (let k = 0; k < 3; k++) document.getElementById('offers').appendChild(document.createElement('div')); await new Promise((r) => setTimeout(r, 150)); } })()`,
   );
@@ -244,7 +245,7 @@ async function bench(prefix) {
     rows: 60,
     quiet3s: {
       scans: delta(start, quiet, "scans"),
-      ms: Math.round(quietStart ? 3000 : 0),
+      ms: quietMs,
     },
     bursts40: {
       scans: delta(quiet, end, "scans"),

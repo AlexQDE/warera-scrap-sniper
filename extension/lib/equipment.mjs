@@ -12,6 +12,7 @@ import {
   offerDimensions,
 } from "./offers.mjs";
 import {
+  comparableFills,
   resaleEstimate,
   percentileRank,
   liquidity,
@@ -127,14 +128,15 @@ export function createEquipment({
     openDetails.clear();
     removePicker();
   }
-  /** One offer's identity across re-renders of the same list: item, price and its own numbers. */
+  /** One offer's identity across re-renders of the same list: item, price and its own numbers (a duplicate listing gets its ordinal). */
   const rowKey = (r) =>
     `${r.code ?? r.alt ?? ""}|${r.priceText ?? ""}|${r.stats.stat ?? ""}|${r.stats.durability ?? ""}`;
   function onAnnotationClick(e) {
+    // Nothing clicked inside the annotation (the button, selected Details text) reaches the game's row.
+    e.stopPropagation();
     const button = e.target.closest?.("[data-action='details']");
     if (!button) return;
     e.preventDefault();
-    e.stopPropagation();
     const key = e.currentTarget.dataset.ssKey;
     if (openDetails.has(key)) openDetails.delete(key);
     else openDetails.add(key);
@@ -142,19 +144,25 @@ export function createEquipment({
       openDetails.delete(openDetails.values().next().value);
     rescan();
   }
-  /** Comparable-sales resale for one row, memoised per item, sales snapshot and durability. */
+  /**
+   * Comparable-sales resale for one row, memoised per item, sales snapshot and
+   * durability. The comparable fills travel with the estimate so the price
+   * rank and the pace are read over the same sample as the median.
+   */
   function resaleFor(code, sales, durability) {
     const anyState = sales.fills.some((f) => f?.state != null);
     const state = anyState ? durability : null;
     const key = `${code}|${sales.at}|${state ?? "any"}`;
     let est = resaleMemo.get(key);
     if (!est) {
-      est = resaleEstimate(sales.fills, {
-        code,
+      const fills = comparableFills(sales.fills, { code, now: now(), state });
+      est = resaleEstimate(fills, {
+        filter: false,
         now: now(),
-        state,
         capped: !sales.complete,
+        total: sales.fills.length,
       });
+      est.fills = fills;
       est.durabilityCompared = anyState && durability != null;
       if (resaleMemo.size > 200) resaleMemo.clear();
       resaleMemo.set(key, est);
@@ -199,7 +207,7 @@ export function createEquipment({
         lines.push(
           `Resale − price = <b>${signed(est.estimate - r.price)} g</b> before market tax${rank?.status === "ok" ? ` · this price sits at the ${rank.percentile.toFixed(0)}th percentile of those fills` : ` · a price rank needs ${MIN_PERCENTILE_PEERS} fills`}`,
         );
-      const liq = liquidity(r.sales.fills, { now: now() });
+      const liq = liquidity(est.fills, { now: now() });
       lines.push(
         `Pace: ${liq.perDay.toFixed(1)} fills/day${liq.medianGapHours != null ? ` · median gap ${liq.medianGapHours.toFixed(1)} h` : ""} · last fill ${escapeHtml(ago(est.lastAt, now()))} · ${est.durabilityCompared ? "comparables within ±10 durability" : "durability not compared"}`,
       );
@@ -245,12 +253,14 @@ export function createEquipment({
     return `<span class="lens-tag">${TAGS[kind]}</span>${scrap}${resaleCell(dims, est)}${best ? '<span class="lens-muted lens-best">Best value</span>' : ""}<button type="button" data-action="details" aria-expanded="${open}" aria-label="${open ? "Hide" : "Show"} details for this offer">${open ? "Hide" : "Details"}</button>${open ? detailsHtml(r, ctx) : ""}`;
   }
   function render(state) {
+    // A scoped scan is trusted only when it finds a list (two rows or more);
+    // one row says nothing about where the next ones will be inserted.
     const scoped =
       listRoot?.isConnected && now() - lastFullScan < FULL_SCAN_EVERY
         ? dom.offerRows(listRoot, palette, rowCache)
         : [];
     let rows = scoped;
-    if (scoped.length) metrics.scopedScans++;
+    if (scoped.length >= 2) metrics.scopedScans++;
     else {
       rowCache.epoch++; // re-read frames and borders on a full scan
       rows = dom.offerRows(document, palette, rowCache);
@@ -324,6 +334,7 @@ export function createEquipment({
         row.querySelector(":scope > .ss-verdict")?.remove();
         delete row.dataset.scrapSniper;
       }
+    const dupes = new Map();
     for (const [i, r] of valuations.entries()) {
       if (setup) {
         r.row.querySelector(":scope > .ss-verdict")?.remove();
@@ -344,7 +355,10 @@ export function createEquipment({
                   ? "near"
                   : "miss";
       r.statRank = ranks[i];
-      const key = rowKey(r);
+      const base = rowKey(r);
+      const ordinal = dupes.get(base) ?? 0;
+      dupes.set(base, ordinal + 1);
+      const key = ordinal ? `${base}#${ordinal}` : base;
       const open = openDetails.has(key);
       const ownItem = r.code != null && (r.sales != null || r.code === code);
       const dims = offerDimensions({
@@ -361,7 +375,7 @@ export function createEquipment({
         dims.resale === "ok" && r.price != null
           ? percentileRank(
               r.price,
-              r.sales.fills.map((f) => f.price),
+              r.resale.fills.map((f) => f.price),
             )
           : null;
       let el = r.row.querySelector(":scope > .ss-verdict");

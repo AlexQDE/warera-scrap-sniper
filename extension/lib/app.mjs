@@ -27,6 +27,8 @@ export async function startLens(runtime = chrome.runtime) {
     busy: new Set(),
   };
   const SALES_CODES_KEPT = 12;
+  const SALES_RETRY_MS = 15_000; // a failed or empty sales read is not asked again at once
+  const salesAttempts = new Map(); // code -> last attempt
   let context = {};
   let disposed = false;
   let timer;
@@ -84,6 +86,7 @@ export async function startLens(runtime = chrome.runtime) {
         state.avg = null;
         state.sales = null;
         state.salesByCode = {};
+        salesAttempts.clear();
         state.errors = {};
         state.rejected = false;
       }
@@ -114,13 +117,21 @@ export async function startLens(runtime = chrome.runtime) {
     )
       return;
     const ttl = kind === "book" ? state.settings.intervalSec * 1000 : TTL[kind];
+    // Sales are fresh per item: the panel's item and the desk's item each keep their own read.
+    const held = kind === "sales" ? state.salesByCode[code] : state[kind];
     if (
       !force &&
-      !Object.keys(state[kind]?.failures ?? {}).length &&
-      freshness(state[kind]?.at, ttl) === "fresh" &&
-      (kind !== "sales" || state.sales?.code === code)
+      !Object.keys(held?.failures ?? {}).length &&
+      freshness(held?.at, ttl) === "fresh"
     )
       return;
+    if (
+      kind === "sales" &&
+      !force &&
+      Date.now() - (salesAttempts.get(code) ?? 0) < SALES_RETRY_MS
+    )
+      return;
+    if (kind === "sales") salesAttempts.set(code, Date.now());
     state.busy.add(kind);
     const revision = state.authRevision;
     const r = await send({

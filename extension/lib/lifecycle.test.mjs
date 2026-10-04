@@ -244,6 +244,124 @@ describe("SPA lifecycle and DOM work", () => {
     expect(document.querySelector("[data-lens]")).toBeNull();
     expect(vi.getTimerCount()).toBe(0);
   });
+  const marketFixture = () => {
+    document.body.innerHTML =
+      '<main><div id="tax"><span>Market tax 5%</span></div><div><div id="item-code-selector-jet" style="z-index:1;border-color:rgb(57,15,16)"></div><div id="item-code-selector-boots5" style="border-color:rgb(43,43,18)"></div></div><div id="offers"></div></main>';
+  };
+  const marketRuntime = (settings, salesImpl) => {
+    const runtime = mockRuntime({ settings: { ...DEFAULTS, ...settings } });
+    const base = runtime.sendMessage.getMockImplementation();
+    runtime.sendMessage.mockImplementation(async (msg) => {
+      if (msg.type === "book")
+        return {
+          book: {
+            at: new Date().toISOString(),
+            bid: 0.2,
+            ask: 0.21,
+            bids: [{ price: 0.2, quantity: 1e6 }],
+            asks: [{ price: 0.21, quantity: 1e6 }],
+          },
+        };
+      if (msg.type === "sales")
+        return salesImpl
+          ? salesImpl(msg)
+          : {
+              sales: {
+                code: msg.itemCode,
+                at: new Date().toISOString(),
+                complete: true,
+                fills: [],
+              },
+            };
+      if (msg.type === "ledgerGet")
+        return { ledger: { version: 1, entries: [] } };
+      return base(msg);
+    });
+    return runtime;
+  };
+  const salesCalls = (runtime, code) =>
+    runtime.sendMessage.mock.calls.filter(
+      ([m]) => m.type === "sales" && m.itemCode === code,
+    ).length;
+  it("reads the panel's item and the desk's item once each instead of looping between them", async () => {
+    window.history.replaceState({}, "", "/market/equipments?item=jet");
+    marketFixture();
+    const runtime = marketRuntime({
+      craftCollapsed: false,
+      craftRecipes: { boots5: { scraps: 10, steel: 2 } },
+    });
+    app = await startLens(runtime);
+    await settle();
+    document
+      .querySelector('[data-action="desk-pick"][data-code="boots5"]')
+      .click();
+    await settle(3000);
+    expect(salesCalls(runtime, "jet")).toBe(1);
+    expect(salesCalls(runtime, "boots5")).toBe(1);
+    expect(app.metrics.scans).toBeLessThan(10);
+  });
+  it("retries a failing sales read after a pause, not on every scan", async () => {
+    window.history.replaceState({}, "", "/market/equipments?item=jet");
+    marketFixture();
+    const runtime = marketRuntime({}, () => ({
+      error: "http",
+      message: "the API answered 503",
+    }));
+    app = await startLens(runtime);
+    await settle(3000);
+    expect(salesCalls(runtime, "jet")).toBe(1);
+    expect(document.getElementById("scrap-sniper-bar").textContent).toContain(
+      "sales read failed",
+    );
+    await settle(16_000);
+    expect(salesCalls(runtime, "jet")).toBe(1); // inside the retry window, and nothing scanned
+    await settle(15_000); // the 30 s discovery scan asks again, once
+    expect(salesCalls(runtime, "jet")).toBe(2);
+    expect(app.metrics.scans).toBeLessThan(12);
+  });
+  it("keeps both panels in place and a focused desk field focused across native mutations", async () => {
+    window.history.replaceState({}, "", "/market/equipments");
+    marketFixture();
+    app = await startLens(marketRuntime({ craftCollapsed: false }));
+    await settle();
+    const bar = document.getElementById("scrap-sniper-bar");
+    const desk = document.getElementById("warera-plus-craft");
+    const input = desk.querySelector('[data-field="scrapPrice"]');
+    input.focus();
+    expect(document.activeElement).toBe(input);
+    for (let i = 0; i < 5; i++) {
+      document
+        .getElementById("offers")
+        .appendChild(document.createElement("div"));
+      await settle(1100);
+    }
+    expect(document.getElementById("scrap-sniper-bar")).toBe(bar);
+    expect(document.getElementById("warera-plus-craft")).toBe(desk);
+    expect(bar.nextElementSibling).toBe(desk);
+    expect(document.activeElement).toBe(input);
+  });
+  it("survives repeated navigation away and back without duplicate panels or leaked nodes", async () => {
+    window.history.replaceState({}, "", "/market/equipments");
+    marketFixture();
+    app = await startLens(marketRuntime({ craftCollapsed: false }));
+    await settle();
+    const count = () => document.querySelectorAll("[data-lens]").length;
+    const first = count();
+    expect(first).toBeGreaterThan(0);
+    for (let cycle = 0; cycle < 3; cycle++) {
+      window.history.pushState({}, "", "/profile");
+      await settle(5100);
+      expect(count()).toBe(0);
+      window.history.pushState({}, "", "/market/equipments");
+      await settle(5100);
+      expect(document.querySelectorAll("#scrap-sniper-bar")).toHaveLength(1);
+      expect(document.querySelectorAll("#warera-plus-craft")).toHaveLength(1);
+      expect(count()).toBe(first);
+    }
+    app.dispose();
+    expect(count()).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
   it("does not starve under continuous mutations, and cancels on dispose", async () => {
     const run = vi.fn();
     const s = createScheduler(run);
