@@ -27,6 +27,7 @@ import {
   taxRate,
   outcomesFor,
   normalizeRecipes,
+  recipeFor,
 } from "./craftdata.mjs";
 import { listingScenarios, liquidity, MIN_RESALE_SAMPLE } from "./resale.mjs";
 import {
@@ -242,7 +243,7 @@ export function createCraftDesk({
       Promise.resolve(save({ craftRecipeOps: { remove: [code] } })).then(
         (applied) => {
           status = applied
-            ? `Recipe for ${itemLabel(code)} removed`
+            ? `Recipe override for ${itemLabel(code)} removed; the game's recipe applies`
             : "Recipe: not removed, the extension did not answer; try again";
           rescan();
         },
@@ -253,11 +254,11 @@ export function createCraftDesk({
       );
     } else if (a === "desk-ledger-new") {
       const p = inputPrices(lastState ?? {}, manual, now());
+      const used = recipeFor(selected ?? "", normalizeRecipes(s.craftRecipes));
       form = {
         code: selected ?? "",
-        scraps:
-          fields["recipe-scraps"] ?? s.craftRecipes[selected]?.scraps ?? "",
-        steel: fields["recipe-steel"] ?? s.craftRecipes[selected]?.steel ?? "",
+        scraps: fields["recipe-scraps"] ?? used.value?.scraps ?? "",
+        steel: fields["recipe-steel"] ?? used.value?.steel ?? "",
         scrapPrice: p.scrap.value ?? "",
         steelPrice: p.steel.value ?? "",
         sources: { scrap: p.scrap.source, steel: p.steel.source },
@@ -541,9 +542,8 @@ export function createCraftDesk({
   function buildInputs(code, state, recipes, tax) {
     return {
       item: describeCode(code),
-      recipe: recipes[code]
-        ? { value: recipes[code], source: "manual" }
-        : { value: null, source: "none", note: "recipe not entered" },
+      // The player's override first, else the game's own recipe: no cell is ever empty.
+      recipe: recipeFor(code, recipes),
       ...outcomesOf(code, state, tax),
     };
   }
@@ -578,7 +578,7 @@ export function createCraftDesk({
     const out = [];
     out.push(
       `<h3>${esc(itemLabel(code))} <small>tier ${item?.tier ?? "?"} ${esc(item?.slot ?? "")}</small></h3>`,
-      `<div class="lens-recipe"><label>Scraps <input data-field="recipe-scraps" type="number" inputmode="numeric" min="0" step="1" value="${esc(rs)}"></label><label>Steel <input data-field="recipe-steel" type="number" inputmode="numeric" min="0" step="1" value="${esc(rst)}"></label><button type="button" data-action="desk-save-recipe">Save recipe</button>${recipe ? '<button type="button" data-action="desk-forget-recipe">Forget</button>' : ""}<small>${recipe ? "your recipe, stored on this browser" : "not entered: read it off the game's craft screen; nothing is assumed"}</small></div>`,
+      `<div class="lens-recipe"><label>Scraps <input data-field="recipe-scraps" type="number" inputmode="numeric" min="0" step="1" value="${esc(rs)}"></label><label>Steel <input data-field="recipe-steel" type="number" inputmode="numeric" min="0" step="1" value="${esc(rst)}"></label><button type="button" data-action="desk-save-recipe">Save recipe</button>${inputs.recipe.source === "manual" ? '<button type="button" data-action="desk-forget-recipe">Forget override</button>' : ""}<small>${esc(inputs.recipe.note)}${inputs.recipe.source === "game" ? "; type other numbers to override it if the game's craft screen disagrees" : ""}</small></div>`,
     );
     if (!recipe || !plan) {
       out.push(
@@ -821,7 +821,7 @@ export function createCraftDesk({
       });
       return `<tr><th scope="row">${rarity}</th>${cells.join("")}</tr>`;
     });
-    const recipeCount = Object.keys(recipes).length;
+    const overrides = Object.keys(recipes).length;
     const top = rankPlans(ranked)[0];
     const best =
       top?.plan.ev.roi != null
@@ -830,10 +830,10 @@ export function createCraftDesk({
     const html =
       head +
       `<div class="lens-desk"><div class="lens-inputs"><label>Scrap price ${numberField("scrapPrice", manual.scrapPrice ?? prices.scrap.value ?? "")}<small>${esc(prices.scrap.note)}</small></label><label>Steel price ${numberField("steelPrice", manual.steelPrice ?? prices.steel.value ?? "")}<small>${esc(prices.steel.note)}</small></label><label>Batch ${numberField("batch", s.craftBatch, "1", 'max="1000" inputmode="numeric"')}<small>crafts</small></label><label>Market tax % ${numberField("taxPct", s.taxPct ?? (tax.source === "page" ? tax.value : ""), "0.01", 'max="100" placeholder="' + esc(tax.source === "page" ? `${tax.value} (page)` : "0") + '"')}<small>${esc(tax.source === "manual" ? "your rate" : tax.source === "page" ? "read off the page notice" : "none read: proceeds = listing")}</small></label><label>Target ROI % ${numberField("targetPct", s.craftTargetPct, "1", 'min="-50" max="500"')}<small>for the ceilings</small></label><button type="button" data-action="desk-quotes">Use quotes</button></div>` +
-      `<table class="lens-matrix"><caption>Expected ROI by tier and slot${recipeCount ? ` · ${recipeCount} of 36 recipes entered${best}` : " · no recipes entered yet: pick a cell and enter its recipe"}</caption><thead><tr><th>Tier</th>${SLOT_HEADS.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${matrix.join("")}</tbody></table>` +
+      `<table class="lens-matrix"><caption>Expected ROI by tier and slot · the game's recipes, slot chosen${overrides ? ` (${overrides} overridden by you)` : ""}${best}</caption><thead><tr><th>Tier</th>${SLOT_HEADS.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${matrix.join("")}</tbody></table>` +
       `<section class="lens-detail">${selected ? detailHtml(selected, state, s, tax, prices, recipes) : '<p class="lens-muted">Pick a cell to work a craft through: recipe, cost, buying now or bidding, expected value over its outcomes, break-even ceilings and listing guidance.</p>'}</section>` +
       `<section class="lens-ledger-box">${ledgerHtml(state, tax)}</section>` +
-      `<p class="lens-muted">Read-only decision support: nothing is bought, crafted or listed for you. Input prices are the best asks (buying now) unless you type your own; expected values weight every outcome by its probability; comparable sales are the last 72 h of fills for the same item. Recipes are yours to verify against the game.</p></div>`;
+      `<p class="lens-muted">Read-only decision support: nothing is bought, crafted or listed for you. Input prices are the best asks (buying now) unless you type your own; expected values weight every outcome by its probability; comparable sales are the last 72 h of fills for the same item. Recipes are the game's table (the tier's scrap value in scraps, the steel fee doubled for a chosen slot); override a cell from the game's craft screen if it disagrees.</p></div>`;
     setHtml(desk, html);
     return { roots: [desk.parentElement] };
   }

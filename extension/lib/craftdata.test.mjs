@@ -1,15 +1,16 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import {
   CRAFT_CODES,
+  GAME_RECIPES,
   describeCode,
   normalizeRecipes,
+  recipeFor,
   inputPrices,
   taxRate,
   outcomesFor,
   applyRecipeOps,
 } from "./craftdata.mjs";
+import { craftRecipe, SCRAP_LADDER, CRAFT_STEEL } from "./ladder.mjs";
 
 const NOW = Date.parse("2026-10-03T12:00:00.000Z");
 const iso = (msAgo = 0) => new Date(NOW - msAgo).toISOString();
@@ -65,18 +66,42 @@ describe("describeCode and recipes", () => {
     expect(normalizeRecipes(null)).toEqual({});
     expect(normalizeRecipes([])).toEqual({});
   });
-  it("accepts the synthetic screenshot fixture as 36 recipes and the fixture says it is synthetic", () => {
-    const file = JSON.parse(
-      readFileSync(
-        fileURLToPath(new URL("../../fixtures/recipes.json", import.meta.url)),
-        "utf8",
-      ),
-    );
-    expect(file._comment).toMatch(/NOT the game's recipes/);
-    const recipes = normalizeRecipes(file);
-    expect(Object.keys(recipes)).toHaveLength(36);
-    expect(recipes.knife).toEqual({ scraps: 10, steel: 1 });
-    expect(recipes.jet).toEqual({ scraps: 2430, steel: 6 });
+  it("ships the game's recipe for all 36 codes: the tier's scrap value in scraps and twice the base steel for a chosen slot", () => {
+    expect(Object.keys(GAME_RECIPES)).toHaveLength(36);
+    expect(GAME_RECIPES.knife).toEqual({ scraps: 6, steel: 2 });
+    expect(GAME_RECIPES.boots5).toEqual({ scraps: 486, steel: 32 });
+    expect(GAME_RECIPES.jet).toEqual({ scraps: 1458, steel: 64 });
+    for (const code of CRAFT_CODES) {
+      const { rarity } = describeCode(code);
+      expect(GAME_RECIPES[code]).toEqual({
+        scraps: SCRAP_LADDER[rarity],
+        steel: 2 * CRAFT_STEEL[rarity],
+      });
+    }
+    expect(craftRecipe("mythic", { chosen: false })).toEqual({
+      scraps: 1458,
+      steel: 32,
+    });
+    expect(craftRecipe("wooden")).toBeNull();
+    expect(normalizeRecipes(GAME_RECIPES)).toEqual(GAME_RECIPES); // the table passes its own validation
+  });
+  it("works from the player's override when there is one, else the game's recipe, and labels both", () => {
+    expect(recipeFor("boots5", { boots5: { scraps: 10, steel: 2 } })).toEqual({
+      value: { scraps: 10, steel: 2 },
+      source: "manual",
+      note: "your recipe, stored on this browser (the game's table says 486 scraps + 32 steel)",
+    });
+    expect(recipeFor("boots5", {})).toEqual({
+      value: { scraps: 486, steel: 32 },
+      source: "game",
+      note: "the game's recipe, slot chosen: 486 scraps + 32 steel (a random craft of this tier burns half the steel, 16)",
+    });
+    expect(recipeFor("jet").value).toEqual({ scraps: 1458, steel: 64 });
+    expect(recipeFor("scraps", { scraps: { scraps: 1, steel: 1 } })).toEqual({
+      value: null,
+      source: "none",
+      note: "not a craftable item",
+    });
   });
 });
 

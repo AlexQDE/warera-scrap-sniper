@@ -169,13 +169,11 @@ console.log("after:");
   await page.close();
 }
 {
-  const recipes = JSON.parse(
-    await readFile(resolve(root, "fixtures/recipes.json"), "utf8"),
-  );
+  // The desk ships the game's recipe table, so the screenshots need none.
   for (const width of [1280, 420]) {
     const page = await openMarket({
       width,
-      settings: { craftCollapsed: false, craftRecipes: recipes },
+      settings: { craftCollapsed: false },
     });
     await page.locator("[data-action='desk-pick'][data-code='jet']").click();
     await page.waitForTimeout(600);

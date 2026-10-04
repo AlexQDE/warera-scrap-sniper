@@ -15,6 +15,7 @@
     "extension/lib/settings.mjs",
     "extension/lib/format.mjs",
     "extension/lib/items.mjs",
+    "extension/lib/ladder.mjs",
     "extension/lib/resale.mjs",
     "extension/lib/offers.mjs",
     "extension/lib/craft.mjs",

@@ -126,12 +126,14 @@ describe("Craft Desk panel", () => {
     expect(el().textContent).toContain("Add your WarEra API key");
     expect(el().querySelector(".lens-matrix")).toBeNull();
   });
-  it("fills the 6×6 matrix with 'no recipe' until recipes are entered, and labels the quote sources", () => {
+  it("fills the 6×6 matrix from the game's recipe table (every cell priced, waiting for fills), and labels the quote sources", () => {
     render();
     const cells = el().querySelectorAll(".lens-matrix td button");
     expect(cells).toHaveLength(36);
-    expect([...cells].every((c) => c.textContent === "no recipe")).toBe(true);
-    expect(el().textContent).toContain("no recipes entered yet");
+    expect([...cells].every((c) => c.textContent === "no fills")).toBe(true);
+    expect(el().textContent).toContain("the game's recipes, slot chosen");
+    expect(el().textContent).not.toContain("overridden by you");
+    expect(el().textContent).not.toContain("no recipe");
     expect(el().textContent).toContain("scraps: best ask (fresh)");
     expect(el().textContent).toContain("steel: best ask (fresh)");
     expect(el().textContent).toContain("read off the page notice");
@@ -144,9 +146,15 @@ describe("Craft Desk panel", () => {
     render();
     expect(requestSales).toHaveBeenCalledWith("boots5");
     expect(el().textContent).toContain("legendary boots");
+    // The game's recipe applies before anything is typed: 486 scraps + 32 steel at 0.21 / 1.6.
     expect(el().textContent).toContain(
-      "not entered: read it off the game's craft screen",
+      "the game's recipe, slot chosen: 486 scraps + 32 steel (a random craft of this tier burns half the steel, 16)",
     );
+    expect(el().textContent).toContain("153.260 g"); // 486 × 0.21 + 32 × 1.6
+    expect(el().querySelector('[data-field="recipe-scraps"]').value).toBe(
+      "486",
+    );
+    expect(el().querySelector('[data-action="desk-forget-recipe"]')).toBeNull();
     type("recipe-scraps", "10");
     type("recipe-steel", "2");
     click('[data-action="desk-save-recipe"]');
@@ -156,6 +164,13 @@ describe("Craft Desk panel", () => {
     await flush();
     render();
     const text = () => el().textContent;
+    expect(text()).toContain(
+      "your recipe, stored on this browser (the game's table says 486 scraps + 32 steel)",
+    );
+    expect(text()).toContain("1 overridden by you");
+    expect(
+      el().querySelector('[data-action="desk-forget-recipe"]'),
+    ).not.toBeNull();
     expect(text()).toContain("5.300 g"); // 10 × 0.21 + 2 × 1.6
     expect(text()).toContain("Buy now at the asks");
     expect(text()).toContain("Place bids at the best bid");
@@ -678,11 +693,17 @@ describe("second review round", () => {
     });
     await flush();
     render();
-    expect(el().textContent).toContain("Recipe for legendary boots removed");
+    expect(el().textContent).toContain(
+      "Recipe override for legendary boots removed; the game's recipe applies",
+    );
+    // Back on the game's recipe: the cell is priced again and waits for fills, never "no recipe".
     expect(
       el().querySelector('[data-action="desk-pick"][data-code="boots5"]')
         .textContent,
-    ).toBe("no recipe");
+    ).toBe("no fills");
+    expect(el().querySelector('[data-field="recipe-scraps"]').value).toBe(
+      "486",
+    );
   });
   it("clears only the numbers the completed recipe save carried: another item's numbers typed meanwhile stay", async () => {
     render();

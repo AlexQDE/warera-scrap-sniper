@@ -2,14 +2,15 @@
 // The Craft Desk's adapter: where recipes, prices, outcome distributions and
 // the tax rate come from, each labelled with its provenance, so the pure
 // maths in craft.mjs never has to know. Three sources, in this order of
-// trust: existing extension data (the scrap book, the resource books, the
-// recent fills), the player's own inputs (manual), and fixtures (synthetic,
-// for tests and screenshots). Nothing here invents a number: a missing input
-// stays missing and is named.
+// trust: the player's own inputs (manual), the game's own rules (the recipe
+// table in ladder.mjs, see docs/GAME-FACTS.md), and existing extension data
+// (the scrap book, the resource books, the recent fills). Nothing here
+// invents a number: a missing input stays missing and is named.
 import { RARITIES, WEAPONS, GEAR_CODES } from "./items.mjs";
 import { freshness, TTL, nonNegative as money } from "./quality.mjs";
 import { normalizeRecipe } from "./craft.mjs";
 import { comparableFills, resaleEstimate } from "./resale.mjs";
+import { craftRecipe, CHOSEN_SLOT_STEEL } from "./ladder.mjs";
 
 /** @typedef {{ scraps: number, steel: number }} Recipe */
 /** @typedef {{ value: number | null, source: "manual" | "page" | "quote" | "fixture" | "none", note?: string }} Sourced */
@@ -19,6 +20,47 @@ export const CRAFT_CODES = RARITIES.flatMap((r) => [
   GEAR_CODES[r].weapon,
   ...GEAR_CODES[r].gear,
 ]);
+
+/**
+ * The game's recipe for every craftable code, slot chosen (which is what a
+ * desk cell is): the tier's scrap value in scraps and twice the base steel
+ * fee. Measured on the craft feed and read off the client; provenance in
+ * docs/GAME-FACTS.md §3.
+ * @type {Readonly<Record<string, Recipe>>}
+ */
+export const GAME_RECIPES = Object.freeze(
+  Object.fromEntries(
+    CRAFT_CODES.flatMap((code) => {
+      const r = craftRecipe(describeCode(code)?.rarity ?? "");
+      return r ? [[code, r]] : [];
+    }),
+  ),
+);
+
+/**
+ * The recipe the desk works with: the player's own entry for `code` first
+ * (an override kept on this browser), else the game's chosen-slot recipe.
+ * Never empty for a craftable code, so no cell has to be typed in.
+ * @param {string} code @param {Record<string, Recipe>} [overrides]
+ * @returns {{ value: Recipe | null, source: "manual" | "game" | "none", note: string }}
+ */
+export function recipeFor(code, overrides = {}) {
+  const game = GAME_RECIPES[code];
+  const own = overrides?.[code];
+  if (own && game)
+    return {
+      value: own,
+      source: "manual",
+      note: `your recipe, stored on this browser (the game's table says ${game.scraps} scraps + ${game.steel} steel)`,
+    };
+  if (!game)
+    return { value: null, source: "none", note: "not a craftable item" };
+  return {
+    value: game,
+    source: "game",
+    note: `the game's recipe, slot chosen: ${game.scraps} scraps + ${game.steel} steel (a random craft of this tier burns half the steel, ${game.steel / CHOSEN_SLOT_STEEL})`,
+  };
+}
 
 /** "boots5" -> { slot: "boots", tier: 5, rarity: "legendary" }; "jet" -> { slot: "weapon", tier: 6, rarity: "mythic" }. @param {unknown} code */
 export function describeCode(code) {
@@ -38,9 +80,10 @@ export function describeCode(code) {
 }
 
 /**
- * The recipe table the player keeps: a map code -> { scraps, steel }, read
- * from the game's craft screen by hand. Validated entry by entry; an
- * invalid entry is dropped, never repaired.
+ * The recipe overrides the player keeps: a map code -> { scraps, steel },
+ * typed on the desk when the game's craft screen disagrees with the shipped
+ * table. Validated entry by entry; an invalid entry is dropped, never
+ * repaired.
  * @param {unknown} raw
  * @returns {Record<string, Recipe>}
  */

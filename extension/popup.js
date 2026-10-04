@@ -35,8 +35,8 @@ function show(p) {
   for (const field of toggles) $(field).checked = p[field];
   const n = Object.keys(p.craftRecipes ?? {}).length;
   $("recipes").textContent = n
-    ? `${n} craft recipe${n === 1 ? "" : "s"} stored on this browser.`
-    : "No craft recipes stored.";
+    ? `${n} recipe override${n === 1 ? "" : "s"} stored on this browser; the game's table applies to the rest.`
+    : "Using the game's recipe table; no overrides stored.";
   $("forgetRecipes").disabled = n === 0;
 }
 async function load() {
@@ -112,7 +112,7 @@ async function forgetRecipes() {
       settings: { craftRecipes: {} },
     });
     show(preferences(r.settings));
-    status("Craft recipes removed from this browser.", "ok");
+    status("Recipe overrides removed; the game's table applies.", "ok");
   } catch (e) {
     status(e.message, "bad");
     $("forgetRecipes").disabled = false;
