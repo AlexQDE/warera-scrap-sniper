@@ -219,6 +219,21 @@ describe("compact annotation", () => {
     equipment.render(state);
     expect(annotation().textContent).toContain("resale · 5 fills");
   });
+  it("lets fills age out of the window as time passes, even with the estimate cached", () => {
+    state.salesByCode = {
+      knife: {
+        code: "knife",
+        at: iso(),
+        complete: true,
+        fills: [1, 1.1, 0.9, 1.2, 1.05].map((p, i) => fill(p, 70 + i * 0.4)),
+      },
+    };
+    equipment.render(state);
+    expect(annotation().textContent).toContain("resale · 5 fills");
+    vi.setSystemTime(new Date(NOW + 3 * 3600e3));
+    equipment.render(state);
+    expect(annotation().textContent).toContain("resale · 0 of 5 fills");
+  });
   it("keeps Details per row when two listings look identical", () => {
     mount("knife", 2);
     const second = document.getElementById("offer2");

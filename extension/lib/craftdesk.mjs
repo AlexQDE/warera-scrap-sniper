@@ -110,7 +110,8 @@ export function createCraftDesk({
   const el = () => document.getElementById(DESK_ID);
 
   /** Save the ledger; true only when the worker confirmed the stored list. */
-  async function persist(entries, message, removed = []) {
+  /** Only what this tab changed travels: the entries it wrote and the ids it removed. */
+  async function persist({ changed = [], removed = [] }, message) {
     if (busy) {
       status = "Ledger: a save is still running; try again in a moment";
       rescan();
@@ -120,7 +121,7 @@ export function createCraftDesk({
     rescan();
     let ok = false;
     try {
-      const r = await onLedger(entries, removed);
+      const r = await onLedger({ changed, removed });
       if (r?.error) status = `Ledger: ${r.message ?? r.error}`;
       else if (!r?.ledger)
         status = "Ledger: not saved, the extension did not answer; try again";
@@ -214,7 +215,7 @@ export function createCraftDesk({
       }
       const saving = form;
       void persist(
-        [entry, ...entries],
+        { changed: [entry] },
         `Recorded ${entry.label || itemLabel(entry.code) || "a craft"} (${entry.inputs.priceSource} prices)`,
       ).then((ok) => {
         // A failed save keeps the form for another try; a form opened meanwhile is not this one's to close.
@@ -233,17 +234,13 @@ export function createCraftDesk({
         return;
       }
       if (type === "delete") {
-        void persist(
-          entries.filter((x) => x.id !== entry.id),
-          "Entry deleted",
-          [entry.id],
-        );
+        void persist({ removed: [entry.id] }, "Entry deleted");
         return;
       }
       const next = transition(entry, { type }, now());
       if (next)
         void persist(
-          entries.map((x) => (x.id === entry.id ? next : x)),
+          { changed: [next] },
           `Marked ${type === "unlist" ? "unlisted" : type === "keep" ? "kept" : "scrapped"}`,
         );
     } else if (a === "desk-ledger-confirm" && pending) {
@@ -268,7 +265,7 @@ export function createCraftDesk({
       }
       const done = pending.type;
       void persist(
-        entries.map((x) => (x.id === next.id ? next : x)),
+        { changed: [next] },
         done === "sell"
           ? `Sale recorded: ${fmt(next.sale.proceeds)} g received`
           : `Listed at ${fmt(next.listing.price)} g`,
@@ -313,8 +310,14 @@ export function createCraftDesk({
       rescan();
       return;
     }
+    // Only the entries the file added or updated are written; the rest stays as stored.
+    const existing = new Map(entries.map((e) => [e.id, e]));
+    const changed = r.entries.filter((e) => {
+      const old = existing.get(e.id);
+      return !old || old.updatedAt !== e.updatedAt;
+    });
     void persist(
-      r.entries,
+      { changed },
       `Imported: ${r.added} added, ${r.updated} updated, ${r.skipped} skipped`,
     ).then((ok) => {
       if (ok) {
@@ -428,7 +431,8 @@ export function createCraftDesk({
   /** The outcomes of crafting `code`, memoised per sales snapshot and tax rate. */
   function outcomesOf(code, state, tax) {
     const sales = state.salesByCode?.[code];
-    const key = `${code}|${sales?.at ?? ""}|${tax.value}`;
+    // The window is measured from now, so a cached estimate turns over every five minutes and fills age out of it.
+    const key = `${code}|${sales?.at ?? ""}|${tax.value}|${Math.floor(now() / 300_000)}`;
     let o = outcomesMemo.get(key);
     if (!o) {
       const outcomes = outcomesFor(code, {
@@ -683,6 +687,7 @@ export function createCraftDesk({
         const recipe = recipes[code];
         // One cell is rebuilt only when something it shows changed.
         const key = [
+          Math.floor(now() / 300_000),
           state.salesByCode?.[code]?.at ?? "",
           prices.scrap.value,
           prices.steel.value,

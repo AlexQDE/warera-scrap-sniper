@@ -152,7 +152,8 @@ export function createEquipment({
   function resaleFor(code, sales, durability) {
     const anyState = sales.fills.some((f) => f?.state != null);
     const state = anyState ? durability : null;
-    const key = `${code}|${sales.at}|${state ?? "any"}`;
+    // The 72 h window is measured from now: a cached estimate turns over every five minutes so fills age out.
+    const key = `${code}|${sales.at}|${state ?? "any"}|${Math.floor(now() / 300_000)}`;
     let est = resaleMemo.get(key);
     if (!est) {
       const fills = comparableFills(sales.fills, { code, now: now(), state });

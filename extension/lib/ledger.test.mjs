@@ -376,5 +376,6 @@ describe("merging a second tab's list", () => {
       ]),
     );
     expect(Object.keys(normalizeTombstones(many))).toHaveLength(MAX_TOMBSTONES);
+    expect(MAX_TOMBSTONES).toBeGreaterThanOrEqual(1000);
   });
 });

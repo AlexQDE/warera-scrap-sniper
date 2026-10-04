@@ -12,8 +12,13 @@ import { nonNegative as money } from "./quality.mjs";
 
 export const LEDGER_VERSION = 1;
 export const MAX_ENTRIES = 500;
-/** Ids deleted recently are remembered so a tab holding an older copy cannot bring them back. */
-export const MAX_TOMBSTONES = 200;
+/**
+ * Ids deleted are remembered so a tab that still edits an old copy of one
+ * cannot bring it back. Writes carry only what a tab changed (never its whole
+ * list), so an untouched stale copy can resurrect nothing; the history only
+ * has to outlast a stale edit, and a thousand deletions is far beyond that.
+ */
+export const MAX_TOMBSTONES = 1000;
 export const STATES = Object.freeze([
   "crafted",
   "listed",

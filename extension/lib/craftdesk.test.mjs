@@ -21,6 +21,21 @@ const fills = (code, prices) =>
     code,
   }));
 let desk, settings, state, bar, save, onLedger, rescan, download, requestSales;
+let clock = NOW;
+/** What the worker does with a write: merge the changed entries and drop the removed ids. */
+async function applyOps({ changed = [], removed = [] } = {}) {
+  const byId = new Map((state.ledger?.entries ?? []).map((e) => [e.id, e]));
+  for (const e of changed) byId.set(e.id, e);
+  for (const id of removed) byId.delete(id);
+  state.ledger = {
+    version: 1,
+    revision: (state.ledger?.revision ?? 0) + 1,
+    entries: [...byId.values()].sort(
+      (a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt),
+    ),
+  };
+  return { ledger: state.ledger };
+}
 const el = () => document.getElementById(DESK_ID);
 const click = (selector) => {
   const b = el().querySelector(selector);
@@ -41,6 +56,7 @@ const flush = async () => {
 };
 
 beforeEach(() => {
+  clock = NOW;
   document.body.innerHTML =
     '<main><section id="scrap-sniper-bar"></section><div id="tax"><span>Market tax 5%</span></div></main>';
   bar = document.getElementById("scrap-sniper-bar");
@@ -49,10 +65,7 @@ beforeEach(() => {
     settings = preferences({ ...settings, ...patch });
     return settings;
   });
-  onLedger = vi.fn(async (entries) => {
-    state.ledger = { version: 1, entries };
-    return { ledger: state.ledger };
-  });
+  onLedger = vi.fn(applyOps);
   rescan = vi.fn();
   download = vi.fn();
   requestSales = vi.fn();
@@ -63,7 +76,7 @@ beforeEach(() => {
     requestSales,
     refresh: vi.fn(),
     rescan,
-    now: () => NOW,
+    now: () => clock,
     download,
   });
   state = {
@@ -267,7 +280,7 @@ describe("craft ledger in the desk", () => {
     click('[data-action="desk-ledger-add"]');
     await flush();
     expect(onLedger).toHaveBeenCalledTimes(1);
-    const entry = onLedger.mock.calls[0][0][0];
+    const entry = onLedger.mock.calls[0][0].changed[0];
     expect(entry).toMatchObject({
       code: "boots5",
       state: "crafted",
@@ -302,13 +315,13 @@ describe("craft ledger in the desk", () => {
     expect(el().textContent).toContain("Prices are manual");
     click('[data-action="desk-ledger-add"]');
     await flush();
-    expect(onLedger.mock.calls[0][0][0].inputs).toMatchObject({
+    expect(onLedger.mock.calls[0][0].changed[0].inputs).toMatchObject({
       scrapPrice: 0.25,
       steelPrice: 1.6,
       priceSource: "manual",
     });
     render();
-    const id = onLedger.mock.calls[0][0][0].id;
+    const id = onLedger.mock.calls[0][0].changed[0].id;
     click(
       `[data-action="desk-ledger-move"][data-type="list"][data-id="${id}"]`,
     );
@@ -362,7 +375,7 @@ describe("craft ledger in the desk", () => {
     click('[data-action="desk-ledger-add"]');
     await flush();
     render();
-    const id = onLedger.mock.calls[0][0][0].id;
+    const id = onLedger.mock.calls[0][0].changed[0].id;
     let release;
     onLedger.mockImplementation(
       () =>
@@ -425,7 +438,8 @@ describe("craft ledger in the desk", () => {
       "Imported: 1 added, 0 updated, 1 skipped",
     );
     expect(el().textContent).toContain("imported one");
-    expect(onLedger.mock.calls.at(-1)[0]).toHaveLength(2);
+    expect(onLedger.mock.calls.at(-1)[0].changed).toHaveLength(1); // only the imported entry travels
+    expect(state.ledger.entries).toHaveLength(2);
     click('[data-action="desk-import-toggle"]');
     render();
     type("import-text", "{nope");
@@ -528,10 +542,9 @@ describe("second review round", () => {
     render();
     let release;
     onLedger.mockImplementation(
-      (entries) =>
+      (ops) =>
         new Promise((resolve) => {
-          release = () =>
-            resolve({ ledger: (state.ledger = { version: 1, entries }) });
+          release = () => applyOps(ops).then(resolve);
         }),
     );
     click('[data-action="desk-ledger-add"]');
@@ -572,7 +585,7 @@ describe("second review round", () => {
     click('[data-action="desk-ledger-add"]');
     await flush();
     render();
-    const id = onLedger.mock.calls[0][0][0].id;
+    const id = onLedger.mock.calls[0][0].changed[0].id;
     click(
       `[data-action="desk-ledger-move"][data-type="scrap"][data-id="${id}"]`,
     );
@@ -582,11 +595,11 @@ describe("second review round", () => {
       `[data-action="desk-ledger-move"][data-type="delete"][data-id="${id}"]`,
     );
     await flush();
-    expect(onLedger).toHaveBeenLastCalledWith([], [id]);
-    onLedger.mockImplementation(async (entries) => {
-      state.ledger = { version: 1, entries };
-      return { ledger: state.ledger, merged: true };
-    });
+    expect(onLedger).toHaveBeenLastCalledWith({ changed: [], removed: [id] });
+    onLedger.mockImplementation(async (ops) => ({
+      ...(await applyOps(ops)),
+      merged: true,
+    }));
     render();
     click('[data-action="desk-ledger-new"]');
     render();
@@ -596,5 +609,32 @@ describe("second review round", () => {
     expect(el().textContent).toContain(
       "merged with changes another tab made meanwhile",
     );
+  });
+  it("lets fills age out of the 72 h window as time passes, even with the cell cached", () => {
+    settings = preferences({
+      ...settings,
+      craftRecipes: { boots5: { scraps: 10, steel: 2 } },
+    });
+    state.salesByCode = {
+      boots5: {
+        code: "boots5",
+        at: iso(),
+        complete: true,
+        fills: [10, 11, 12, 13, 14].map((price, i) => ({
+          price,
+          at: iso((70 + i * 0.4) * 3600e3),
+          state: 100,
+          code: "boots5",
+        })),
+      },
+    };
+    render();
+    const cell = () =>
+      el().querySelector('[data-action="desk-pick"][data-code="boots5"]')
+        .textContent;
+    expect(cell()).toBe("+115%");
+    clock = NOW + 3 * 3600e3;
+    render();
+    expect(cell()).toBe("0/5 fills");
   });
 });

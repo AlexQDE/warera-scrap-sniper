@@ -342,21 +342,23 @@ export function createController({
       }
       if (msg?.type === "ledgerSet")
         return serial(async () => {
-          // A tab sends its whole list with the revision it read. If another
-          // tab wrote since, the lists are merged by id instead of the newer
-          // write silently replacing the older tab's entries; deletions are
-          // remembered so a stale copy cannot bring them back.
+          // A tab sends only what it changed: the entries it created or
+          // edited and the ids it removed, with the revision it read. They
+          // are merged onto what is stored, so a tab's untouched (and maybe
+          // stale) copy of the rest can neither overwrite nor revive anything;
+          // deletions are remembered so a stale edit of a deleted entry loses.
           const { craftLedger } = await storage.get(["craftLedger"]);
           const stored = normalizeLedger(craftLedger, now());
-          const incoming = normalizeLedger(msg.ledger, now());
+          const changed = normalizeLedger(
+            { entries: msg.changed },
+            now(),
+          ).entries;
           const removed = (Array.isArray(msg.removed) ? msg.removed : [])
             .map(String)
             .slice(0, 500);
-          const conflict =
-            craftLedger != null && Number(msg.baseRevision) !== stored.revision;
           const merged = mergeLedgers({
-            stored: conflict ? stored.entries : [],
-            incoming: incoming.entries,
+            stored: stored.entries,
+            incoming: changed,
             removed,
             tombstones: stored.tombstones,
             now: now(),
@@ -374,7 +376,12 @@ export function createController({
                 "The craft ledger is too large to store; export and trim it",
             };
           await storage.set({ craftLedger: ledger });
-          return { ledger, merged: conflict };
+          return {
+            ledger,
+            merged:
+              craftLedger != null &&
+              Number(msg.baseRevision) !== stored.revision,
+          };
         });
       if (["book", "cases", "avg", "sales"].includes(msg?.type)) {
         if (msg.type === "sales" && !ITEM_CODES.has(msg.itemCode))

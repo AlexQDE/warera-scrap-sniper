@@ -225,11 +225,11 @@ export async function startLens(runtime = chrome.runtime) {
       if (context.craft) void read("sales", false, code);
     },
     rescan: () => sched.schedule(),
-    onLedger: async (entries, removed = []) => {
+    onLedger: async ({ changed = [], removed = [] } = {}) => {
       const r = await send({
         type: "ledgerSet",
-        ledger: { entries },
         baseRevision: state.ledger?.revision ?? 0,
+        changed,
         removed,
       });
       if (r?.ledger) state.ledger = r.ledger;
