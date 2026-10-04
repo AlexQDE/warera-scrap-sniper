@@ -1,0 +1,48 @@
+{
+  "measuredAt": "2026-10-04T16:49:56.291Z",
+  "engine": "Chromium headless via Playwright",
+  "fixture": "fixtures/market.html?item=jet&rows=60",
+  "results": [
+    {
+      "build": "before (1.4.1)",
+      "rows": 60,
+      "quiet3s": {
+        "scans": 0,
+        "ms": 3000
+      },
+      "bursts40": {
+        "scans": 40,
+        "scanMs": 209.7,
+        "maxScanMs": 10.7,
+        "innerTextReads": 5000,
+        "getComputedStyle": 8640,
+        "querySelectorAll": 2761
+      },
+      "equipment": null
+    },
+    {
+      "build": "after (1.6.0)",
+      "rows": 60,
+      "quiet3s": {
+        "scans": 0,
+        "ms": 3000
+      },
+      "bursts40": {
+        "scans": 40,
+        "scanMs": 139.1,
+        "maxScanMs": 14,
+        "innerTextReads": 0,
+        "getComputedStyle": 1440,
+        "querySelectorAll": 2641
+      },
+      "equipment": {
+        "rowsScanned": 2520,
+        "rowsWritten": 120,
+        "scopedScans": 41,
+        "fullScans": 1,
+        "innerTextReads": 60,
+        "styleReads": 60
+      }
+    }
+  ]
+}

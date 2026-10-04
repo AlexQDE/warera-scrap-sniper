@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fixture: WarEra equipment market (synthetic)</title>
+    <!--
+      A synthetic stand-in for app.warera.io/market/equipments, built from the
+      layout notes in extension/lib/dom.mjs: a "Market tax" notice, a grid of
+      tiles named item-code-selector-<code> whose border colour is the rarity
+      (the v0.26 850 shades), the selected tile on top, then offer rows that
+      print the stat, the durability, the seller, the age, the taxed price and
+      a BUY button. Prices, stats and names are invented. Nothing here is a
+      capture of the live page; the manual checklist covers that.
+    -->
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        margin: 0;
+        background: #0b1220;
+        color: #e5e7eb;
+        font:
+          14px/1.4 system-ui,
+          sans-serif;
+      }
+      .page {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 16px;
+      }
+      .topbar {
+        display: flex;
+        justify-content: space-between;
+        padding: 10px 0 16px;
+        border-bottom: 1px solid #1f2937;
+        margin-bottom: 14px;
+        color: #9ca3af;
+      }
+      .tax {
+        display: flex;
+        gap: 8px;
+        color: #9ca3af;
+        margin: 8px 0;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        gap: 10px;
+        margin: 12px 0 18px;
+      }
+      .section h4 {
+        margin: 0 0 6px;
+        font-size: 12px;
+        color: #9ca3af;
+      }
+      .tiles {
+        display: flex;
+        gap: 4px;
+      }
+      .tile {
+        width: 22px;
+        height: 22px;
+        border-radius: 4px;
+        border: 2px solid;
+        background: #111827;
+        opacity: 1;
+        position: relative;
+      }
+      .offers {
+        display: grid;
+        gap: 8px;
+      }
+      .offer {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 12px;
+        background: #111827;
+        border: 1px solid #1f2937;
+        border-radius: 10px;
+        padding: 10px 12px;
+      }
+      .frame {
+        width: 48px;
+        height: 48px;
+        border-radius: 8px;
+        border: 2px solid;
+        background: #0f172a;
+        display: grid;
+        place-items: center;
+        flex: none;
+      }
+      .frame img {
+        width: 32px;
+        height: 32px;
+      }
+      .col {
+        display: grid;
+        gap: 2px;
+        min-width: 70px;
+      }
+      .col small {
+        color: #9ca3af;
+        font-size: 11px;
+      }
+      .price {
+        margin-left: auto;
+        font-weight: 700;
+        font-size: 16px;
+      }
+      button.buy {
+        background: #2563eb;
+        color: #fff;
+        border: 0;
+        border-radius: 8px;
+        padding: 8px 18px;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .more {
+        margin: 14px auto;
+        display: block;
+        background: #1f2937;
+        color: #e5e7eb;
+        border: 0;
+        border-radius: 8px;
+        padding: 8px 16px;
+        font: inherit;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="topbar">
+        <span>WarEra (fixture) · Market › Equipment</span><span>12,345 g</span>
+      </div>
+      <div class="tax"><span>Market tax</span><span>5%</span></div>
+      <div id="grid" class="grid"></div>
+      <div id="offers" class="offers"></div>
+      <button class="more" type="button">Load more</button>
+    </div>
+    <script>
+      // The same 850-shade palette dom.mjs reads, so the extension can
+      // calibrate off the grid and classify the offer frames.
+      const BORDER = {
+        common: "rgb(28, 46, 49)",
+        uncommon: "rgb(10, 44, 28)",
+        rare: "rgb(14, 29, 63)",
+        epic: "rgb(42, 23, 69)",
+        legendary: "rgb(43, 43, 18)",
+        mythic: "rgb(57, 15, 16)",
+      };
+      const RARITIES = Object.keys(BORDER);
+      const WEAPONS = ["knife", "gun", "rifle", "sniper", "tank", "jet"];
+      const SECTIONS = {
+        Weapons: (i) => WEAPONS[i],
+        Helmets: (i) => `helmet${i + 1}`,
+        Chests: (i) => `chest${i + 1}`,
+        Gloves: (i) => `gloves${i + 1}`,
+        Pants: (i) => `pants${i + 1}`,
+        Boots: (i) => `boots${i + 1}`,
+      };
+      const params = new URLSearchParams(location.search);
+      const selected = params.get("item");
+      const rows = Number(params.get("rows") || 12);
+      const grid = document.getElementById("grid");
+      for (const [name, codeOf] of Object.entries(SECTIONS)) {
+        const sec = document.createElement("div");
+        sec.className = "section";
+        sec.innerHTML = `<h4>${name}</h4><div class="tiles"></div>`;
+        RARITIES.forEach((r, i) => {
+          const t = document.createElement("div");
+          t.className = "tile";
+          t.id = `item-code-selector-${codeOf(i)}`;
+          t.style.borderColor = BORDER[r];
+          if (selected) {
+            if (codeOf(i) === selected) t.style.zIndex = "1";
+            else t.style.opacity = "0.5";
+          }
+          sec.querySelector(".tiles").appendChild(t);
+        });
+        grid.appendChild(sec);
+      }
+      // Offers: a deterministic synthetic list. The selected item fills the
+      // list when a filter is set, otherwise the list mixes items.
+      const IMG =
+        "data:image/svg+xml;utf8," +
+        encodeURIComponent(
+          '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M6 20 L16 4 L26 20 L16 28 Z" fill="#94a3b8"/></svg>',
+        );
+      const SKINS = {
+        jet: "winterJet",
+        tank: "desertTank",
+        knife: "knife",
+        boots5: "dieselBoots",
+        helmet4: "miamiHelmet",
+        chest2: "chest2",
+      };
+      const BASE = {
+        jet: 380,
+        tank: 120,
+        knife: 1.2,
+        boots5: 130,
+        helmet4: 42,
+        chest2: 4.6,
+      };
+      const STAT = {
+        jet: 270,
+        tank: 180,
+        knife: 12,
+        boots5: 95,
+        helmet4: 60,
+        chest2: 22,
+      };
+      const rarityOf = (code) => {
+        const w = WEAPONS.indexOf(code);
+        if (w >= 0) return RARITIES[w];
+        return RARITIES[Number(code.slice(-1)) - 1];
+      };
+      const codes = selected ? [selected] : Object.keys(SKINS);
+      const offers = document.getElementById("offers");
+      let seed = 7;
+      const rnd = () => {
+        seed = (seed * 9301 + 49297) % 233280;
+        return seed / 233280;
+      };
+      function addRows(n) {
+        for (let i = 0; i < n; i++) {
+          const code = codes[(offers.children.length + i) % codes.length];
+          const rarity = rarityOf(code);
+          const price = (BASE[code] ?? 10) * (0.8 + rnd() * 0.5);
+          const stat = Math.round((STAT[code] ?? 50) * (0.85 + rnd() * 0.3));
+          const row = document.createElement("article");
+          row.className = "offer";
+          row.innerHTML = `<div class="frame" style="border-color:${BORDER[rarity]}"><img alt="${SKINS[code] ?? code}" src="${IMG}"></div><div class="col"><span>${stat}</span><small>stat</small></div><div class="col"><span>${rnd() > 0.7 ? 60 + Math.round(rnd() * 40) : 100}%</span><small>durability</small></div><div class="col"><span>Trader${Math.round(rnd() * 900)}</span><small>${Math.round(rnd() * 20) + 1}h ago</small></div><div class="price">${price.toFixed(3)}</div><button class="buy" type="button">BUY</button>`;
+          offers.appendChild(row);
+        }
+      }
+      addRows(rows);
+      document
+        .querySelector(".more")
+        .addEventListener("click", () => addRows(12));
+      window.__fixture = { addRows };
+    </script>
+  </body>
+</html>
