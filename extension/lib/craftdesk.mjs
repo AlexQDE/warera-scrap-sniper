@@ -30,6 +30,7 @@ import {
   normalizeRecipes,
   recipeFor,
   randomCraft,
+  GAME_RECIPES,
 } from "./craftdata.mjs";
 import { listingScenarios, liquidity, MIN_RESALE_SAMPLE } from "./resale.mjs";
 import {
@@ -212,9 +213,13 @@ export function createCraftDesk({
       delete fields.steelPrice;
       rescan();
     } else if (a === "desk-save-recipe") {
+      // The boxes show the recipe in use (the game's, or the override), so a box left untouched means that number, not zero.
+      const shown = selected
+        ? recipeFor(selected, normalizeRecipes(s.craftRecipes)).value
+        : null;
       const r = normalizeRecipe({
-        scraps: fields["recipe-scraps"],
-        steel: fields["recipe-steel"],
+        scraps: fields["recipe-scraps"] ?? shown?.scraps,
+        steel: fields["recipe-steel"] ?? shown?.steel,
       });
       if (!r || !selected) {
         status = "Recipe: enter whole numbers, at least one above zero";
@@ -226,6 +231,30 @@ export function createCraftDesk({
         scraps: fields["recipe-scraps"],
         steel: fields["recipe-steel"],
       };
+      const game = GAME_RECIPES[code];
+      if (game && r.scraps === game.scraps && r.steel === game.steel) {
+        // Nothing to override: the game's table already says this. An override that now matches it goes instead.
+        delete fields["recipe-scraps"];
+        delete fields["recipe-steel"];
+        if (!normalizeRecipes(s.craftRecipes)[code]) {
+          status = `Recipe for ${itemLabel(code)}: that is the game's recipe already; nothing to override`;
+          rescan();
+          return;
+        }
+        Promise.resolve(save({ craftRecipeOps: { remove: [code] } })).then(
+          (applied) => {
+            status = applied
+              ? `Recipe for ${itemLabel(code)} matches the game's table again; the override is removed`
+              : "Recipe: not saved, the extension did not answer; try again";
+            rescan();
+          },
+          () => {
+            status = "Recipe: not saved; try again";
+            rescan();
+          },
+        );
+        return;
+      }
       // One code travels, not the whole table, so another tab's recipe is never overwritten; the inputs clear only once the worker confirmed,
       // and only while they still hold this save's numbers for this item: numbers typed meanwhile, for another item or this one, are not this save's to clear.
       Promise.resolve(save({ craftRecipeOps: { set: { [code]: r } } })).then(

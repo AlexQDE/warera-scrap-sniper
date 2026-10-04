@@ -1237,4 +1237,52 @@ describe("second review round", () => {
       "EV unavailable: 5 of 6 slots have a sales estimate",
     );
   });
+  it("saves the shown number for a box left untouched: editing only the steel keeps the game's scraps", async () => {
+    render();
+    click('[data-action="desk-pick"][data-code="boots5"]');
+    render();
+    type("recipe-steel", "40");
+    click('[data-action="desk-save-recipe"]');
+    expect(save).toHaveBeenLastCalledWith({
+      craftRecipeOps: { set: { boots5: { scraps: 486, steel: 40 } } },
+    });
+    await flush();
+    render();
+    expect(el().textContent).toContain(
+      "your recipe, stored on this browser (the game's table says 486 scraps + 32 steel)",
+    );
+    expect(el().querySelector('[data-field="recipe-scraps"]').value).toBe(
+      "486",
+    );
+    expect(el().querySelector('[data-field="recipe-steel"]').value).toBe("40");
+  });
+  it("stores no override equal to the game's recipe, and drops an override that comes to equal it", async () => {
+    render();
+    click('[data-action="desk-pick"][data-code="boots5"]');
+    render();
+    const saves = save.mock.calls.length;
+    click('[data-action="desk-save-recipe"]'); // nothing typed: the boxes show the game's numbers
+    expect(save.mock.calls).toHaveLength(saves);
+    render();
+    expect(el().textContent).toContain(
+      "that is the game's recipe already; nothing to override",
+    );
+    settings = preferences({
+      ...settings,
+      craftRecipes: { boots5: { scraps: 10, steel: 2 } },
+    });
+    render();
+    type("recipe-scraps", "486");
+    type("recipe-steel", "32");
+    click('[data-action="desk-save-recipe"]');
+    expect(save).toHaveBeenLastCalledWith({
+      craftRecipeOps: { remove: ["boots5"] },
+    });
+    await flush();
+    render();
+    expect(el().textContent).toContain(
+      "matches the game's table again; the override is removed",
+    );
+    expect(el().textContent).not.toContain("overridden by you");
+  });
 });
