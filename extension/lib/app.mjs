@@ -31,6 +31,7 @@ export async function startLens(runtime = chrome.runtime) {
   const SALES_CODES_KEPT = 12;
   const SALES_RETRY_MS = 15_000; // a failed or empty sales read is not asked again at once
   const salesAttempts = new Map(); // code -> last attempt
+  const salesPending = new Map(); // code -> forced?: sales reads asked for while another item's read was in flight
   let context = {};
   let disposed = false;
   let timer;
@@ -90,6 +91,7 @@ export async function startLens(runtime = chrome.runtime) {
         state.salesByCode = {};
         state.salesErrors = {};
         salesAttempts.clear();
+        salesPending.clear();
         state.errors = {};
         state.rejected = false;
       }
@@ -113,14 +115,14 @@ export async function startLens(runtime = chrome.runtime) {
     return r?.settings ?? null;
   };
   async function read(kind, force = false, code) {
-    if (
-      disposed ||
-      document.hidden ||
-      state.setup ||
-      state.invalidated ||
-      state.busy.has(kind)
-    )
+    if (disposed || document.hidden || state.setup || state.invalidated) return;
+    if (state.busy.has(kind)) {
+      // Sales reads are single-flight. One asked for while another item's read is in flight is kept, with
+      // whether it was forced, and runs when that read finishes; a plain repeat of the item being read is not.
+      if (kind === "sales" && code && (force || code !== state.salesReading))
+        salesPending.set(code, force || !!salesPending.get(code));
       return;
+    }
     const ttl = kind === "book" ? state.settings.intervalSec * 1000 : TTL[kind];
     // Sales are fresh per item: the panel's item and the desk's item each keep their own read.
     const held = kind === "sales" ? state.salesByCode[code] : state[kind];
@@ -190,13 +192,23 @@ export async function startLens(runtime = chrome.runtime) {
       }
     }
     sched.schedule();
-    if (
-      kind === "sales" &&
-      salesWanted &&
-      salesWanted !== code &&
-      !document.hidden
-    )
-      void read("sales", false, salesWanted);
+    if (kind === "sales" && !document.hidden) {
+      if (salesWanted && salesWanted !== code)
+        void read("sales", false, salesWanted);
+      drainSales();
+    }
+  }
+  /** Run the sales reads kept while one was in flight, one at a time; the rest wait for the next completion. */
+  function drainSales() {
+    if (!context.equipment && !context.craft) {
+      salesPending.clear();
+      return;
+    }
+    for (const [pendingCode, forced] of [...salesPending]) {
+      salesPending.delete(pendingCode);
+      void read("sales", forced, pendingCode);
+      if (state.busy.has("sales")) return;
+    }
   }
   const equipment = createEquipment({
     settings: () => state.settings,

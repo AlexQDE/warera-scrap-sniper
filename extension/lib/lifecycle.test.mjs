@@ -336,6 +336,61 @@ describe("SPA lifecycle and DOM work", () => {
     expect(salesCalls(runtime, "boots5")).toBe(1);
     expect(app.metrics.scans).toBeLessThan(10);
   });
+  it("runs a forced refresh of the desk's item after the panel's item read that was in flight, instead of dropping it", async () => {
+    window.history.replaceState({}, "", "/market/equipments?item=jet");
+    marketFixture();
+    let releaseJet = null;
+    const runtime = marketRuntime(
+      {
+        craftCollapsed: false,
+        craftRecipes: { boots5: { scraps: 10, steel: 2 } },
+      },
+      (msg) => {
+        const sales = {
+          sales: {
+            code: msg.itemCode,
+            at: new Date().toISOString(),
+            complete: true,
+            fills: [],
+          },
+        };
+        // the panel's forced jet read is slow
+        if (msg.itemCode === "jet" && msg.force)
+          return new Promise((resolve) => {
+            releaseJet = () => resolve(sales);
+          });
+        return sales;
+      },
+    );
+    app = await startLens(runtime);
+    await settle();
+    document
+      .querySelector('[data-action="desk-pick"][data-code="boots5"]')
+      .click();
+    await settle(3000);
+    expect(salesCalls(runtime, "jet")).toBe(1);
+    expect(salesCalls(runtime, "boots5")).toBe(1);
+    document.querySelector('#scrap-sniper-bar [data-action="refresh"]').click();
+    await settle();
+    expect(salesCalls(runtime, "jet")).toBe(2);
+    expect(releaseJet).not.toBeNull();
+    // meanwhile the desk's Refresh asks for boots5 again, by force, although its snapshot is fresh
+    document
+      .querySelector('#warera-plus-craft [data-action="refresh"]')
+      .click();
+    await settle();
+    expect(salesCalls(runtime, "boots5")).toBe(1); // single-flight: it waits for jet
+    releaseJet();
+    await settle(1000);
+    expect(salesCalls(runtime, "boots5")).toBe(2); // then runs, forced
+    const last = runtime.sendMessage.mock.calls
+      .filter(([m]) => m.type === "sales" && m.itemCode === "boots5")
+      .at(-1)[0];
+    expect(last.force).toBe(true);
+    await settle(3000);
+    expect(salesCalls(runtime, "boots5")).toBe(2); // once, no loop
+    expect(salesCalls(runtime, "jet")).toBe(2);
+  });
   it("retries a failing sales read after a pause, not on every scan", async () => {
     window.history.replaceState({}, "", "/market/equipments?item=jet");
     marketFixture();
