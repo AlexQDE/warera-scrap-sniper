@@ -151,6 +151,10 @@ describe("Craft Desk panel", () => {
       "the game's recipe, slot chosen: 486 scraps + 32 steel (a random craft of this tier burns half the steel, 16)",
     );
     expect(el().textContent).toContain("153.260 g"); // 486 × 0.21 + 32 × 1.6
+    // The reroll floor: 486 scraps back at the 0.2 bid = 97.2 g, 32 steel gone = 51.2 g, so a roll sent back costs 56.06 g.
+    expect(el().textContent).toContain(
+      "dismantling it returns all 486 scraps (97.200 g at the 0.200 scrap bid); the 32 steel is gone (51.200 g). A roll you send straight back to scraps costs 56.060 g, not the 153.260 g input.",
+    );
     expect(el().querySelector('[data-field="recipe-scraps"]').value).toBe(
       "486",
     );

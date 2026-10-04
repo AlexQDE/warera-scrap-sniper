@@ -12,6 +12,7 @@ import {
   breakEven,
   craftPlan,
   rankPlans,
+  rerollFloor,
 } from "./craft.mjs";
 
 // Synthetic recipe and books: the quantities are a fixture, not the game's
@@ -407,5 +408,42 @@ describe("craftPlan and rankPlans", () => {
       plan: craftPlan({ recipe, scrapPrice: 0.5, steelPrice: 1, outcomes: [] }),
     };
     expect(rankPlans([c, b, a]).map((p) => p.code)).toEqual(["a", "b", "c"]);
+  });
+});
+
+describe("rerollFloor", () => {
+  it("returns the whole scrap ladder of the rarity at the bid and writes the steel off, so a failed attempt loses less than the input", () => {
+    // A legendary craft: 486 scraps + 32 steel at 0.21 / 1.6 = 153.26 g; dismantled at 100% it gives 486 scraps back, 97.2 g at the 0.2 bid.
+    const floor = rerollFloor({
+      rarity: "legendary",
+      recipe: { scraps: 486, steel: 32 },
+      cost: 153.26,
+      scrapBid: 0.2,
+      steelPrice: 1.6,
+    });
+    expect(floor).toEqual({
+      scrapsBack: 486,
+      scrapsValue: 97.2,
+      steelLost: 32,
+      steelCost: 51.2,
+      loss: 56.06,
+    });
+    // The ladder, not the recipe, decides what comes back: an overridden recipe still dismantles into the tier's scraps.
+    expect(
+      rerollFloor({ rarity: "legendary", recipe, cost: 5.3, scrapBid: 0.2 })
+        .scrapsBack,
+    ).toBe(486);
+  });
+  it("leaves the value and the loss unknown without a bid, and everything null for an unknown rarity", () => {
+    const noBid = rerollFloor({ rarity: "mythic", recipe, cost: 5.3 });
+    expect(noBid).toMatchObject({
+      scrapsBack: 1458,
+      scrapsValue: null,
+      loss: null,
+      steelCost: null,
+    });
+    expect(
+      rerollFloor({ rarity: "wooden", recipe, cost: 5.3, scrapBid: 0.2 }),
+    ).toMatchObject({ scrapsBack: null, scrapsValue: null, loss: null });
   });
 });

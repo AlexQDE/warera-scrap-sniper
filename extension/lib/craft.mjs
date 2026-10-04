@@ -13,9 +13,41 @@
 // EV, profit and ROI are always in sellerGets minus cost. A fee is applied
 // exactly once, on the sale leg; input prices are taken as paid.
 import { positive, quote, nonNegative as money } from "./quality.mjs";
+import { scrapYield } from "./ladder.mjs";
 
 /** The market's smallest price step: every recorded price carries at most three decimals. */
 export const TICK = 0.001;
+
+/**
+ * The floor under a craft: a crafted piece comes out at 100% durability, and
+ * dismantling it returns the whole scrap ladder of its rarity while the
+ * steel fee is gone for good (docs/GAME-FACTS.md §2 and §3). So a bad roll
+ * sent straight back to scraps costs the steel plus whatever the scraps
+ * lose between what they cost and what the bid pays for them, not the whole
+ * input. `scrapBid` is what the returned scraps fetch sold at once; without
+ * it the scraps' value, and so the loss, stay unknown.
+ * @param {{ rarity: string, recipe: Recipe, cost?: unknown, scrapBid?: unknown, steelPrice?: unknown }} input
+ */
+export function rerollFloor({ rarity, recipe, cost, scrapBid, steelPrice }) {
+  const scrapsBack = scrapYield(rarity, 100);
+  const bid = money(scrapBid);
+  const stp = money(steelPrice);
+  const c = money(cost);
+  const scrapsValue =
+    scrapsBack == null || bid == null ? null : scrapsBack * bid;
+  const steelCost = stp == null ? null : recipe.steel * stp;
+  return {
+    scrapsBack,
+    scrapsValue,
+    steelLost: recipe.steel,
+    steelCost,
+    // what a failed attempt costs once the scraps are sold back at the bid
+    loss:
+      c == null || scrapsValue == null
+        ? null
+        : Math.round((c - scrapsValue) * 1e9) / 1e9,
+  };
+}
 
 /** @param {number} tick */
 const decimalsOf = (tick) => {

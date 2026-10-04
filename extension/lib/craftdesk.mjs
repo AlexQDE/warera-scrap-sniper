@@ -19,6 +19,7 @@ import {
   listingForProceeds,
   rankPlans,
   normalizeRecipe,
+  rerollFloor,
 } from "./craft.mjs";
 import {
   CRAFT_CODES,
@@ -610,6 +611,18 @@ export function createCraftDesk({
     out.push(
       `<div class="lens-grid2"><div><small>Per craft</small><b>${fmt(plan.cost.perCraft)} g</b><span>${recipe.scraps} scraps × ${fmt(prices.scrap.value)} + ${recipe.steel} steel × ${fmt(prices.steel.value)}</span></div><div><small>Batch of ${b}</small><b>${fmt(plan.batch.cost)} g</b><span>${plan.cost.scraps} scraps + ${plan.cost.steel} steel · ${esc(prices.scrap.note)} · ${esc(prices.steel.note)}</span></div></div>`,
     );
+    // A bad roll dismantled at once gives the tier's scraps back; only the steel is gone.
+    const floor = rerollFloor({
+      rarity: item?.rarity ?? "",
+      recipe,
+      cost: plan.cost.perCraft,
+      scrapBid: prices.scrap.book?.bid ?? prices.scrap.book?.bids?.[0]?.price,
+      steelPrice: prices.steel.value,
+    });
+    if (floor.scrapsBack != null)
+      out.push(
+        `<p class="lens-muted">Reroll floor: a crafted piece is at 100%, and dismantling it returns all <b>${floor.scrapsBack} scraps</b>${floor.scrapsValue != null ? ` (${fmt(floor.scrapsValue)} g at the ${fmt(prices.scrap.book?.bid ?? prices.scrap.book?.bids?.[0]?.price)} scrap bid)` : " (no scrap bid to value them at)"}; the ${floor.steelLost} steel is gone${floor.steelCost != null ? ` (${fmt(floor.steelCost)} g)` : ""}. ${floor.loss != null ? `A roll you send straight back to scraps costs <b>${fmt(floor.loss)} g</b>, not the ${fmt(plan.cost.perCraft)} g input.` : "The loss on a roll sent back to scraps needs the scrap bid."}</p>`,
+      );
     const immediate = acq.immediate.total;
     const bidTotal = acq.bid.total;
     out.push(
