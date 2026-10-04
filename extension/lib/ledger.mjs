@@ -60,7 +60,8 @@ export function newId(now = Date.now(), random = Math.random) {
 
 /**
  * @typedef {{ scraps: number, steel: number, scrapPrice: number | null, steelPrice: number | null, priceSource: "manual" | "inferred" }} Inputs
- * @typedef {{ id: string, createdAt: string, updatedAt: string, code: string | null, label: string, inputs: Inputs, costBasis: number | null, result: { rarity: string | null, stat: number | null, durability: number | null, note: string }, state: string, listing: { price: number | null, at: string | null }, sale: { proceeds: number | null, at: string | null, source: "manual" }, notes: string }} Entry
+ * @typedef {{ id: string, createdAt: string, updatedAt: string, code: string | null, label: string, inputs: Inputs, costBasis: number | null, result: { rarity: string | null, stat: number | null, durability: number | null, note: string }, state: string, listing: { price: number | null, at: string | null }, sale: { proceeds: number | null, at: string | null, source: "manual" }, notes: string, revision: number }} Entry
+ *   `revision` is the ledger revision of the write that last stored the entry; the worker assigns it, a client's value is never trusted.
  */
 
 /** The cost of the inputs when both used prices are known; null otherwise, never zero. @param {Inputs} inputs */
@@ -142,6 +143,7 @@ export function normalizeEntry(raw, now = Date.now()) {
         : { price: null, at: null },
     sale,
     notes: text(r.notes, 200),
+    revision: count(r.revision) ?? 0,
   };
 }
 
@@ -398,14 +400,18 @@ export function normalizeLedger(raw, now = Date.now()) {
 }
 
 /**
- * Merge a tab's changes into the stored list: by id, the newer `updatedAt`
- * wins; the ids this tab removed go and are remembered with the revision
- * this write produces; an id deleted at a revision the writer never read
- * stays deleted whatever its copy's timestamp (a stale tab stamps its edit
- * with the clock, which says nothing about what it knew), and is reported
- * as dropped. A writer that read the deletion and sends the id again does so
- * on purpose (an import), so it comes back. Both sides keep their new
- * entries. Pure; the worker applies it on every write.
+ * Merge a tab's changes into the stored list. An entry changed by a write
+ * the writer never read (its stored `revision` is above the writer's base)
+ * keeps its stored copy against the writer's edit or deletion, reported as
+ * a conflict: a stale tab stamps its edit with the clock, which says nothing
+ * about what it knew, so a sale recorded elsewhere is not undone by a later
+ * move on a crafted copy. Otherwise, by id, the newer `updatedAt` wins. The
+ * ids this tab removed go and are remembered with the revision this write
+ * produces; an id deleted at a revision the writer never read stays deleted
+ * whatever its copy's timestamp, reported as dropped. A writer that read the
+ * deletion and sends the id again does so on purpose (an import), so it
+ * comes back. Both sides keep their new entries; every entry stored carries
+ * this write's revision. Pure; the worker applies it on every write.
  * @param {{ stored: ReadonlyArray<Entry>, incoming: ReadonlyArray<Entry>, removed?: ReadonlyArray<string>, tombstones?: Record<string, Tombstone>, baseRevision?: number, revision?: number, now?: number }} input
  *   `baseRevision` is the revision the writer last read, `revision` the one this write produces.
  */
@@ -427,10 +433,24 @@ export function mergeLedgers({
       : 0;
   const dead = { ...tombstones };
   const at = new Date(now).toISOString();
-  for (const id of removed) dead[String(id)] = { at, revision };
   const byId = new Map(stored.map((e) => [e.id, e]));
   /** @type {string[]} */
   const dropped = [];
+  /** @type {Set<string>} */
+  const conflicts = new Set();
+  /** @param {Entry | undefined} old */
+  const changedSince = (old) => !!old && old.revision > base;
+  /** @type {Set<string>} */
+  const removing = new Set();
+  for (const id of removed) {
+    const key = String(id);
+    if (changedSince(byId.get(key))) {
+      conflicts.add(key);
+      continue;
+    }
+    dead[key] = { at, revision };
+    removing.add(key);
+  }
   for (const e of incoming) {
     const buried = dead[e.id];
     if (buried && base < buried.revision) {
@@ -438,15 +458,20 @@ export function mergeLedgers({
       continue;
     }
     const old = byId.get(e.id);
+    if (changedSince(old)) {
+      conflicts.add(e.id);
+      continue;
+    }
     if (!old || Date.parse(e.updatedAt) >= Date.parse(old.updatedAt))
-      byId.set(e.id, e);
+      byId.set(e.id, { ...e, revision });
   }
-  for (const id of removed) byId.delete(String(id));
+  for (const key of removing) byId.delete(key);
   return {
     entries: [...byId.values()]
       .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
       .slice(0, MAX_ENTRIES),
     tombstones: normalizeTombstones(dead),
     dropped,
+    conflicts: [...conflicts],
   };
 }

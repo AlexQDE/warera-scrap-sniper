@@ -362,6 +362,57 @@ describe("background controller", () => {
       (await controller.handle({ type: "ledgerGet" })).ledger.revision,
     ).toBe(6); // six writes, whatever they carried
   });
+  it("keeps a sale recorded by one tab against the other tab's later move or deletion of its stale copy, and reports the conflict", async () => {
+    const { controller } = setup();
+    const iso = (ms) => new Date(NOW + ms).toISOString();
+    const crafted = {
+      id: "shared-001",
+      createdAt: iso(0),
+      updatedAt: iso(0),
+      code: "boots5",
+      inputs: { scraps: 1, steel: 0, scrapPrice: 0.2 },
+      state: "crafted",
+    };
+    const write = (changed, baseRevision, removed = []) =>
+      controller.handle({ type: "ledgerSet", changed, baseRevision, removed });
+    const first = await write([crafted], 0); // revision 1, read by both tabs
+    expect(first.ledger.entries[0].revision).toBe(1);
+    // tab A records the sale
+    const sold = {
+      ...crafted,
+      state: "sold",
+      sale: { proceeds: 3, at: iso(1000) },
+      updatedAt: iso(1000),
+    };
+    const second = await write([sold], 1); // revision 2
+    expect(second.conflicts).toEqual([]);
+    expect(second.ledger.entries[0]).toMatchObject({
+      state: "sold",
+      revision: 2,
+    });
+    // tab B, still on revision 1, marks its crafted copy kept, stamped later: the sale stays and B is told
+    const kept = { ...crafted, state: "kept", updatedAt: iso(2000) };
+    const third = await write([kept], 1); // revision 3
+    expect(third.conflicts).toEqual(["shared-001"]);
+    expect(third.dropped).toEqual([]);
+    expect(third.ledger.entries[0]).toMatchObject({
+      state: "sold",
+      sale: { proceeds: 3 },
+      revision: 2,
+    });
+    // B's deletion of that stale copy is refused the same way, nothing is tombstoned
+    const fourth = await write([], 1, ["shared-001"]); // revision 4
+    expect(fourth.conflicts).toEqual(["shared-001"]);
+    expect(fourth.ledger.entries).toHaveLength(1);
+    expect(fourth.ledger.tombstones).toEqual({});
+    // once B has read the sale (revision 4 now), its deletion goes through
+    const fifth = await write([], 4, ["shared-001"]); // revision 5
+    expect(fifth.conflicts).toEqual([]);
+    expect(fifth.ledger.entries).toEqual([]);
+    expect(fifth.ledger.tombstones["shared-001"]).toMatchObject({
+      revision: 5,
+    });
+  });
   it("merges two tabs' recipe saves instead of letting the second replace the first, and still lets the popup clear the table", async () => {
     const { controller } = setup();
     const a = await controller.handle({

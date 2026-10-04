@@ -89,7 +89,11 @@ describe("normalizeEntry and createEntry", () => {
       state: "crafted",
       listing: { price: null, at: null },
       sale: { proceeds: null, at: null, source: "manual" },
+      revision: 0, // the worker assigns it when it stores the entry
     });
+    expect(normalizeEntry({ ...e, revision: 4 }).revision).toBe(4);
+    expect(normalizeEntry({ ...e, revision: "junk" }).revision).toBe(0);
+    expect(normalizeEntry({ ...e, revision: -1 }).revision).toBe(0);
   });
   it("drops what it cannot trust: bad ids, negative quantities, a sale without proceeds, unknown codes and states", () => {
     expect(normalizeEntry({ ...form, id: "x" })).toBeNull();
@@ -342,6 +346,56 @@ describe("merging a second tab's list", () => {
       revision: 2,
     });
     expect(m.dropped).toEqual([]);
+    expect(m.conflicts).toEqual([]);
+    expect(m.entries.find((e) => e.id === "test-0003").revision).toBe(2); // stored by this write
+  });
+  it("keeps an entry changed since the writer read it against the writer's later-stamped edit or deletion, as a conflict", () => {
+    // tab A sold it in the write that made revision 6
+    const sold = {
+      ...transition(base, { type: "sell", proceeds: 9 }, NOW + 5000),
+      revision: 6,
+    };
+    // tab B, which last read revision 5, marks its crafted copy kept later: the clock says nothing about what it knew
+    const kept = transition(base, { type: "keep" }, NOW + 7000);
+    const m = mergeLedgers({
+      stored: [sold],
+      incoming: [kept],
+      baseRevision: 5,
+      revision: 7,
+    });
+    expect(m.entries).toEqual([sold]);
+    expect(m.conflicts).toEqual(["test-0001"]);
+    expect(m.dropped).toEqual([]);
+    // its deletion of that stale copy is refused the same way, and nothing is remembered as deleted
+    const d = mergeLedgers({
+      stored: [sold],
+      incoming: [],
+      removed: ["test-0001"],
+      baseRevision: 5,
+      revision: 7,
+    });
+    expect(d.entries).toEqual([sold]);
+    expect(d.conflicts).toEqual(["test-0001"]);
+    expect(d.tombstones).toEqual({});
+    // a tab that read revision 6 saw the sale: its deletion goes through
+    const ok = mergeLedgers({
+      stored: [sold],
+      incoming: [],
+      removed: ["test-0001"],
+      baseRevision: 6,
+      revision: 7,
+    });
+    expect(ok.entries).toEqual([]);
+    expect(ok.conflicts).toEqual([]);
+    expect(ok.tombstones["test-0001"]).toMatchObject({ revision: 7 });
+    // whatever a client sends as revision, a stored entry carries the revision of the write that stored it
+    const n = mergeLedgers({
+      stored: [],
+      incoming: [{ ...base, revision: 99 }],
+      baseRevision: 6,
+      revision: 7,
+    });
+    expect(n.entries[0].revision).toBe(7);
   });
   it("keeps an entry deleted against an edit from a tab that never read the deletion, however late it is stamped, and lets a tab that read it bring the id back on purpose", () => {
     // deleted by the write that made revision 4

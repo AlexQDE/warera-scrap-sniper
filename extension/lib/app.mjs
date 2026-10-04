@@ -233,16 +233,24 @@ export async function startLens(runtime = chrome.runtime) {
         changed,
         removed,
       });
-      if (r?.ledger) state.ledger = r.ledger;
+      adoptLedger(r?.ledger);
       return r;
     },
   });
+  /** Take a ledger from the worker only when it is newer than the one held: answers can arrive out of order, and an old one must not roll the desk back. */
+  function adoptLedger(ledger) {
+    if (!ledger) return false;
+    if (state.ledger && !(ledger.revision > state.ledger.revision))
+      return false;
+    state.ledger = ledger;
+    return true;
+  }
   let ledgerRequested = false;
   async function loadLedger() {
     if (ledgerRequested || disposed) return;
     ledgerRequested = true;
     const r = await send({ type: "ledgerGet" });
-    if (r?.ledger) state.ledger = r.ledger;
+    if (r?.ledger) adoptLedger(r.ledger);
     else ledgerRequested = false; // asked again on the next scan
     sched.schedule();
   }
@@ -250,10 +258,7 @@ export async function startLens(runtime = chrome.runtime) {
   async function refreshLedger() {
     if (!state.ledger || disposed || document.hidden) return;
     const r = await send({ type: "ledgerGet" });
-    if (r?.ledger && r.ledger.revision !== state.ledger?.revision) {
-      state.ledger = r.ledger;
-      sched.schedule();
-    }
+    if (adoptLedger(r?.ledger)) sched.schedule();
   }
   const observer = new MutationObserver((muts) => {
     if (document.hidden || disposed) return;

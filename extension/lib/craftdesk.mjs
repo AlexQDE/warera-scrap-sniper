@@ -132,12 +132,19 @@ export function createCraftDesk({
       else if (!r?.ledger)
         status = "Ledger: not saved, the extension did not answer; try again";
       else {
-        // The worker drops an edit of an entry another tab deleted since this tab last read; say so instead of claiming the move.
+        // The worker refuses an edit of an entry another tab deleted or changed since this tab last read; say so instead of claiming the move.
         const dropped = Array.isArray(r.dropped) ? r.dropped.length : 0;
-        if (dropped && dropped >= changed.length)
-          status = `Ledger: not applied, ${dropped === 1 ? "the entry was" : "the entries were"} deleted in another tab meanwhile`;
-        else if (dropped)
-          status = `${message} · ${dropped} not applied: deleted in another tab meanwhile`;
+        const conflicts = Array.isArray(r.conflicts) ? r.conflicts.length : 0;
+        const lost = dropped + conflicts;
+        const why =
+          dropped && conflicts
+            ? "deleted or changed in another tab meanwhile"
+            : dropped
+              ? "deleted in another tab meanwhile"
+              : `changed in another tab meanwhile; ${lost === 1 ? "its" : "their"} current state is shown`;
+        if (lost && lost >= changed.length + removed.length)
+          status = `Ledger: not applied, ${lost === 1 ? "the entry was" : "the entries were"} ${why}`;
+        else if (lost) status = `${message} · ${lost} not applied: ${why}`;
         else
           status = r.merged
             ? `${message} · merged with changes another tab made meanwhile`

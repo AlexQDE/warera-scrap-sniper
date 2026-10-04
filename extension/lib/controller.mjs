@@ -358,7 +358,9 @@ export function createController({
           // stale) copy of the rest can neither overwrite nor revive anything;
           // deletions are remembered with the revision they made, so an edit
           // from a tab that read an older revision loses however it is
-          // stamped, and the tab is told which ids were dropped.
+          // stamped, and an entry changed since the tab read keeps its stored
+          // copy against the tab's edit or deletion; the tab is told which
+          // ids were dropped or conflicted.
           const { craftLedger } = await storage.get(["craftLedger"]);
           const stored = normalizeLedger(craftLedger, now());
           const changed = normalizeLedger(
@@ -397,6 +399,7 @@ export function createController({
               craftLedger != null &&
               Number(msg.baseRevision) !== stored.revision,
             dropped: merged.dropped,
+            conflicts: merged.conflicts,
           };
         });
       if (["book", "cases", "avg", "sales"].includes(msg?.type)) {

@@ -511,6 +511,82 @@ describe("SPA lifecycle and DOM work", () => {
       "deleted in another tab meanwhile",
     );
   });
+  it("ignores a ledger refresh that answers late with an older revision than the tab already holds", async () => {
+    window.history.replaceState({}, "", "/market/equipments");
+    marketFixture();
+    const runtime = marketRuntime({
+      craftCollapsed: false,
+      craftRecipes: { boots5: { scraps: 10, steel: 2 } },
+    });
+    let revision = 1;
+    let entries = [];
+    const held = []; // ledger reads not yet answered, each with the snapshot the worker took
+    const writes = [];
+    const inner = runtime.sendMessage.getMockImplementation();
+    runtime.sendMessage.mockImplementation((msg) => {
+      if (msg.type === "ledgerGet") {
+        const ledger = {
+          version: 1,
+          revision,
+          entries: structuredClone(entries),
+          tombstones: {},
+        };
+        return new Promise((resolve) => held.push(() => resolve({ ledger })));
+      }
+      if (msg.type === "ledgerSet") {
+        writes.push(msg);
+        revision++;
+        entries = [...entries, ...msg.changed];
+        return Promise.resolve({
+          ledger: {
+            version: 1,
+            revision,
+            entries: structuredClone(entries),
+            tombstones: {},
+          },
+          merged: false,
+          dropped: [],
+          conflicts: [],
+        });
+      }
+      return inner(msg);
+    });
+    app = await startLens(runtime);
+    await settle();
+    expect(held).toHaveLength(1);
+    held.shift()(); // the initial load answers at once
+    await settle();
+    // the first tick's refresh is slow: it is answered only after this tab's own write below
+    const before = held.length;
+    for (let t = 0; t < 5200 && held.length === before; t += 50)
+      await vi.advanceTimersByTimeAsync(50);
+    expect(held).toHaveLength(before + 1);
+    const slow = held.shift();
+    document
+      .querySelector('[data-action="desk-pick"][data-code="boots5"]')
+      .click();
+    await settle();
+    document.querySelector('[data-action="desk-ledger-new"]').click();
+    await settle();
+    document.querySelector('[data-action="desk-ledger-add"]').click();
+    await settle();
+    expect(writes).toHaveLength(1);
+    const id = writes[0].changed[0].id;
+    const row = () =>
+      document.querySelector(
+        `[data-action="desk-ledger-move"][data-type="keep"][data-id="${id}"]`,
+      );
+    expect(row()).not.toBeNull();
+    // the slow answer arrives now, from before the write: revision 1, no entries. It must not roll the desk back.
+    slow();
+    await settle();
+    expect(row()).not.toBeNull();
+    row().click();
+    await settle();
+    expect(writes).toHaveLength(2);
+    expect(writes[1].baseRevision).toBe(2);
+    for (const answer of held) answer(); // nothing left hanging
+  });
   it("keeps both panels in place and a focused desk field focused across native mutations", async () => {
     window.history.replaceState({}, "", "/market/equipments");
     marketFixture();

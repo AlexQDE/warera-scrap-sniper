@@ -806,6 +806,48 @@ describe("second review round", () => {
       baseRevision: 1,
     });
   });
+  it("says when a move was not applied because the entry was changed in another tab, and shows that state", async () => {
+    settings = preferences({
+      ...settings,
+      craftRecipes: { boots5: { scraps: 10, steel: 2 } },
+    });
+    render();
+    click('[data-action="desk-pick"][data-code="boots5"]');
+    render();
+    click('[data-action="desk-ledger-new"]');
+    render();
+    click('[data-action="desk-ledger-add"]');
+    await flush();
+    render();
+    const entry = onLedger.mock.calls[0][0].changed[0];
+    // the worker: another tab sold the entry since this tab read, so the move conflicts and the sold copy comes back
+    const sold = {
+      ...entry,
+      state: "sold",
+      listing: { price: 7, at: iso() },
+      sale: { proceeds: 7, at: iso(), source: "manual" },
+      revision: 9,
+    };
+    onLedger.mockImplementationOnce(async () => {
+      state.ledger = { ...state.ledger, revision: 9, entries: [sold] };
+      return {
+        ledger: state.ledger,
+        merged: true,
+        dropped: [],
+        conflicts: [entry.id],
+      };
+    });
+    click(
+      `[data-action="desk-ledger-move"][data-type="keep"][data-id="${entry.id}"]`,
+    );
+    await flush();
+    render();
+    expect(el().textContent).toContain(
+      "Ledger: not applied, the entry was changed in another tab meanwhile; its current state is shown",
+    );
+    expect(el().textContent).not.toContain("Marked kept");
+    expect(el().textContent).toContain("1 sold · 7.000 g received");
+  });
   it("keeps a setting typed while an earlier save of the same field was still pending", async () => {
     render();
     const apply = save.getMockImplementation();
