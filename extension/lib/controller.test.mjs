@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { createController } from "./controller.mjs";
+import { createController, LEDGER_BYTES } from "./controller.mjs";
 import { CACHE_VERSION } from "./quality.mjs";
 
 const NOW = Date.parse("2026-09-16T12:00:00Z");
@@ -255,5 +255,54 @@ describe("background controller", () => {
       (await controller.handle({ type: "sales", itemCode: "../../settings" }))
         .error,
     ).toBe("bad-item");
+  });
+  it("stores a validated, bounded craft ledger for the page and keeps it across key changes and cleanup", async () => {
+    const { controller, storage } = setup();
+    expect((await controller.handle({ type: "ledgerGet" })).ledger).toEqual({
+      version: 1,
+      entries: [],
+    });
+    const entry = {
+      id: "test-0001",
+      createdAt: new Date(NOW).toISOString(),
+      code: "boots5",
+      inputs: { scraps: 10, steel: 2, scrapPrice: 0.2, steelPrice: 1.5 },
+      state: "crafted",
+    };
+    const saved = await controller.handle({
+      type: "ledgerSet",
+      ledger: { entries: [entry, { id: "bad" }, "junk"] },
+    });
+    expect(saved.ledger.entries).toHaveLength(1);
+    expect(saved.ledger.entries[0].costBasis).toBe(5);
+    expect(storage.data.craftLedger.entries[0].id).toBe("test-0001");
+    expect(JSON.stringify(storage.data.craftLedger)).not.toContain("junk");
+    await controller.handle(
+      { type: "saveSettings", settings: { apiKey: "another-key" } },
+      { trusted: true },
+    );
+    await controller.cleanup();
+    expect(
+      (await controller.handle({ type: "ledgerGet" })).ledger.entries,
+    ).toHaveLength(1);
+    const huge = {
+      entries: Array.from({ length: 502 }, (_, i) => ({
+        ...entry,
+        id: `huge-${i}`,
+        notes: "n".repeat(500),
+        label: "l".repeat(500),
+        result: { note: "x".repeat(500) },
+      })),
+    };
+    const bounded = await controller.handle({
+      type: "ledgerSet",
+      ledger: huge,
+    });
+    expect(bounded.error).toBeUndefined();
+    expect(bounded.ledger.entries).toHaveLength(500);
+    expect(bounded.ledger.entries[0].notes).toHaveLength(200);
+    expect(JSON.stringify(storage.data.craftLedger).length).toBeLessThan(
+      LEDGER_BYTES,
+    );
   });
 });

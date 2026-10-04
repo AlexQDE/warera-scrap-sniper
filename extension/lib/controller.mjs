@@ -9,6 +9,10 @@ import { CASE_CODES, WOODEN_CODES, ALL_GEAR_CODES } from "./cases.mjs";
 import { makeSingleFlight } from "./flight.mjs";
 import { preferences } from "./settings.mjs";
 import { CACHE_VERSION, TTL, freshness } from "./quality.mjs";
+import { normalizeLedger } from "./ledger.mjs";
+
+/** The craft ledger is the player's own record: validated, bounded, kept across key changes, never sent anywhere. */
+export const LEDGER_BYTES = 512_000;
 
 const CASE_BOOKS = [
   ...new Set([...CASE_CODES, ...WOODEN_CODES, "scraps", "oil"]),
@@ -332,6 +336,22 @@ export function createController({
           }
         });
       }
+      if (msg?.type === "ledgerGet") {
+        const { craftLedger } = await storage.get(["craftLedger"]);
+        return { ledger: normalizeLedger(craftLedger, now()) };
+      }
+      if (msg?.type === "ledgerSet")
+        return serial(async () => {
+          const ledger = normalizeLedger(msg.ledger, now());
+          if (JSON.stringify(ledger).length > LEDGER_BYTES)
+            return {
+              error: "too-large",
+              message:
+                "The craft ledger is too large to store; export and trim it",
+            };
+          await storage.set({ craftLedger: ledger });
+          return { ledger };
+        });
       if (["book", "cases", "avg", "sales"].includes(msg?.type)) {
         if (msg.type === "sales" && !ITEM_CODES.has(msg.itemCode))
           return { error: "bad-item", message: "Unknown equipment item" };
@@ -339,7 +359,7 @@ export function createController({
       }
       return {
         error: "unknown-message",
-        message: "Unknown WarEra Lens request",
+        message: "Unknown WarEra Plus request",
       };
     },
   };
