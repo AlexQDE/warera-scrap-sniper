@@ -1067,6 +1067,31 @@ describe("second review round", () => {
     expect(textarea).not.toBeNull(); // the import stays for another try once there is room
     expect(textarea.value).toBe(text);
   });
+  it("keeps the craft form and says so when the worker refused the write as too old", async () => {
+    settings = preferences({
+      ...settings,
+      craftRecipes: { boots5: { scraps: 10, steel: 2 } },
+    });
+    render();
+    click('[data-action="desk-pick"][data-code="boots5"]');
+    render();
+    click('[data-action="desk-ledger-new"]');
+    render();
+    onLedger.mockImplementationOnce(async () => ({
+      error: "stale",
+      message:
+        "this tab's copy of the ledger was too old to apply safely; it has been reloaded, try again",
+      ledger: { ...state.ledger, revision: 2000 },
+    }));
+    click('[data-action="desk-ledger-add"]');
+    await flush();
+    render();
+    expect(el().querySelector(".lens-form")).not.toBeNull();
+    expect(el().textContent).toContain(
+      "Ledger: this tab's copy of the ledger was too old to apply safely; it has been reloaded, try again",
+    );
+    expect(el().textContent).not.toContain("Recorded");
+  });
   it("keeps a setting typed while an earlier save of the same field was still pending", async () => {
     render();
     const apply = save.getMockImplementation();

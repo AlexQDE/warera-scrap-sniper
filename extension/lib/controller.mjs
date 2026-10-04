@@ -365,7 +365,9 @@ export function createController({
           // from a tab that read an older revision loses however it is
           // stamped, and an entry changed since the tab read keeps its stored
           // copy against the tab's edit or deletion; the tab is told which
-          // ids were dropped or conflicted.
+          // ids were dropped or conflicted. A write from a base older than
+          // the deletion history still held is refused whole, with the
+          // current ledger, so the tab reloads and tries again.
           const { craftLedger } = await storage.get(["craftLedger"]);
           const stored = normalizeLedger(craftLedger, now());
           // Each entry is validated on its own, not as a bounded ledger: what the cap cannot hold is reported, never cut here.
@@ -383,13 +385,22 @@ export function createController({
             tombstones: stored.tombstones,
             baseRevision: Number(msg.baseRevision),
             revision,
+            horizon: stored.horizon,
             now: now(),
           });
+          if (merged.stale)
+            return {
+              error: "stale",
+              message:
+                "this tab's copy of the ledger was too old to apply safely; it has been reloaded, try again",
+              ledger: stored,
+            };
           const ledger = {
             version: LEDGER_VERSION,
             revision,
             entries: merged.entries,
             tombstones: merged.tombstones,
+            horizon: merged.horizon,
           };
           if (JSON.stringify(ledger).length > LEDGER_BYTES)
             return {

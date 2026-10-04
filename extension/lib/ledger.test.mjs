@@ -521,6 +521,53 @@ describe("merging a second tab's list", () => {
     expect(n.entries).toHaveLength(MAX_ENTRIES);
     expect(n.entries.map((e) => e.id)).toContain("fresh-0001");
   });
+  it("refuses a write from a base older than the deletion history it still holds, raising the horizon as tombstones are forgotten", () => {
+    const at = new Date(NOW).toISOString();
+    const history = Object.fromEntries(
+      Array.from({ length: MAX_TOMBSTONES }, (_, i) => [
+        `dead-${String(i + 1).padStart(4, "0")}`,
+        { at, revision: i + 1 },
+      ]),
+    );
+    // one more deletion forgets the oldest tombstone (revision 1): the horizon rises to 1
+    const m = mergeLedgers({
+      stored: [base],
+      incoming: [],
+      removed: ["test-0002"],
+      tombstones: history,
+      baseRevision: MAX_TOMBSTONES,
+      revision: MAX_TOMBSTONES + 1,
+    });
+    expect(m.stale).toBe(false);
+    expect(Object.keys(m.tombstones)).toHaveLength(MAX_TOMBSTONES);
+    expect(m.tombstones["dead-0001"]).toBeUndefined();
+    expect(m.horizon).toBe(1);
+    // a writer that read revision 0 may still hold what dead-0001 was: refused whole, nothing applied
+    const stale = mergeLedgers({
+      stored: [base],
+      incoming: [{ ...other, id: "dead-0001" }],
+      tombstones: m.tombstones,
+      horizon: m.horizon,
+      baseRevision: 0,
+      revision: MAX_TOMBSTONES + 2,
+    });
+    expect(stale.stale).toBe(true);
+    expect(stale.entries).toEqual([base]);
+    expect(stale.tombstones).toEqual(m.tombstones);
+    expect(stale.horizon).toBe(1);
+    // a writer at the horizon or above read that deletion: its write goes through, and the horizon stays while nothing is forgotten
+    const ok = mergeLedgers({
+      stored: [base],
+      incoming: [{ ...other, id: "new-0001" }],
+      tombstones: m.tombstones,
+      horizon: m.horizon,
+      baseRevision: 1,
+      revision: MAX_TOMBSTONES + 2,
+    });
+    expect(ok.stale).toBe(false);
+    expect(ok.entries.map((e) => e.id)).toContain("new-0001");
+    expect(ok.horizon).toBe(1);
+  });
   it("normalizes a stored ledger with its revision and tombstones, bounded to the newest deletions", () => {
     const at = new Date(NOW).toISOString();
     const l = normalizeLedger(
@@ -542,6 +589,9 @@ describe("merging a second tab's list", () => {
     expect(l.revision).toBe(3);
     expect(l.tombstones).toEqual({ "test-0009": { at, revision: 2 } });
     expect(normalizeLedger({ revision: -1 }).revision).toBe(0);
+    expect(normalizeLedger({ revision: 3, horizon: 2 }).horizon).toBe(2);
+    expect(normalizeLedger({ horizon: -1 }).horizon).toBe(0);
+    expect(normalizeLedger({ horizon: "x" }).horizon).toBe(0);
     const many = Object.fromEntries(
       Array.from({ length: MAX_TOMBSTONES + 5 }, (_, i) => [
         `dead-${String(i).padStart(4, "0")}`,

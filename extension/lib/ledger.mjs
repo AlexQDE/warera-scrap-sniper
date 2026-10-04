@@ -17,7 +17,9 @@ export const MAX_ENTRIES = 500;
  * tab that still edits an old copy of one cannot bring it back. Writes carry
  * only what a tab changed (never its whole list), so an untouched stale copy
  * can resurrect nothing; the history only has to outlast a stale edit, and a
- * thousand deletions is far beyond that.
+ * thousand deletions is far beyond that. Past it, the ledger keeps a horizon,
+ * the highest revision whose deletion it has forgotten, and refuses a write
+ * from a base below it rather than trust a copy it can no longer check.
  */
 export const MAX_TOMBSTONES = 1000;
 export const STATES = Object.freeze([
@@ -389,7 +391,9 @@ export function normalizeTombstones(raw) {
 /**
  * A stored ledger, validated and bounded; what the worker keeps. `revision`
  * counts the writes so a tab can tell whether another tab wrote since it
- * read; `tombstones` remember recent deletions with the revision each made.
+ * read; `tombstones` remember recent deletions with the revision each made;
+ * `horizon` is the highest revision whose deletion has been forgotten, below
+ * which no writer's base is trusted.
  * @param {unknown} raw @param {number} [now]
  */
 export function normalizeLedger(raw, now = Date.now()) {
@@ -401,11 +405,13 @@ export function normalizeLedger(raw, now = Date.now()) {
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
     .slice(0, MAX_ENTRIES);
   const revision = Number(r?.revision);
+  const horizon = Number(r?.horizon);
   return {
     version: LEDGER_VERSION,
     revision: Number.isSafeInteger(revision) && revision >= 0 ? revision : 0,
     entries,
     tombstones: normalizeTombstones(r?.tombstones),
+    horizon: Number.isSafeInteger(horizon) && horizon >= 0 ? horizon : 0,
   };
 }
 
@@ -427,8 +433,10 @@ export function normalizeLedger(raw, now = Date.now()) {
  * never drops a stored one to make room: the ids it could not hold are
  * reported as capped, and edits of stored entries always fit. Pure; the
  * worker applies it on every write.
- * @param {{ stored: ReadonlyArray<Entry>, incoming: ReadonlyArray<Entry>, removed?: ReadonlyArray<string>, tombstones?: Record<string, Tombstone>, baseRevision?: number, revision?: number, now?: number }} input
- *   `baseRevision` is the revision the writer last read, `revision` the one this write produces.
+ * @param {{ stored: ReadonlyArray<Entry>, incoming: ReadonlyArray<Entry>, removed?: ReadonlyArray<string>, tombstones?: Record<string, Tombstone>, baseRevision?: number, revision?: number, horizon?: number, now?: number }} input
+ *   `baseRevision` is the revision the writer last read, `revision` the one this write produces, `horizon` the
+ *   highest revision whose deletion the tombstones no longer hold: a write from a base below it is refused whole
+ *   (`stale`), since a copy it carries can no longer be checked against the deletions; the tab reloads and retries.
  */
 export function mergeLedgers({
   stored,
@@ -437,6 +445,7 @@ export function mergeLedgers({
   tombstones = {},
   baseRevision = 0,
   revision = 1,
+  horizon = 0,
   now = Date.now(),
 }) {
   // A base no tab can have read (missing, or not below the revision this write makes) is no base: deletions win over it.
@@ -446,6 +455,16 @@ export function mergeLedgers({
     baseRevision < revision
       ? baseRevision
       : 0;
+  if (base < horizon)
+    return {
+      entries: [...stored],
+      tombstones: { ...tombstones },
+      dropped: [],
+      conflicts: [],
+      capped: [],
+      horizon,
+      stale: true,
+    };
   const dead = { ...tombstones };
   const at = new Date(now).toISOString();
   const byId = new Map(stored.map((e) => [e.id, e]));
@@ -489,13 +508,21 @@ export function mergeLedgers({
     // the clocks say. A timestamp decides nothing here, so an entry imported with a future stamp stays editable.
     byId.set(e.id, { ...e, revision });
   }
+  const kept = normalizeTombstones(dead);
+  // Tombstones beyond the bound are forgotten; the horizon rises to the highest revision forgotten, so no base
+  // below it is trusted again.
+  let nextHorizon = horizon;
+  for (const [id, t] of Object.entries(dead))
+    if (!kept[id] && t.revision > nextHorizon) nextHorizon = t.revision;
   return {
     entries: [...byId.values()].sort(
       (a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt),
     ),
-    tombstones: normalizeTombstones(dead),
+    tombstones: kept,
     dropped,
     conflicts: [...conflicts],
     capped,
+    horizon: nextHorizon,
+    stale: false,
   };
 }

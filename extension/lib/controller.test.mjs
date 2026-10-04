@@ -449,6 +449,41 @@ describe("background controller", () => {
       revision: 2,
     });
   });
+  it("refuses a write from a tab older than the deletion history it still holds, handing it the current ledger", async () => {
+    const { controller, storage } = setup();
+    const write = (changed, baseRevision, removed = []) =>
+      controller.handle({ type: "ledgerSet", changed, baseRevision, removed });
+    // three sweeps of 400 deletions: 1,200 tombstones, of which the oldest 200 (revision 1) are forgotten
+    for (let k = 1; k <= 3; k++)
+      await write(
+        [],
+        k - 1,
+        Array.from({ length: 400 }, (_, i) => `gone-${k}-${i}`),
+      );
+    const current = (await controller.handle({ type: "ledgerGet" })).ledger;
+    expect(current.revision).toBe(3);
+    expect(Object.keys(current.tombstones)).toHaveLength(1000);
+    expect(current.horizon).toBe(1);
+    const entry = {
+      id: "late-0001",
+      createdAt: new Date(NOW).toISOString(),
+      code: "boots5",
+      inputs: { scraps: 1, steel: 0, scrapPrice: 0.2 },
+      state: "crafted",
+    };
+    // a tab that read revision 0 cannot be checked against what was forgotten
+    const refused = await write([entry], 0);
+    expect(refused.error).toBe("stale");
+    expect(refused.ledger.revision).toBe(3);
+    expect(storage.data.craftLedger.revision).toBe(3);
+    expect(storage.data.craftLedger.entries).toEqual([]);
+    // a tab that read revision 1 saw every deletion still remembered: its write goes through
+    const taken = await write([entry], 1);
+    expect(taken.error).toBeUndefined();
+    expect(taken.ledger.revision).toBe(4);
+    expect(taken.ledger.entries.map((e) => e.id)).toEqual(["late-0001"]);
+    expect(taken.ledger.horizon).toBe(1);
+  });
   it("merges two tabs' recipe saves instead of letting the second replace the first, and still lets the popup clear the table", async () => {
     const { controller } = setup();
     const a = await controller.handle({
