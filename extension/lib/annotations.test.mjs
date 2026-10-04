@@ -234,6 +234,26 @@ describe("compact annotation", () => {
     equipment.render(state);
     expect(annotation().textContent).toContain("resale · 0 of 5 fills");
   });
+  it("rewrites a closed annotation when a fill ages out without changing the resale status", () => {
+    state.salesByCode = {
+      knife: {
+        code: "knife",
+        at: iso(),
+        complete: true,
+        fills: [
+          fill(2, 71.5), // the oldest, about to leave the window
+          ...[1, 1.1, 0.9, 1.2, 1.05].map((p, i) => fill(p, i + 1)),
+        ],
+      },
+    };
+    equipment.render(state);
+    expect(annotation().textContent).toContain("resale · 6 fills");
+    expect(annotation().textContent).toContain("~1.075 g"); // median of six
+    vi.setSystemTime(new Date(NOW + 3600e3));
+    equipment.render(state);
+    expect(annotation().textContent).toContain("resale · 5 fills");
+    expect(annotation().textContent).toContain("~1.050 g"); // median of the five that remain
+  });
   it("keeps Details per row when two listings look identical", () => {
     mount("knife", 2);
     const second = document.getElementById("offer2");

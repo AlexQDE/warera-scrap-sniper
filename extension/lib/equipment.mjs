@@ -405,6 +405,10 @@ export function createEquipment({
         s.minMarginPct,
         r.sales?.at ?? "",
         dims.resale,
+        // the estimate itself: a fill ageing out of the window changes the count or the median without changing the status
+        r.resale
+          ? `${r.resale.n}|${r.resale.estimate ?? ""}|${r.resale.low ?? ""}|${r.resale.high ?? ""}|${r.resale.quartiles}`
+          : "",
         r.statRank?.percentile ?? "",
         open,
         i === best && fresh,
