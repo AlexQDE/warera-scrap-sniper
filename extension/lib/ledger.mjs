@@ -298,8 +298,11 @@ export function exportLedger(entries, now = Date.now()) {
 
 /**
  * Merge an exported file into `existing`: entries are matched by id, the
- * newer `updatedAt` wins, malformed entries are counted and skipped, and the
- * list is bounded. A file that is not a ledger yields an error, not a merge.
+ * newer `updatedAt` wins, malformed entries are counted and skipped. The list
+ * is not bounded here: every entry the file adds or updates travels to the
+ * worker, whose cap decides and reports what did not fit, so nothing is cut
+ * before it can be reported. A file that is not a ledger yields an error,
+ * not a merge.
  * @param {string} textValue @param {ReadonlyArray<Entry>} [existing] @param {number} [now]
  */
 export function importLedger(textValue, existing = [], now = Date.now()) {
@@ -346,9 +349,9 @@ export function importLedger(textValue, existing = [], now = Date.now()) {
       updated++;
     }
   }
-  const entries = [...byId.values()]
-    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
-    .slice(0, MAX_ENTRIES);
+  const entries = [...byId.values()].sort(
+    (a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt),
+  );
   return { entries, added, updated, skipped, error: null };
 }
 

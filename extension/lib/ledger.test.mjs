@@ -281,7 +281,7 @@ describe("export and import", () => {
       "second",
     );
   });
-  it("skips malformed entries, rejects what is not a ledger, and bounds the list", () => {
+  it("skips malformed entries, rejects what is not a ledger, and leaves the cap to the worker", () => {
     const mixed = importLedger(
       JSON.stringify({
         kind: "craft-ledger",
@@ -303,9 +303,10 @@ describe("export and import", () => {
       id: `many-${String(i).padStart(4, "0")}`,
       createdAt: new Date(NOW + i * 1000).toISOString(),
     }));
-    const bounded = importLedger(JSON.stringify(many), []);
-    expect(bounded.entries).toHaveLength(MAX_ENTRIES);
-    expect(bounded.entries[0].id).toBe(
+    const whole = importLedger(JSON.stringify(many), []);
+    expect(whole.entries).toHaveLength(MAX_ENTRIES + 2); // nothing is cut here: the worker's cap decides and reports
+    expect(whole.added).toBe(MAX_ENTRIES + 2);
+    expect(whole.entries[0].id).toBe(
       `many-${String(MAX_ENTRIES + 1).padStart(4, "0")}`,
     ); // newest first
   });

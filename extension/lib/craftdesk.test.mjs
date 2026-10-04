@@ -1024,6 +1024,49 @@ describe("second review round", () => {
     );
     expect(el().textContent).not.toContain("Recorded");
   });
+  it("keeps a pasted import open and says how many entries did not fit when the ledger is full", async () => {
+    render();
+    click('[data-action="desk-import-toggle"]');
+    render();
+    const entry = (id) => ({
+      id,
+      createdAt: iso(),
+      updatedAt: iso(),
+      code: "boots5",
+      inputs: { scraps: 1, steel: 0, scrapPrice: 0.2 },
+      state: "crafted",
+    });
+    const text = JSON.stringify({
+      kind: "craft-ledger",
+      entries: [entry("imp-0001"), entry("imp-0002"), entry("imp-0003")],
+    });
+    type("import-text", text);
+    // the worker: one fits, the ledger is full for the other two
+    onLedger.mockImplementationOnce(async (ops) => {
+      state.ledger = {
+        ...state.ledger,
+        revision: 2,
+        entries: ops.changed.slice(0, 1),
+      };
+      return {
+        ledger: state.ledger,
+        merged: false,
+        dropped: [],
+        conflicts: [],
+        capped: ops.changed.slice(1).map((e) => e.id),
+      };
+    });
+    click('[data-action="desk-import-paste"]');
+    await flush();
+    render();
+    expect(onLedger.mock.calls.at(-1)[0].changed).toHaveLength(3); // every entry the file adds travels
+    expect(el().textContent).toContain(
+      "Imported: 3 added, 0 updated, 0 skipped · 2 not applied: not kept: the ledger is full (500 entries), export it and delete old entries",
+    );
+    const textarea = el().querySelector('[data-field="import-text"]');
+    expect(textarea).not.toBeNull(); // the import stays for another try once there is room
+    expect(textarea.value).toBe(text);
+  });
   it("keeps a setting typed while an earlier save of the same field was still pending", async () => {
     render();
     const apply = save.getMockImplementation();

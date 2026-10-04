@@ -160,8 +160,8 @@ export function createCraftDesk({
           status = r.merged
             ? `${message} · merged with changes another tab made meanwhile`
             : message;
-        // A write the ledger could not hold at all is not done: the form stays for another try once there is room.
-        ok = !(capped && capped >= changed.length);
+        // A write the ledger could not hold in full is not done: the form or the pasted import stays for another try once there is room.
+        ok = !capped;
       }
     } catch (e) {
       status = `Ledger: ${e?.message ?? "could not save"}`;
