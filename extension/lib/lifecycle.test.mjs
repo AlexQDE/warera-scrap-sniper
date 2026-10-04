@@ -284,6 +284,41 @@ describe("SPA lifecycle and DOM work", () => {
     runtime.sendMessage.mock.calls.filter(
       ([m]) => m.type === "sales" && m.itemCode === code,
     ).length;
+  it("mounts the Craft Desk on the grid's section when the Equipment module is off and the page shows no tax notice", async () => {
+    window.history.replaceState({}, "", "/market/equipments");
+    document.body.innerHTML =
+      '<main><section id="market"><div><div id="item-code-selector-jet" style="border-color:rgb(57,15,16)"></div></div><div id="offers"></div></section></main>';
+    app = await startLens(
+      marketRuntime({ equipment: false, craftCollapsed: false }),
+    );
+    await settle();
+    expect(document.querySelectorAll("#scrap-sniper-bar")).toHaveLength(0);
+    const desk = () => document.querySelectorAll("#warera-plus-craft");
+    expect(desk()).toHaveLength(1);
+    expect(desk()[0].nextElementSibling?.id).toBe("market");
+    expect(desk()[0].textContent).toContain("Craft Desk");
+    expect(desk()[0].textContent).toContain("none read"); // no notice on the page: the tax field says so
+    for (let i = 0; i < 20; i++)
+      document
+        .getElementById("offers")
+        .appendChild(document.createElement("div"));
+    await settle(5100);
+    expect(desk()).toHaveLength(1);
+    // a notice appearing later becomes the anchor and the rate, with no second desk
+    const notice = document.createElement("div");
+    notice.innerHTML = "<span>Market tax 5%</span>";
+    document.getElementById("market").prepend(notice);
+    await settle(5100);
+    expect(desk()).toHaveLength(1);
+    expect(desk()[0].nextElementSibling).toBe(notice);
+    expect(desk()[0].textContent).toContain("read off the page notice");
+    window.history.pushState({}, "", "/profile");
+    await settle(5100);
+    expect(desk()).toHaveLength(0);
+    window.history.pushState({}, "", "/market/equipments");
+    await settle(5100);
+    expect(desk()).toHaveLength(1);
+  });
   it("reads the panel's item and the desk's item once each instead of looping between them", async () => {
     window.history.replaceState({}, "", "/market/equipments?item=jet");
     marketFixture();

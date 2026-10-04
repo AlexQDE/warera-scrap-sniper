@@ -318,17 +318,17 @@ export async function startLens(runtime = chrome.runtime) {
       /^\/market\/equipments\/?$/.test(location.pathname);
     if (context.craft) {
       const bar = document.getElementById("scrap-sniper-bar");
-      const tax = dom.taxNotice();
-      state.taxOnPage = dom.taxRateFromText(tax?.textContent);
+      state.taxOnPage = dom.taxRateFromText(dom.taxNotice()?.textContent);
       if (!state.ledger && !state.setup && !state.settings.craftCollapsed)
         void loadLedger();
+      // After the equipment bar; without that module, where the bar would go (the tax notice, else the grid's section).
       const result = desk.render(
         {
           ...state,
           busy: state.busy.has("cases") || state.busy.has("book"),
           action,
         },
-        bar ?? tax,
+        bar ?? dom.marketAnchor(),
         { after: !!bar },
       );
       if (result) nextRoots.push(...result.roots);

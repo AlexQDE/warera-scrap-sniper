@@ -592,6 +592,21 @@ export function gridFrames(root = document) {
 }
 
 /**
+ * Where the equipment market's panels go: before the tax notice, else before
+ * the section that holds the item grid; null when neither is on the page, so
+ * callers clear. One rule for the equipment bar and the Craft Desk, so the
+ * desk still has a place when the Equipment module is off.
+ * @param {Document | Element} [root]
+ */
+export function marketAnchor(root = document) {
+  return (
+    taxNotice(root) ??
+    gridFrames(root)[0]?.frame?.parentElement?.parentElement ??
+    null
+  );
+}
+
+/**
  * The rarity palette as this page paints it, read off the grid's named tiles
  * (their code says the rarity, their computed border says the colour). Empty
  * when the grid is not on the page; callers fall back to RARITY_PALETTE.

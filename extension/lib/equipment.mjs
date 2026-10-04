@@ -283,7 +283,7 @@ export function createEquipment({
       dom.selectedItemCode() ?? dom.filteredItemCode(location.search);
     const s = settings();
     if (code) requestSales(code);
-    const anchor = dom.taxNotice() ?? nextGrid?.parentElement?.parentElement;
+    const anchor = dom.marketAnchor();
     if (!anchor) {
       clear();
       return;
