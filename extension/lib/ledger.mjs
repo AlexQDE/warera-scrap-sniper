@@ -363,7 +363,9 @@ export function importLedger(textValue, existing = [], now = Date.now()) {
 
 /**
  * Deleted ids with the time and the revision of their deletion, validated
- * and bounded to the newest deletions.
+ * and bounded to the newest deletions. The table has no prototype, so an id
+ * named like an inherited property (`__proto__`, `constructor`) is a plain
+ * key: nothing is read off Object and no setter is ever invoked.
  * @param {unknown} raw
  * @returns {Record<string, Tombstone>}
  */
@@ -385,7 +387,19 @@ export function normalizeTombstones(raw) {
       b[1].revision - a[1].revision ||
       Date.parse(b[1].at) - Date.parse(a[1].at),
   );
-  return Object.fromEntries(pairs.slice(0, MAX_TOMBSTONES));
+  return table(pairs.slice(0, MAX_TOMBSTONES));
+}
+
+/**
+ * A prototype-less table from pairs: every key is an own data property.
+ * @param {Iterable<[string, Tombstone]>} pairs
+ * @returns {Record<string, Tombstone>}
+ */
+function table(pairs) {
+  /** @type {Record<string, Tombstone>} */
+  const t = Object.create(null);
+  for (const [id, value] of pairs) t[id] = value;
+  return t;
 }
 
 /**
@@ -458,14 +472,14 @@ export function mergeLedgers({
   if (base < horizon)
     return {
       entries: [...stored],
-      tombstones: { ...tombstones },
+      tombstones: table(Object.entries(tombstones)),
       dropped: [],
       conflicts: [],
       capped: [],
       horizon,
       stale: true,
     };
-  const dead = { ...tombstones };
+  const dead = table(Object.entries(tombstones)); // no prototype: an id like `__proto__` is stored, never assigned through a setter
   const at = new Date(now).toISOString();
   const byId = new Map(stored.map((e) => [e.id, e]));
   /** @type {string[]} */

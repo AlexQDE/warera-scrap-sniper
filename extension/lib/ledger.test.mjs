@@ -568,6 +568,46 @@ describe("merging a second tab's list", () => {
     expect(ok.entries.map((e) => e.id)).toContain("new-0001");
     expect(ok.horizon).toBe(1);
   });
+  it("remembers the deletion of an entry whose id is a prototype name, and never reads a tombstone off Object", () => {
+    const proto = { ...other, id: "__proto__" };
+    const m = mergeLedgers({
+      stored: [base, proto],
+      incoming: [],
+      removed: ["__proto__"],
+      baseRevision: 1,
+      revision: 2,
+    });
+    expect(m.entries.map((e) => e.id)).toEqual(["test-0001"]);
+    expect(Object.hasOwn(m.tombstones, "__proto__")).toBe(true);
+    expect(m.tombstones["__proto__"]).toMatchObject({ revision: 2 });
+    // a stale copy of it is dropped like any other
+    const back = mergeLedgers({
+      stored: [base],
+      incoming: [proto],
+      tombstones: m.tombstones,
+      baseRevision: 1,
+      revision: 3,
+    });
+    expect(back.dropped).toEqual(["__proto__"]);
+    expect(back.entries.map((e) => e.id)).toEqual(["test-0001"]);
+    // the stored table survives the JSON round trip storage makes, as an own key
+    const again = normalizeTombstones(JSON.parse(JSON.stringify(m.tombstones)));
+    expect(Object.hasOwn(again, "__proto__")).toBe(true);
+    expect(again["__proto__"]).toMatchObject({ revision: 2 });
+    // an id named like an inherited property is its own entry, not Object's function
+    const c = mergeLedgers({
+      stored: [base],
+      incoming: [{ ...other, id: "constructor" }],
+      baseRevision: 1,
+      revision: 2,
+    });
+    expect(c.entries.map((e) => e.id).sort()).toEqual([
+      "constructor",
+      "test-0001",
+    ]);
+    expect(c.dropped).toEqual([]);
+    expect(c.conflicts).toEqual([]);
+  });
   it("normalizes a stored ledger with its revision and tombstones, bounded to the newest deletions", () => {
     const at = new Date(NOW).toISOString();
     const l = normalizeLedger(
