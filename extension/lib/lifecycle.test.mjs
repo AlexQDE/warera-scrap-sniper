@@ -436,6 +436,81 @@ describe("SPA lifecycle and DOM work", () => {
     await settle(5100);
     expect(desk()).toContain("from another tab");
   });
+  it("writes with the revision the desk rendered, not one refreshed in the window before the re-render, so the worker can drop the stale edit", async () => {
+    window.history.replaceState({}, "", "/market/equipments");
+    marketFixture();
+    const runtime = marketRuntime({
+      craftCollapsed: false,
+      craftRecipes: { boots5: { scraps: 10, steel: 2 } },
+    });
+    const at = new Date().toISOString();
+    const mine = {
+      id: "mine-0001",
+      createdAt: at,
+      updatedAt: at,
+      code: "boots5",
+      label: "mine",
+      inputs: {
+        scraps: 10,
+        steel: 2,
+        scrapPrice: 0.2,
+        steelPrice: 1.5,
+        priceSource: "manual",
+      },
+      costBasis: 5,
+      result: { rarity: null, stat: null, durability: null, note: "" },
+      state: "crafted",
+      listing: { price: null, at: null },
+      sale: { proceeds: null, at: null, source: "manual" },
+      notes: "",
+    };
+    let ledger = { version: 1, revision: 1, entries: [mine], tombstones: {} };
+    const inner = runtime.sendMessage.getMockImplementation();
+    const writes = [];
+    runtime.sendMessage.mockImplementation(async (msg) => {
+      if (msg.type === "ledgerGet") return { ledger: structuredClone(ledger) };
+      if (msg.type === "ledgerSet") {
+        writes.push(msg);
+        // the worker: the entry is tombstoned at revision 2, so a base below 2 loses
+        const dropped =
+          msg.baseRevision < 2 ? msg.changed.map((e) => e.id) : [];
+        return { ledger: structuredClone(ledger), merged: true, dropped };
+      }
+      return inner(msg);
+    });
+    app = await startLens(runtime);
+    await settle();
+    const keep = () =>
+      document.querySelector(
+        '[data-action="desk-ledger-move"][data-type="keep"][data-id="mine-0001"]',
+      );
+    expect(keep()).not.toBeNull();
+    const reads = () =>
+      runtime.sendMessage.mock.calls.filter(([m]) => m.type === "ledgerGet")
+        .length;
+    // another tab deletes the entry; this tab's next tick picks revision 2 up
+    ledger = {
+      version: 1,
+      revision: 2,
+      entries: [],
+      tombstones: { "mine-0001": { at, revision: 2 } },
+    };
+    const before = reads();
+    for (let t = 0; t < 5200 && reads() === before; t += 50)
+      await vi.advanceTimersByTimeAsync(50);
+    expect(reads()).toBe(before + 1);
+    // the refresh landed, the re-render (100 ms) has not: the row is still on screen, rendered from revision 1
+    expect(keep()).not.toBeNull();
+    keep().click();
+    await settle(400);
+    expect(writes).toHaveLength(1);
+    expect(writes[0].baseRevision).toBe(1);
+    expect(writes[0].changed.map((e) => e.id)).toEqual(["mine-0001"]);
+    expect(keep()).toBeNull();
+    expect(document.getElementById("warera-plus-craft").textContent).toContain(
+      "deleted in another tab meanwhile",
+    );
+  });
   it("keeps both panels in place and a focused desk field focused across native mutations", async () => {
     window.history.replaceState({}, "", "/market/equipments");
     marketFixture();

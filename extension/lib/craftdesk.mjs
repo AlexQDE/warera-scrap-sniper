@@ -121,7 +121,13 @@ export function createCraftDesk({
     rescan();
     let ok = false;
     try {
-      const r = await onLedger({ changed, removed });
+      // The base is the revision these rows were rendered from, never the newest the tab holds: a refresh may have
+      // landed since, and an edit of a row rendered before another tab's deletion must still lose to it.
+      const r = await onLedger({
+        changed,
+        removed,
+        baseRevision: lastState?.ledger?.revision ?? 0,
+      });
       if (r?.error) status = `Ledger: ${r.message ?? r.error}`;
       else if (!r?.ledger)
         status = "Ledger: not saved, the extension did not answer; try again";

@@ -225,10 +225,11 @@ export async function startLens(runtime = chrome.runtime) {
       if (context.craft) void read("sales", false, code);
     },
     rescan: () => sched.schedule(),
-    onLedger: async ({ changed = [], removed = [] } = {}) => {
+    onLedger: async ({ changed = [], removed = [], baseRevision } = {}) => {
       const r = await send({
         type: "ledgerSet",
-        baseRevision: state.ledger?.revision ?? 0,
+        // What the desk rendered its rows from, not the newest revision this tab holds: a refresh may have landed in between.
+        baseRevision: Number.isSafeInteger(baseRevision) ? baseRevision : 0,
         changed,
         removed,
       });

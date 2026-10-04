@@ -606,7 +606,11 @@ describe("second review round", () => {
       `[data-action="desk-ledger-move"][data-type="delete"][data-id="${id}"]`,
     );
     await flush();
-    expect(onLedger).toHaveBeenLastCalledWith({ changed: [], removed: [id] });
+    expect(onLedger).toHaveBeenLastCalledWith({
+      changed: [],
+      removed: [id],
+      baseRevision: 2, // the revision the row was rendered from
+    });
     onLedger.mockImplementation(async (ops) => ({
       ...(await applyOps(ops)),
       merged: true,
@@ -774,6 +778,33 @@ describe("second review round", () => {
     );
     expect(el().textContent).not.toContain("Marked scrapped");
     expect(el().textContent).toContain("No crafts recorded yet");
+  });
+  it("writes with the revision its rows were rendered from, not a newer one picked up since, so an edit of a row rendered before a deletion still loses", async () => {
+    settings = preferences({
+      ...settings,
+      craftRecipes: { boots5: { scraps: 10, steel: 2 } },
+    });
+    render();
+    click('[data-action="desk-pick"][data-code="boots5"]');
+    render();
+    click('[data-action="desk-ledger-new"]');
+    render();
+    click('[data-action="desk-ledger-add"]');
+    await flush();
+    desk.render({ ...state }, bar, { after: true }); // the rows on screen come from revision 1
+    const id = onLedger.mock.calls[0][0].changed[0].id;
+    expect(state.ledger.revision).toBe(1);
+    // another tab deleted the entry; the tab's refresh has landed, the re-render has not run yet
+    state.ledger = { ...state.ledger, revision: 2, entries: [] };
+    click(
+      `[data-action="desk-ledger-move"][data-type="keep"][data-id="${id}"]`,
+    );
+    await flush();
+    expect(onLedger).toHaveBeenLastCalledWith({
+      changed: [expect.objectContaining({ id, state: "kept" })],
+      removed: [],
+      baseRevision: 1,
+    });
   });
   it("keeps a setting typed while an earlier save of the same field was still pending", async () => {
     render();
