@@ -178,7 +178,8 @@ describe("Craft Desk panel", () => {
     expect(text()).toContain("saves 0.300 g against buying now if it does");
     expect(text()).toContain("unavailable");
     expect(text()).toContain("no recent fills read for this item");
-    expect(text()).toContain("Break-even listing 5.579 g"); // 5.3 / 0.95, up to the tick
+    expect(text()).toContain("Break-even listing 5.300 g"); // the seller keeps the listing: the cost itself, on the tick
+    expect(text()).toContain("the tax is the buyer's");
     expect(
       el().querySelector('[data-action="desk-pick"][data-code="boots5"]')
         .textContent,
@@ -192,20 +193,24 @@ describe("Craft Desk panel", () => {
       },
     };
     render();
-    expect(text()).toContain("11.400 g"); // listing 12 nets 11.4 after the 5% page tax
+    // The median listing of 12 is what the seller nets: the 5% page rate is the buyer's and only changes what a buyer is shown.
+    expect(text()).toContain("Expected proceeds per craft12.000 g");
+    expect(text()).toContain("the market tax being the buyer's");
+    expect(text()).not.toContain("11.400 g");
     expect(text()).toContain("sells like recent fills");
-    expect(text()).toContain("+6.100 g"); // 11.4 − 5.3
-    expect(text()).toContain("ROI +115.1%");
+    expect(text()).toContain("+6.700 g"); // 12 − 5.3
+    expect(text()).toContain("ROI +126.4%");
     expect(
       el().querySelector('[data-action="desk-pick"][data-code="boots5"]')
         .textContent,
-    ).toBe("+115%");
-    expect(text()).toContain("best legendary boots +115%");
-    expect(text()).toContain("scraps ≤ 0.820 g"); // (11.4 − 3.2) / 10
-    expect(text()).toContain("steel ≤ 4.650 g"); // (11.4 − 2.1) / 2
+    ).toBe("+126%");
+    expect(text()).toContain("best legendary boots +126%");
+    expect(text()).toContain("scraps ≤ 0.880 g"); // (12 − 3.2) / 10
+    expect(text()).toContain("steel ≤ 4.950 g"); // (12 − 2.1) / 2
     expect(text()).toContain("For 20% ROI");
-    expect(text()).toContain("scraps ≤ 0.630 g"); // (9.5 − 3.2) / 10
-    expect(text()).toContain("steel ≤ 3.700 g");
+    expect(text()).toContain("scraps ≤ 0.680 g"); // (10 − 3.2) / 10
+    expect(text()).toContain("steel ≤ 3.950 g");
+    expect(text()).toContain("a buyer in a 5% country is shown 12.600 g"); // 12 × 1.05
     expect(text()).toContain("Balanced");
     expect(text()).toContain("12.000 g");
     expect(text()).toContain("needs 8 comparable fills (5 now)");
@@ -662,7 +667,7 @@ describe("second review round", () => {
     const cell = () =>
       el().querySelector('[data-action="desk-pick"][data-code="boots5"]')
         .textContent;
-    expect(cell()).toBe("+115%");
+    expect(cell()).toBe("+126%");
     clock = NOW + 3 * 3600e3;
     render();
     expect(cell()).toBe("0/5 fills");
@@ -970,7 +975,7 @@ describe("second review round", () => {
     render();
     const cell = (code) =>
       el().querySelector(`[data-action="desk-pick"][data-code="${code}"]`);
-    expect(cell("boots5").textContent).toBe("+115% ⚠");
+    expect(cell("boots5").textContent).toBe("+126% ⚠");
     expect(cell("boots5").title).toContain(
       "last read failed (the API answered 503); showing the last good read",
     );
@@ -986,7 +991,7 @@ describe("second review round", () => {
     // the next read succeeds: the labels go, the numbers stay
     state.salesErrors = {};
     render();
-    expect(cell("boots5").textContent).toBe("+115%");
+    expect(cell("boots5").textContent).toBe("+126%");
     expect(el().textContent).not.toContain("last read failed");
   });
   it("labels a failed read on an item whose cached sample is too small, in the EV line and the listing guidance", () => {
@@ -1118,7 +1123,7 @@ describe("second review round", () => {
       ...settings,
       craftRecipes: { boots5: { scraps: 10, steel: 2 } },
     });
-    // cost 5.300 g; fills net 3.8, 4.75, 5.7, 6.65 and 7.6 after 5% tax: three of five beat it, the median (6 → 5.7) does
+    // cost 5.300 g; the seller keeps the listing, so fills at 4, 5, 6, 7 and 8 are what sellers got: three of five beat it, the median (6) does
     state.salesByCode = {
       boots5: {
         code: "boots5",
@@ -1131,9 +1136,9 @@ describe("second review round", () => {
     click('[data-action="desk-pick"][data-code="boots5"]');
     render();
     const text = el().textContent;
-    expect(text).toContain("Expected proceeds per craft5.700 g");
+    expect(text).toContain("Expected proceeds per craft6.000 g");
     expect(text).toContain(
-      "3 of the 5 comparable fills would have beaten the cost after tax",
+      "3 of the 5 comparable fills would have beaten the cost (fill prices taken as the sellers' listings)",
     );
     expect(text).not.toContain("% of outcomes beat the cost");
   });

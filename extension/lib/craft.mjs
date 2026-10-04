@@ -184,11 +184,14 @@ export function acquisition({
 }
 
 /**
- * What a listing turns into for both sides under the market tax. The game
- * prints a "taxed price": by default (`deducted`) that printed listing is
- * what the buyer pays and the tax comes out of the seller's proceeds; under
- * `added` the tax is put on top of the listing for the buyer and the seller
- * nets the listing. Either way the tax is counted once.
+ * What a listing turns into for both sides under the market tax, counted
+ * once either way. Under `added` the tax is put on top of the listing for
+ * the buyer and the seller nets the listing; under `deducted` the listing is
+ * what the buyer pays and the tax comes out of the seller's proceeds. The
+ * game's equipment market is `added`: the tax is the buyer's, at the buyer's
+ * country's rate, and the price a buyer sees already includes it
+ * (docs/GAME-FACTS.md §5); the Craft Desk passes that mode. The `deducted`
+ * default is kept for callers that model a seller-side fee.
  * @param {{ listing: unknown, taxPct?: unknown, mode?: "deducted" | "added" }} input
  */
 export function proceeds({ listing, taxPct = 0, mode = "deducted" }) {

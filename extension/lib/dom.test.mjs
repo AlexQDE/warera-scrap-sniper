@@ -20,7 +20,34 @@ import {
   paletteFromSamples,
   gridCodeFromId,
   selectedCodeFromTiles,
+  taxRateFromText,
 } from "./dom.mjs";
+
+// The market-tax notice: the 2026-09-03 build printed "Market tax 5%"; since
+// 2026-09-09 the live page says "All prices displayed include a 1% market tax
+// from your country", the number before the words. Both must read; anything
+// else is no rate (then a manual input), never a guess.
+describe("taxRateFromText", () => {
+  it("reads the rate whether it comes after or before the words", () => {
+    expect(taxRateFromText("Market tax 5%")).toBe(5);
+    expect(taxRateFromText("Market tax: 2.5 %")).toBe(2.5);
+    expect(
+      taxRateFromText(
+        "All prices displayed include a 1% market tax from your country",
+      ),
+    ).toBe(1);
+    expect(
+      taxRateFromText("Svi prikazani iznosi uključuju 1,5% market tax"),
+    ).toBe(1.5);
+  });
+  it("returns null for no number, an impossible rate or no text", () => {
+    expect(taxRateFromText("Market tax")).toBeNull();
+    expect(taxRateFromText("Taxed price")).toBeNull();
+    expect(taxRateFromText("250% market tax")).toBeNull();
+    expect(taxRateFromText("")).toBeNull();
+    expect(taxRateFromText(null)).toBeNull();
+  });
+});
 
 // The inventory picker behind "New item offer" shows every item as a skin
 // image whose name ends in the slot (dieselBoots, miamiHelmet, winterJet) inside

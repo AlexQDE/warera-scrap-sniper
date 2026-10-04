@@ -384,9 +384,11 @@ export function rowsContainer(rows) {
 }
 
 /**
- * The "Taxed price" notice element, if the page shows one. Used only as the
- * anchor the toolbar is inserted after; the rate itself plays no part in the
- * maths (editor's rule: displayed prices are compared as they are).
+ * The market-tax notice element, if the page shows one: since 2026-09-09
+ * "All prices displayed include a 1% market tax from your country" (earlier
+ * builds printed "Taxed price"). The anchor the toolbar is inserted after;
+ * the rate plays no part in the scrap maths (editor's rule: displayed prices
+ * are compared as they are), the Craft Desk shows it as the buyer's rate.
  */
 let taxCache = null;
 export function taxNotice(root = document) {
@@ -411,11 +413,17 @@ export function taxNotice(root = document) {
   return taxCache;
 }
 
-/** "Market tax 5%" -> 5: the rate the notice prints, when it prints one; null otherwise (the rate is then a manual input). */
+/**
+ * The rate the notice prints, when it prints one: "Market tax 5%" -> 5 and
+ * the live "All prices displayed include a 1% market tax from your country"
+ * -> 1 (the number comes before the words there). null otherwise, and the
+ * rate is then a manual input.
+ */
 export function taxRateFromText(text) {
-  const m = /market tax[^0-9%]{0,40}?(\d+(?:[.,]\d+)?)\s*%/i.exec(
-    String(text ?? ""),
-  );
+  const s = String(text ?? "");
+  const m =
+    /market tax[^0-9%]{0,40}?(\d+(?:[.,]\d+)?)\s*%/i.exec(s) ??
+    /(\d+(?:[.,]\d+)?)\s*%\s*market tax/i.exec(s);
   if (!m) return null;
   const n = Number(m[1].replace(",", "."));
   return Number.isFinite(n) && n >= 0 && n <= 100 ? n : null;

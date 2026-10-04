@@ -174,7 +174,9 @@ export function inputPrices(state, manual = {}, now = Date.now()) {
 
 /**
  * The market tax rate: the player's own figure first, then what the page
- * notice printed, else zero with a note (the 1.4 convention: no adjustment).
+ * notice printed, else zero with a note. The rate is the buyer's (at the
+ * buyer's country) and the seller nets the listing either way, so it only
+ * changes what a buyer is shown; see docs/GAME-FACTS.md §5.
  * @param {{ manual?: unknown, page?: unknown, settings?: unknown }} input
  */
 export function taxRate({ manual = null, page = null, settings = null } = {}) {
@@ -192,7 +194,7 @@ export function taxRate({ manual = null, page = null, settings = null } = {}) {
   return {
     value: 0,
     source: /** @type {const} */ ("none"),
-    note: "no rate read: proceeds equal the listing",
+    note: "no rate read: buyers are shown the listing itself",
   };
 }
 

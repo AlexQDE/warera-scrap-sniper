@@ -43,6 +43,16 @@ import { itemLabel } from "./dom.mjs";
 
 export const DESK_ID = "warera-plus-craft";
 const SLOT_HEADS = ["weapon", ...SLOTS];
+/**
+ * Which side of a sale the market tax lands on. In the game it is the
+ * BUYER's, at the buyer's own country's rate, paid to that country; the
+ * seller receives the listed price either way, and since 2026-09-09 the
+ * price a buyer sees already includes it ("All prices displayed include a 1%
+ * market tax from your country"). So a listing is what the seller nets, and
+ * the rate only changes what a buyer in your country is shown.
+ * docs/GAME-FACTS.md §5.
+ */
+const TAX_MODE = "added";
 const LEDGER_ROWS = 20;
 /** Ledger writes that must not overlap: each waits for the previous save. */
 const LEDGER_WRITES = new Set([
@@ -531,7 +541,11 @@ export function createCraftDesk({
           proceeds:
             x.listing == null
               ? null
-              : proceeds({ listing: x.listing, taxPct: tax.value }).sellerGets,
+              : proceeds({
+                  listing: x.listing,
+                  taxPct: tax.value,
+                  mode: TAX_MODE,
+                }).sellerGets,
         })),
       };
       if (outcomesMemo.size > 200) outcomesMemo.clear();
@@ -609,11 +623,11 @@ export function createCraftDesk({
       o.outcomes.length > 1 && ev.cost != null
         ? ` · ${Math.round((ev.pProfit ?? 0) * 100)}% of outcomes beat the cost`
         : o.fills?.length && plan.cost.perCraft != null
-          ? ` · ${o.fills.filter((f) => proceeds({ listing: f.price, taxPct: tax.value }).sellerGets > plan.cost.perCraft).length} of the ${o.fills.length} comparable fills would have beaten the cost after tax`
+          ? ` · ${o.fills.filter((f) => proceeds({ listing: f.price, taxPct: tax.value, mode: TAX_MODE }).sellerGets > plan.cost.perCraft).length} of the ${o.fills.length} comparable fills would have beaten the cost (fill prices taken as the sellers' listings)`
           : "";
     const evLine =
       ev.status === "ok"
-        ? `<b>${fmt(ev.ev)} g</b><span>seller proceeds after ${tax.value}% tax · ${esc(o.note)}${beat}${o.outcomes.length > 1 ? ` · best ${fmt(ev.best)} · worst ${fmt(ev.worst)}` : ""}</span>`
+        ? `<b>${fmt(ev.ev)} g</b><span>what the seller nets: the listing itself, the market tax being the buyer's · ${esc(o.note)}${beat}${o.outcomes.length > 1 ? ` · best ${fmt(ev.best)} · worst ${fmt(ev.worst)}` : ""}</span>`
         : `<b>unavailable</b><span>${esc(ev.reason ? `${ev.reason}${o.error ? ` · ${o.note}` : ""}` : o.note)}</span>`;
     out.push(
       `<div class="lens-grid2"><div><small>Expected proceeds per craft</small>${evLine}</div><div><small>Expected profit</small><b class="${ev.profit == null ? "" : ev.profit >= 0 ? "lens-pos" : "lens-neg"}">${ev.profit == null ? "–" : `${signed(ev.profit)} g`}</b><span>ROI ${pct(ev.roi, 1)} per craft · batch ${plan.batch.expectedProfit == null ? "–" : `${signed(plan.batch.expectedProfit)} g`} · an expectation over random outcomes, not a promise</span></div></div>`,
@@ -631,20 +645,21 @@ export function createCraftDesk({
         : listingForProceeds({
             sellerGets: plan.cost.perCraft,
             taxPct: tax.value,
+            mode: TAX_MODE,
           });
     const breakEvenLine =
       breakEvenListing == null
         ? ""
-        : `<p class="lens-muted">Break-even listing <b>${fmt(breakEvenListing)} g</b>: the lowest listing that nets your cost of ${fmt(plan.cost.perCraft)} g per craft at ${tax.value}% tax, snapped up to the tick.</p>`;
+        : `<p class="lens-muted">Break-even listing <b>${fmt(breakEvenListing)} g</b>: the lowest listing that returns your cost of ${fmt(plan.cost.perCraft)} g per craft, snapped up to the tick; the seller keeps the listing, the tax is the buyer's.</p>`;
     if (est?.status === "ok") {
       const sales = state.salesByCode?.[code];
       const liq = o.fills?.length ? liquidity(o.fills, { now: now() }) : null;
       const row = (name, sc) =>
         sc
-          ? `<div><small>${name}</small><b>${fmt(sc.price)} g</b><span>nets ${fmt(proceeds({ listing: sc.price, taxPct: tax.value }).sellerGets)} g after tax · ${esc(sc.basis)}</span></div>`
+          ? `<div><small>${name}</small><b>${fmt(sc.price)} g</b><span>a buyer in a ${tax.value}% country is shown ${fmt(proceeds({ listing: sc.price, taxPct: tax.value, mode: TAX_MODE }).buyerPays)} g · ${esc(sc.basis)}</span></div>`
           : `<div><small>${name}</small><b>–</b><span>needs 8 comparable fills (${est.n} now)</span></div>`;
       out.push(
-        `<h4>Listing guidance <small>listing = the price shown on the market; "nets" = what you keep at ${tax.value}% tax (${esc(tax.source === "none" ? "no rate read" : tax.source === "page" ? "rate read off the page" : "your rate")})</small></h4><div class="lens-grid3">${row("Quick sale", scenarios.quick)}${row("Balanced", scenarios.balanced)}${row("Patient", scenarios.patient)}</div><p class="lens-muted">Evidence: ${est.n} comparable fills in ${est.windowHours} h${est.capped ? " (capped sample)" : ""} · low ${fmt(est.low)} · high ${fmt(est.high)}${est.uncertaintyPct != null ? ` · ±${est.uncertaintyPct.toFixed(0)}% spread (MAD)` : ""} · last fill ${timeLabel(est.lastAt, now())}${liq?.medianGapHours != null ? ` · pace ${liq.perDay.toFixed(1)}/day, median gap ${liq.medianGapHours.toFixed(1)} h (recent pace, not your queue)` : ""}${sales ? ` · read ${timeLabel(sales.at, now())}` : ""}${o.error ? ` · <b>last read failed</b> (${esc(o.error)}): the last good read is shown` : ""}</p>${breakEvenLine}`,
+        `<h4>Listing guidance <small>listing = the price you set and keep; buyers see it plus their own country's market tax (${tax.value}% ${esc(tax.source === "none" ? "assumed, no rate read" : tax.source === "page" ? "read off the page notice" : "your rate")})</small></h4><div class="lens-grid3">${row("Quick sale", scenarios.quick)}${row("Balanced", scenarios.balanced)}${row("Patient", scenarios.patient)}</div><p class="lens-muted">Evidence: ${est.n} comparable fills in ${est.windowHours} h${est.capped ? " (capped sample)" : ""} · low ${fmt(est.low)} · high ${fmt(est.high)}${est.uncertaintyPct != null ? ` · ±${est.uncertaintyPct.toFixed(0)}% spread (MAD)` : ""} · last fill ${timeLabel(est.lastAt, now())}${liq?.medianGapHours != null ? ` · pace ${liq.perDay.toFixed(1)}/day, median gap ${liq.medianGapHours.toFixed(1)} h (recent pace, not your queue)` : ""}${sales ? ` · read ${timeLabel(sales.at, now())}` : ""}${o.error ? ` · <b>last read failed</b> (${esc(o.error)}): the last good read is shown` : ""}</p>${breakEvenLine}`,
       );
     } else
       out.push(
@@ -829,7 +844,7 @@ export function createCraftDesk({
         : "";
     const html =
       head +
-      `<div class="lens-desk"><div class="lens-inputs"><label>Scrap price ${numberField("scrapPrice", manual.scrapPrice ?? prices.scrap.value ?? "")}<small>${esc(prices.scrap.note)}</small></label><label>Steel price ${numberField("steelPrice", manual.steelPrice ?? prices.steel.value ?? "")}<small>${esc(prices.steel.note)}</small></label><label>Batch ${numberField("batch", s.craftBatch, "1", 'max="1000" inputmode="numeric"')}<small>crafts</small></label><label>Market tax % ${numberField("taxPct", s.taxPct ?? (tax.source === "page" ? tax.value : ""), "0.01", 'max="100" placeholder="' + esc(tax.source === "page" ? `${tax.value} (page)` : "0") + '"')}<small>${esc(tax.source === "manual" ? "your rate" : tax.source === "page" ? "read off the page notice" : "none read: proceeds = listing")}</small></label><label>Target ROI % ${numberField("targetPct", s.craftTargetPct, "1", 'min="-50" max="500"')}<small>for the ceilings</small></label><button type="button" data-action="desk-quotes">Use quotes</button></div>` +
+      `<div class="lens-desk"><div class="lens-inputs"><label>Scrap price ${numberField("scrapPrice", manual.scrapPrice ?? prices.scrap.value ?? "")}<small>${esc(prices.scrap.note)}</small></label><label>Steel price ${numberField("steelPrice", manual.steelPrice ?? prices.steel.value ?? "")}<small>${esc(prices.steel.note)}</small></label><label>Batch ${numberField("batch", s.craftBatch, "1", 'max="1000" inputmode="numeric"')}<small>crafts</small></label><label>Market tax % ${numberField("taxPct", s.taxPct ?? (tax.source === "page" ? tax.value : ""), "0.01", 'max="100" placeholder="' + esc(tax.source === "page" ? `${tax.value} (page)` : "0") + '"')}<small>${esc(tax.source === "manual" ? "your rate (the buyer's, by country)" : tax.source === "page" ? "read off the page notice" : "none read; the tax is the buyer's, so the listing is what you keep")}</small></label><label>Target ROI % ${numberField("targetPct", s.craftTargetPct, "1", 'min="-50" max="500"')}<small>for the ceilings</small></label><button type="button" data-action="desk-quotes">Use quotes</button></div>` +
       `<table class="lens-matrix"><caption>Expected ROI by tier and slot · the game's recipes, slot chosen${overrides ? ` (${overrides} overridden by you)` : ""}${best}</caption><thead><tr><th>Tier</th>${SLOT_HEADS.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${matrix.join("")}</tbody></table>` +
       `<section class="lens-detail">${selected ? detailHtml(selected, state, s, tax, prices, recipes) : '<p class="lens-muted">Pick a cell to work a craft through: recipe, cost, buying now or bidding, expected value over its outcomes, break-even ceilings and listing guidance.</p>'}</section>` +
       `<section class="lens-ledger-box">${ledgerHtml(state, tax)}</section>` +
