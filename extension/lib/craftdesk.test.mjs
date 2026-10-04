@@ -775,4 +775,30 @@ describe("second review round", () => {
     expect(el().textContent).not.toContain("Marked scrapped");
     expect(el().textContent).toContain("No crafts recorded yet");
   });
+  it("keeps a setting typed while an earlier save of the same field was still pending", async () => {
+    render();
+    const apply = save.getMockImplementation();
+    let confirm;
+    save.mockImplementationOnce(
+      (patch) =>
+        new Promise((resolve) => {
+          confirm = () => resolve(apply(patch));
+        }),
+    );
+    type("batch", "4", "change");
+    type("batch", "40"); // typed while the save of 4 is pending, its change event not yet fired
+    confirm();
+    await flush();
+    render();
+    expect(settings.craftBatch).toBe(4);
+    expect(el().querySelector('[data-field="batch"]').value).toBe("40");
+    type("batch", "40", "change");
+    await flush();
+    render();
+    expect(settings.craftBatch).toBe(40);
+    expect(el().querySelector('[data-field="batch"]').value).toBe("40");
+    settings = preferences({ ...settings, craftBatch: 7 }); // changed in the popup: no longer shadowed
+    render();
+    expect(el().querySelector('[data-field="batch"]').value).toBe("7");
+  });
 });

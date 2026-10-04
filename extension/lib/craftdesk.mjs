@@ -393,8 +393,10 @@ export function createCraftDesk({
             : { craftTargetPct: v };
       Promise.resolve(save(patch)).then(
         (applied) => {
-          if (applied) delete fields[f];
-          else
+          // Text typed since this value was committed is a newer edit, not yet saved: it is not this save's to clear.
+          if (applied) {
+            if (fields[f] === v) delete fields[f];
+          } else
             status =
               "Settings: not saved, the extension did not answer; try again";
           rescan();
