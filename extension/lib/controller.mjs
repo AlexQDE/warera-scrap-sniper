@@ -10,6 +10,7 @@ import { makeSingleFlight } from "./flight.mjs";
 import { preferences } from "./settings.mjs";
 import { CACHE_VERSION, TTL, freshness } from "./quality.mjs";
 import { normalizeLedger, mergeLedgers, LEDGER_VERSION } from "./ledger.mjs";
+import { applyRecipeOps } from "./craftdata.mjs";
 
 /** The craft ledger is the player's own record: validated, bounded, kept across key changes, never sent anywhere. */
 export const LEDGER_BYTES = 512_000;
@@ -221,8 +222,17 @@ export function createController({
         nextKey !== keyOf(settings) ||
         (savesKey &&
           rejectedAuthRevision === (Number(settings.authRevision) || 0));
+      // A recipe change arrives as operations on the stored table (set / remove), never as a tab's whole copy of it.
+      const recipes = patch.craftRecipeOps
+        ? {
+            craftRecipes: applyRecipeOps(
+              settings.craftRecipes,
+              patch.craftRecipeOps,
+            ),
+          }
+        : {};
       const next = {
-        ...preferences({ ...settings, ...patch }),
+        ...preferences({ ...settings, ...patch, ...recipes }),
         revision: (Number(settings.revision) || 0) + 1,
         authRevision:
           (Number(settings.authRevision) || 0) + (resetsAuth ? 1 : 0),

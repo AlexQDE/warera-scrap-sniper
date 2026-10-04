@@ -59,6 +59,24 @@ export function normalizeRecipes(raw) {
 }
 
 /**
+ * Apply one tab's recipe changes to the stored table: `set` adds or replaces
+ * codes, `remove` drops them. Tabs send these instead of their whole table so
+ * two tabs saving different recipes cannot overwrite each other.
+ * @param {unknown} current @param {unknown} ops
+ * @returns {Record<string, Recipe>}
+ */
+export function applyRecipeOps(current, ops) {
+  const out = { ...normalizeRecipes(current) };
+  const o = /** @type {{ set?: unknown, remove?: unknown } | null} */ (
+    ops && typeof ops === "object" ? ops : null
+  );
+  Object.assign(out, normalizeRecipes(o?.set));
+  for (const code of Array.isArray(o?.remove) ? o.remove : [])
+    delete out[String(code)];
+  return out;
+}
+
+/**
  * @typedef {{ bid?: number | null, ask?: number | null, bids?: Array<{price:number, quantity:number}> | null, asks?: Array<{price:number, quantity:number}> | null }} BookLike
  * @typedef {{ book?: { at?: string | null, bids?: Array<{price:number, quantity:number}>, asks?: Array<{price:number, quantity:number}>, bid?: number | null, ask?: number | null } | null, cases?: { at?: string | null, books?: Record<string, BookLike> } | null, salesByCode?: Record<string, { code: string, at: string, complete: boolean, fills: Array<{ price: number, at: string, state?: number | null, code?: string | null }> }> | null, settings?: { intervalSec?: number, craftRecipes?: unknown, taxPct?: unknown } | null }} LensState
  * @typedef {{ scrapPrice?: unknown, steelPrice?: unknown }} Manual

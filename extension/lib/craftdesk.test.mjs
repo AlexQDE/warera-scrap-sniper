@@ -2,6 +2,7 @@
 import { beforeEach, afterEach, describe, it, expect, vi } from "vitest";
 import { createCraftDesk, DESK_ID } from "./craftdesk.mjs";
 import { DEFAULTS, preferences } from "./settings.mjs";
+import { applyRecipeOps } from "./craftdata.mjs";
 
 const NOW = Date.parse("2026-10-03T12:00:00Z");
 const iso = (msAgo = 0) => new Date(NOW - msAgo).toISOString();
@@ -62,7 +63,16 @@ beforeEach(() => {
   bar = document.getElementById("scrap-sniper-bar");
   settings = preferences({ ...DEFAULTS, craftCollapsed: false });
   save = vi.fn((patch) => {
-    settings = preferences({ ...settings, ...patch });
+    // what the worker does: recipe operations are applied to the stored table
+    const recipes = patch.craftRecipeOps
+      ? {
+          craftRecipes: applyRecipeOps(
+            settings.craftRecipes,
+            patch.craftRecipeOps,
+          ),
+        }
+      : {};
+    settings = preferences({ ...settings, ...patch, ...recipes });
     return settings;
   });
   onLedger = vi.fn(applyOps);
@@ -127,7 +137,7 @@ describe("Craft Desk panel", () => {
     expect(el().textContent).toContain("read off the page notice");
     expect(el().querySelector('[data-field="scrapPrice"]').value).toBe("0.21");
   });
-  it("works a craft through once its recipe is saved: cost, buy-now against bids, EV over outcomes, ceilings on the tick", () => {
+  it("works a craft through once its recipe is saved: cost, buy-now against bids, EV over outcomes, ceilings on the tick", async () => {
     render();
     click('[data-action="desk-pick"][data-code="boots5"]');
     expect(rescan).toHaveBeenCalled();
@@ -141,8 +151,9 @@ describe("Craft Desk panel", () => {
     type("recipe-steel", "2");
     click('[data-action="desk-save-recipe"]');
     expect(save).toHaveBeenCalledWith({
-      craftRecipes: { boots5: { scraps: 10, steel: 2 } },
+      craftRecipeOps: { set: { boots5: { scraps: 10, steel: 2 } } },
     });
+    await flush();
     render();
     const text = () => el().textContent;
     expect(text()).toContain("5.300 g"); // 10 × 0.21 + 2 × 1.6
@@ -636,5 +647,37 @@ describe("second review round", () => {
     clock = NOW + 3 * 3600e3;
     render();
     expect(cell()).toBe("0/5 fills");
+  });
+  it("keeps the typed recipe and says so when the save was not confirmed, and forgets by operation", async () => {
+    render();
+    click('[data-action="desk-pick"][data-code="boots5"]');
+    render();
+    type("recipe-scraps", "10");
+    type("recipe-steel", "2");
+    save.mockImplementationOnce(() => undefined); // the extension did not answer
+    click('[data-action="desk-save-recipe"]');
+    await flush();
+    render();
+    expect(el().querySelector('[data-field="recipe-scraps"]').value).toBe("10");
+    expect(el().querySelector('[data-field="recipe-steel"]').value).toBe("2");
+    expect(el().textContent).toContain("Recipe: not saved");
+    expect(el().textContent).not.toContain("saved on this browser");
+    click('[data-action="desk-save-recipe"]');
+    await flush();
+    render();
+    expect(el().textContent).toContain(
+      "Recipe for legendary boots saved on this browser",
+    );
+    click('[data-action="desk-forget-recipe"]');
+    expect(save).toHaveBeenLastCalledWith({
+      craftRecipeOps: { remove: ["boots5"] },
+    });
+    await flush();
+    render();
+    expect(el().textContent).toContain("Recipe for legendary boots removed");
+    expect(
+      el().querySelector('[data-action="desk-pick"][data-code="boots5"]')
+        .textContent,
+    ).toBe("no recipe");
   });
 });

@@ -174,15 +174,38 @@ export function createCraftDesk({
         rescan();
         return;
       }
-      delete fields["recipe-scraps"];
-      delete fields["recipe-steel"];
-      status = `Recipe for ${itemLabel(selected)} saved on this browser`;
-      save({ craftRecipes: { ...s.craftRecipes, [selected]: r } });
+      const code = selected;
+      // One code travels, not the whole table, so another tab's recipe is never overwritten; the inputs clear only once the worker confirmed.
+      Promise.resolve(save({ craftRecipeOps: { set: { [code]: r } } })).then(
+        (applied) => {
+          if (applied) {
+            delete fields["recipe-scraps"];
+            delete fields["recipe-steel"];
+            status = `Recipe for ${itemLabel(code)} saved on this browser`;
+          } else
+            status =
+              "Recipe: not saved, the extension did not answer; your numbers are kept, try again";
+          rescan();
+        },
+        () => {
+          status = "Recipe: not saved; your numbers are kept, try again";
+          rescan();
+        },
+      );
     } else if (a === "desk-forget-recipe" && selected) {
-      const rest = { ...s.craftRecipes };
-      delete rest[selected];
-      status = `Recipe for ${itemLabel(selected)} removed`;
-      save({ craftRecipes: rest });
+      const code = selected;
+      Promise.resolve(save({ craftRecipeOps: { remove: [code] } })).then(
+        (applied) => {
+          status = applied
+            ? `Recipe for ${itemLabel(code)} removed`
+            : "Recipe: not removed, the extension did not answer; try again";
+          rescan();
+        },
+        () => {
+          status = "Recipe: not removed; try again";
+          rescan();
+        },
+      );
     } else if (a === "desk-ledger-new") {
       const p = inputPrices(lastState ?? {}, manual, now());
       form = {

@@ -344,4 +344,35 @@ describe("background controller", () => {
       (await controller.handle({ type: "ledgerGet" })).ledger.revision,
     ).toBe(5); // five writes, whatever they carried
   });
+  it("merges two tabs' recipe saves instead of letting the second replace the first, and still lets the popup clear the table", async () => {
+    const { controller } = setup();
+    const a = await controller.handle({
+      type: "saveSettings",
+      settings: {
+        craftRecipeOps: { set: { boots5: { scraps: 10, steel: 2 } } },
+      },
+    });
+    expect(a.settings.craftRecipes).toEqual({
+      boots5: { scraps: 10, steel: 2 },
+    });
+    // the other tab still holds the empty table it read before, and saves a different code
+    const b = await controller.handle({
+      type: "saveSettings",
+      settings: { craftRecipeOps: { set: { jet: { scraps: 30, steel: 3 } } } },
+    });
+    expect(b.settings.craftRecipes).toEqual({
+      boots5: { scraps: 10, steel: 2 },
+      jet: { scraps: 30, steel: 3 },
+    });
+    const c = await controller.handle({
+      type: "saveSettings",
+      settings: { craftRecipeOps: { remove: ["boots5"] } },
+    });
+    expect(c.settings.craftRecipes).toEqual({ jet: { scraps: 30, steel: 3 } });
+    const cleared = await controller.handle(
+      { type: "saveSettings", settings: { craftRecipes: {} } },
+      { trusted: true },
+    );
+    expect(cleared.settings.craftRecipes).toEqual({});
+  });
 });

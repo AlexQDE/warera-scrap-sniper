@@ -8,6 +8,7 @@ import {
   inputPrices,
   taxRate,
   outcomesFor,
+  applyRecipeOps,
 } from "./craftdata.mjs";
 
 const NOW = Date.parse("2026-10-03T12:00:00.000Z");
@@ -175,5 +176,36 @@ describe("outcomesFor", () => {
     expect(outcomesFor("boots5", { salesByCode: {}, now: NOW }).fills).toEqual(
       [],
     );
+  });
+});
+
+describe("applyRecipeOps", () => {
+  it("adds, replaces and removes codes on the stored table, validating what it sets", () => {
+    const stored = {
+      boots5: { scraps: 10, steel: 2 },
+      jet: { scraps: 30, steel: 3 },
+    };
+    expect(
+      applyRecipeOps(stored, {
+        set: {
+          knife: { scraps: "5", steel: 1 },
+          boots5: { scraps: 12, steel: 2 },
+        },
+      }),
+    ).toEqual({
+      boots5: { scraps: 12, steel: 2 },
+      jet: { scraps: 30, steel: 3 },
+      knife: { scraps: 5, steel: 1 },
+    });
+    expect(applyRecipeOps(stored, { remove: ["jet", "nope"] })).toEqual({
+      boots5: { scraps: 10, steel: 2 },
+    });
+    expect(
+      applyRecipeOps(stored, {
+        set: { hat: { scraps: 1 }, jet: { scraps: -1 } },
+      }),
+    ).toEqual(stored);
+    expect(applyRecipeOps(undefined, null)).toEqual({});
+    expect(applyRecipeOps(stored, "junk")).toEqual(stored);
   });
 });
