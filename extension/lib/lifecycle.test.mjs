@@ -391,6 +391,48 @@ describe("SPA lifecycle and DOM work", () => {
     expect(salesCalls(runtime, "boots5")).toBe(2); // once, no loop
     expect(salesCalls(runtime, "jet")).toBe(2);
   });
+  it("runs one forced read for the panel's new item when its refresh was queued behind another read, not a plain read and then the forced one", async () => {
+    window.history.replaceState({}, "", "/market/equipments?item=jet");
+    marketFixture();
+    let releaseJet = null;
+    const runtime = marketRuntime({}, (msg) => {
+      const sales = {
+        sales: {
+          code: msg.itemCode,
+          at: new Date().toISOString(),
+          complete: true,
+          fills: [],
+        },
+      };
+      if (msg.itemCode === "jet")
+        return new Promise((resolve) => {
+          releaseJet = () => resolve(sales);
+        });
+      return sales;
+    });
+    app = await startLens(runtime);
+    await settle();
+    expect(salesCalls(runtime, "jet")).toBe(1);
+    expect(releaseJet).not.toBeNull();
+    // the selection moves to the boots while jet's read is in flight, and the panel's Refresh is clicked
+    document.getElementById("item-code-selector-jet").style.zIndex = "";
+    document.getElementById("item-code-selector-boots5").style.zIndex = "1";
+    document
+      .getElementById("offers")
+      .appendChild(document.createElement("div"));
+    await settle(5100);
+    document.querySelector('#scrap-sniper-bar [data-action="refresh"]').click();
+    await settle();
+    expect(salesCalls(runtime, "boots5")).toBe(0); // waits for jet
+    releaseJet();
+    await settle(3000);
+    const boots = runtime.sendMessage.mock.calls.filter(
+      ([m]) => m.type === "sales" && m.itemCode === "boots5",
+    );
+    expect(boots).toHaveLength(1);
+    expect(boots[0][0].force).toBe(true);
+    expect(salesCalls(runtime, "jet")).toBe(1);
+  });
   it("retries a failing sales read after a pause, not on every scan", async () => {
     window.history.replaceState({}, "", "/market/equipments?item=jet");
     marketFixture();

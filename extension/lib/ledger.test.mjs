@@ -94,6 +94,14 @@ describe("normalizeEntry and createEntry", () => {
     expect(normalizeEntry({ ...e, revision: 4 }).revision).toBe(4);
     expect(normalizeEntry({ ...e, revision: "junk" }).revision).toBe(0);
     expect(normalizeEntry({ ...e, revision: -1 }).revision).toBe(0);
+    // a listing without its price is not a listing: the piece is still crafted
+    const at = new Date(NOW).toISOString();
+    expect(
+      normalizeEntry({ ...e, state: "listed", listing: { price: null, at } }),
+    ).toMatchObject({ state: "crafted", listing: { price: null, at: null } });
+    expect(
+      normalizeEntry({ ...e, state: "listed", listing: { price: 3, at } }),
+    ).toMatchObject({ state: "listed", listing: { price: 3, at } });
   });
   it("drops what it cannot trust: bad ids, negative quantities, a sale without proceeds, unknown codes and states", () => {
     expect(normalizeEntry({ ...form, id: "x" })).toBeNull();
@@ -163,10 +171,13 @@ describe("transition", () => {
     expect(back.state).toBe("crafted");
     expect(back.listing.price).toBeNull();
   });
-  it("refuses a sale without proceeds, any move after a sale, and unknown moves", () => {
+  it("refuses a sale without proceeds, a listing without a price, any move after a sale, and unknown moves", () => {
     expect(
       transition(crafted, { type: "sell", proceeds: null }, NOW),
     ).toBeNull();
+    expect(transition(crafted, { type: "list" }, NOW)).toBeNull();
+    expect(transition(crafted, { type: "list", price: "" }, NOW)).toBeNull();
+    expect(transition(crafted, { type: "list", price: -1 }, NOW)).toBeNull();
     const sold = transition(crafted, { type: "sell", proceeds: 1 }, NOW);
     expect(transition(sold, { type: "list", price: 1 }, NOW)).toBeNull();
     expect(transition(crafted, { type: "teleport" }, NOW)).toBeNull();

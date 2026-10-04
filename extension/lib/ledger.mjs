@@ -106,7 +106,13 @@ export function normalizeEntry(raw, now = Date.now()) {
     priceSource,
   };
   const createdAt = when(r.createdAt) ?? new Date(now).toISOString();
-  const state = STATES.includes(r.state) ? r.state : "crafted";
+  const listingPrice = money(r.listing?.price);
+  // A listing without its price is not a listing (as a sale without proceeds is not a sale): such a piece is still crafted.
+  const state = !STATES.includes(r.state)
+    ? "crafted"
+    : r.state === "listed" && listingPrice == null
+      ? "crafted"
+      : r.state;
   const code = ALL_GEAR_CODES.includes(r.code) ? r.code : null;
   const rarity = RARITIES.includes(r.result?.rarity) ? r.result.rarity : null;
   const sale =
@@ -139,7 +145,7 @@ export function normalizeEntry(raw, now = Date.now()) {
     state,
     listing:
       state === "listed" || state === "sold"
-        ? { price: money(r.listing?.price), at: when(r.listing?.at) }
+        ? { price: listingPrice, at: when(r.listing?.at) }
         : { price: null, at: null },
     sale,
     notes: text(r.notes, 200),
@@ -193,6 +199,7 @@ export function transition(entry, event, now = Date.now()) {
   switch (event.type) {
     case "list": {
       const price = money(event.price);
+      if (price == null) return null; // a listing needs its price, as a sale needs its proceeds
       return normalizeEntry(
         {
           ...entry,

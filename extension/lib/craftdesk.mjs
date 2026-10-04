@@ -315,7 +315,7 @@ export function createCraftDesk({
         status =
           pending.type === "sell"
             ? "Ledger: a sale needs the proceeds you received"
-            : "Ledger: could not list this entry";
+            : "Ledger: a listing needs its price";
         rescan();
         return;
       }

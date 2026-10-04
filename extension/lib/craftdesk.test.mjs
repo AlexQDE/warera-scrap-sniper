@@ -887,6 +887,43 @@ describe("second review round", () => {
     expect(el().querySelector('[data-field="recipe-scraps"]').value).toBe("7");
     expect(el().querySelector('[data-field="recipe-steel"]').value).toBe("1");
   });
+  it("refuses to list without a price, keeps the price form open and writes nothing", async () => {
+    settings = preferences({
+      ...settings,
+      craftRecipes: { boots5: { scraps: 10, steel: 2 } },
+    });
+    render();
+    click('[data-action="desk-pick"][data-code="boots5"]');
+    render();
+    click('[data-action="desk-ledger-new"]');
+    render();
+    click('[data-action="desk-ledger-add"]');
+    await flush();
+    render();
+    const id = onLedger.mock.calls[0][0].changed[0].id;
+    click(
+      `[data-action="desk-ledger-move"][data-type="list"][data-id="${id}"]`,
+    );
+    render();
+    click('[data-action="desk-ledger-confirm"]'); // the price field is empty
+    await flush();
+    render();
+    expect(onLedger).toHaveBeenCalledTimes(1); // the craft only
+    expect(el().textContent).toContain("Ledger: a listing needs its price");
+    expect(el().querySelector('[data-field="pending-price"]')).not.toBeNull();
+    expect(state.ledger.entries[0].state).toBe("crafted");
+    expect(el().textContent).not.toContain("listed at");
+    type("pending-price", "12");
+    click('[data-action="desk-ledger-confirm"]');
+    await flush();
+    render();
+    expect(onLedger).toHaveBeenCalledTimes(2);
+    expect(state.ledger.entries[0]).toMatchObject({
+      state: "listed",
+      listing: { price: 12 },
+    });
+    expect(el().textContent).toContain("Listed at 12.000 g");
+  });
   it("keeps a setting typed while an earlier save of the same field was still pending", async () => {
     render();
     const apply = save.getMockImplementation();

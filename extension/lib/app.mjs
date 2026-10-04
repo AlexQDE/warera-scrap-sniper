@@ -193,9 +193,16 @@ export async function startLens(runtime = chrome.runtime) {
     }
     sched.schedule();
     if (kind === "sales" && !document.hidden) {
-      if (salesWanted && salesWanted !== code)
-        void read("sales", false, salesWanted);
+      // The reads kept while this one ran go first, each with its force flag; the panel's item is asked for
+      // afterwards only when nothing is being read or waiting for it, so one refresh makes one read.
       drainSales();
+      if (
+        salesWanted &&
+        salesWanted !== code &&
+        !state.busy.has("sales") &&
+        !salesPending.has(salesWanted)
+      )
+        void read("sales", false, salesWanted);
     }
   }
   /** Run the sales reads kept while one was in flight, one at a time; the rest wait for the next completion. */
