@@ -181,8 +181,10 @@ export function createCraftDesk({
       delete fields["recipe-steel"];
       rescan();
     } else if (a === "desk-quotes") {
+      // Back to the market's prices: only the typed scrap and steel prices go; a recipe, a pending price or a pasted import being entered stays.
       manual = {};
-      fields = {};
+      delete fields.scrapPrice;
+      delete fields.steelPrice;
       rescan();
     } else if (a === "desk-save-recipe") {
       const r = normalizeRecipe({

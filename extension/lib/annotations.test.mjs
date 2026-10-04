@@ -157,6 +157,23 @@ describe("compact annotation", () => {
     expect(annotation().querySelector(".lens-details")).toBeNull();
     expect(details().getAttribute("aria-expanded")).toBe("false");
   });
+  it("rewrites open Details when a same-item offer comes or goes below eight peers, so the peer count stays current", () => {
+    mount("knife", 2);
+    equipment.render(state);
+    details().click();
+    equipment.render(state);
+    const text = () => annotation().querySelector(".lens-details").textContent;
+    expect(text()).toContain("stat rank needs 8 listed peers (1 now)");
+    document
+      .getElementById("offers")
+      .insertAdjacentHTML("beforeend", offerHtml("offer3"));
+    fakeText(document.getElementById("offer3"));
+    equipment.render(state);
+    expect(text()).toContain("stat rank needs 8 listed peers (2 now)");
+    document.getElementById("offer2").remove();
+    equipment.render(state);
+    expect(text()).toContain("stat rank needs 8 listed peers (1 now)");
+  });
   it("withholds quartiles and the price rank below eight fills even with Details open", () => {
     state.salesByCode = {
       knife: {

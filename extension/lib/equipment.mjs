@@ -409,7 +409,8 @@ export function createEquipment({
         r.resale
           ? `${r.resale.n}|${r.resale.estimate ?? ""}|${r.resale.low ?? ""}|${r.resale.high ?? ""}|${r.resale.quartiles}`
           : "",
-        r.statRank?.percentile ?? "",
+        // the peer count as well as the rank: below eight peers the rank stays null while the count Details shows moves
+        r.statRank ? `${r.statRank.n}|${r.statRank.percentile ?? ""}` : "",
         open,
         i === best && fresh,
         key,

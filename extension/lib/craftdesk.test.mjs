@@ -848,6 +848,45 @@ describe("second review round", () => {
     expect(el().textContent).not.toContain("Marked kept");
     expect(el().textContent).toContain("1 sold · 7.000 g received");
   });
+  it("returns to quotes without discarding a pending price, a pasted import or a recipe being entered", async () => {
+    settings = preferences({
+      ...settings,
+      craftRecipes: { boots5: { scraps: 10, steel: 2 } },
+    });
+    render();
+    click('[data-action="desk-pick"][data-code="boots5"]');
+    render();
+    click('[data-action="desk-ledger-new"]');
+    render();
+    click('[data-action="desk-ledger-add"]');
+    await flush();
+    render();
+    const id = onLedger.mock.calls[0][0].changed[0].id;
+    click(
+      `[data-action="desk-ledger-move"][data-type="list"][data-id="${id}"]`,
+    );
+    render();
+    type("pending-price", "9");
+    type("scrapPrice", "0.19", "change");
+    render();
+    expect(el().textContent).toContain("scraps: your price");
+    click('[data-action="desk-import-toggle"]');
+    render();
+    type("import-text", "{not pasted in full yet");
+    click('[data-action="desk-pick"][data-code="helmet5"]');
+    render();
+    type("recipe-scraps", "7");
+    type("recipe-steel", "1");
+    click('[data-action="desk-quotes"]');
+    render();
+    expect(el().textContent).toContain("scraps: best ask (fresh)");
+    expect(el().querySelector('[data-field="pending-price"]').value).toBe("9");
+    expect(el().querySelector('[data-field="import-text"]').value).toBe(
+      "{not pasted in full yet",
+    );
+    expect(el().querySelector('[data-field="recipe-scraps"]').value).toBe("7");
+    expect(el().querySelector('[data-field="recipe-steel"]').value).toBe("1");
+  });
   it("keeps a setting typed while an earlier save of the same field was still pending", async () => {
     render();
     const apply = save.getMockImplementation();
