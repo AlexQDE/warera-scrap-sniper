@@ -1092,6 +1092,30 @@ describe("second review round", () => {
     );
     expect(el().textContent).not.toContain("Recorded");
   });
+  it("counts how many comparable fills would have beaten the cost, instead of a 0% or 100% claim from the median alone", () => {
+    settings = preferences({
+      ...settings,
+      craftRecipes: { boots5: { scraps: 10, steel: 2 } },
+    });
+    // cost 5.300 g; fills net 3.8, 4.75, 5.7, 6.65 and 7.6 after 5% tax: three of five beat it, the median (6 → 5.7) does
+    state.salesByCode = {
+      boots5: {
+        code: "boots5",
+        at: iso(),
+        complete: true,
+        fills: fills("boots5", [4, 5, 6, 7, 8]),
+      },
+    };
+    render();
+    click('[data-action="desk-pick"][data-code="boots5"]');
+    render();
+    const text = el().textContent;
+    expect(text).toContain("Expected proceeds per craft5.700 g");
+    expect(text).toContain(
+      "3 of the 5 comparable fills would have beaten the cost after tax",
+    );
+    expect(text).not.toContain("% of outcomes beat the cost");
+  });
   it("keeps a setting typed while an earlier save of the same field was still pending", async () => {
     render();
     const apply = save.getMockImplementation();

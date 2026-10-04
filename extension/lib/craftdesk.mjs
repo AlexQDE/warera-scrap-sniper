@@ -603,9 +603,17 @@ export function createCraftDesk({
     );
     const ev = plan.ev;
     const o = inputs.outcomes;
+    // How often the result would have beaten the cost: over the outcomes when there is a real distribution, over the
+    // comparable fills themselves when the only outcome is their median (a one-outcome model can only say 0% or 100%).
+    const beat =
+      o.outcomes.length > 1 && ev.cost != null
+        ? ` · ${Math.round((ev.pProfit ?? 0) * 100)}% of outcomes beat the cost`
+        : o.fills?.length && plan.cost.perCraft != null
+          ? ` · ${o.fills.filter((f) => proceeds({ listing: f.price, taxPct: tax.value }).sellerGets > plan.cost.perCraft).length} of the ${o.fills.length} comparable fills would have beaten the cost after tax`
+          : "";
     const evLine =
       ev.status === "ok"
-        ? `<b>${fmt(ev.ev)} g</b><span>seller proceeds after ${tax.value}% tax · ${esc(o.note)}${ev.cost != null ? ` · ${Math.round((ev.pProfit ?? 0) * 100)}% of outcomes beat the cost` : ""}${o.outcomes.length > 1 ? ` · best ${fmt(ev.best)} · worst ${fmt(ev.worst)}` : ""}</span>`
+        ? `<b>${fmt(ev.ev)} g</b><span>seller proceeds after ${tax.value}% tax · ${esc(o.note)}${beat}${o.outcomes.length > 1 ? ` · best ${fmt(ev.best)} · worst ${fmt(ev.worst)}` : ""}</span>`
         : `<b>unavailable</b><span>${esc(ev.reason ? `${ev.reason}${o.error ? ` · ${o.note}` : ""}` : o.note)}</span>`;
     out.push(
       `<div class="lens-grid2"><div><small>Expected proceeds per craft</small>${evLine}</div><div><small>Expected profit</small><b class="${ev.profit == null ? "" : ev.profit >= 0 ? "lens-pos" : "lens-neg"}">${ev.profit == null ? "–" : `${signed(ev.profit)} g`}</b><span>ROI ${pct(ev.roi, 1)} per craft · batch ${plan.batch.expectedProfit == null ? "–" : `${signed(plan.batch.expectedProfit)} g`} · an expectation over random outcomes, not a promise</span></div></div>`,
