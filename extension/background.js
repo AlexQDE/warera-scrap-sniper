@@ -42,7 +42,7 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
     .catch(() =>
       respond({
         error: "internal",
-        message: "WarEra Lens could not complete this request",
+        message: "WarEra Plus could not complete this request",
       }),
     );
   return true;

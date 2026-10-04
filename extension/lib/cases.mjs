@@ -1,4 +1,4 @@
-// Case models for WarEra Lens: what a case is worth opened,
+// Case models for WarEra Plus: what a case is worth opened,
 // what the market bids for it sealed, and what a trip to a wooden case on the
 // map costs. Pure functions plus explicit immutable-snapshot memoization;
 // the extension and tests use the same code.

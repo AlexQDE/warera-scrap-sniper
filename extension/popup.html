@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>WarEra Lens settings</title>
+    <title>WarEra Plus settings</title>
     <style>
       :root {
         color-scheme: dark;
@@ -13,7 +13,7 @@
       }
       body {
         margin: 0;
-        min-width: 380px;
+        min-width: 0;
         background: #15171c;
         color: #e6e8ee;
         font:
@@ -23,20 +23,22 @@
           sans-serif;
       }
       main {
-        max-width: 520px;
+        width: min(100%, 560px);
         margin: 0 auto;
-        padding: 16px 18px 18px;
+        padding: 14px 16px 16px;
+        container-type: inline-size;
       }
       header {
         display: flex;
         align-items: center;
         gap: 10px;
-        margin-bottom: 14px;
+        margin-bottom: 12px;
       }
       header img {
         width: 28px;
         height: 28px;
         border-radius: 7px;
+        flex: none;
       }
       h1 {
         font-size: 15px;
@@ -48,20 +50,49 @@
         color: #8b909a;
         font-size: 12px;
       }
-      section {
+      section,
+      details {
         border: 1px solid rgba(255, 255, 255, 0.09);
         border-radius: 10px;
         padding: 12px 14px;
-        margin-bottom: 12px;
+        margin-bottom: 10px;
         background: #1b1e25;
       }
-      h2 {
+      h2,
+      summary {
         font-size: 10.5px;
         letter-spacing: 0.07em;
         text-transform: uppercase;
         color: #8b909a;
         margin: 0 0 8px;
         font-weight: 600;
+      }
+      summary {
+        cursor: pointer;
+        margin: 0;
+        list-style: none;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      summary::-webkit-details-marker {
+        display: none;
+      }
+      summary::before {
+        content: "▸";
+        font-size: 11px;
+        transition: transform 0.15s;
+      }
+      details[open] summary::before {
+        transform: rotate(90deg);
+      }
+      details[open] summary {
+        margin-bottom: 8px;
+      }
+      summary:focus-visible {
+        outline: 2px solid rgba(76, 217, 100, 0.55);
+        outline-offset: 3px;
+        border-radius: 4px;
       }
       label {
         display: block;
@@ -73,10 +104,15 @@
         display: flex;
         gap: 8px;
         align-items: center;
+        flex-wrap: wrap;
+      }
+      .row input {
+        flex: 1 1 160px;
       }
       input[type="text"],
       input[type="password"],
-      input[type="number"] {
+      input[type="number"],
+      select {
         width: 100%;
         font: inherit;
         color: #fff;
@@ -84,11 +120,13 @@
         border: 1px solid #3a3f4a;
         border-radius: 6px;
         padding: 7px 9px;
+        min-height: 34px;
       }
       input[type="number"] {
-        width: 96px;
+        max-width: 140px;
       }
-      input:focus {
+      input:focus,
+      select:focus {
         outline: 2px solid rgba(76, 217, 100, 0.45);
         outline-offset: 1px;
       }
@@ -100,11 +138,16 @@
         border: 1px solid #3a3f4a;
         border-radius: 6px;
         padding: 6px 12px;
+        min-height: 34px;
         cursor: pointer;
         white-space: nowrap;
       }
       button:hover {
         background: #30353f;
+      }
+      button:focus-visible {
+        outline: 2px solid rgba(76, 217, 100, 0.55);
+        outline-offset: 2px;
       }
       button.primary {
         background: #1f7a35;
@@ -115,14 +158,26 @@
       button.primary:hover {
         background: #24913f;
       }
-      .toggle {
-        color: #8b909a;
+      button.quiet {
         font-size: 12px;
-        display: inline-flex;
+        min-height: 28px;
+        padding: 3px 9px;
+      }
+      .toggle {
+        color: #c8ccd4;
+        font-size: 12.5px;
+        display: flex;
         align-items: center;
-        gap: 5px;
+        gap: 7px;
         cursor: pointer;
-        margin-top: 6px;
+        margin: 6px 0;
+        min-height: 24px;
+      }
+      .toggle input {
+        width: 16px;
+        height: 16px;
+        margin: 0;
+        flex: none;
       }
       .help {
         color: #8b909a;
@@ -137,6 +192,7 @@
         background: rgba(255, 255, 255, 0.04);
         color: #aab0bc;
         min-height: 34px;
+        overflow-wrap: anywhere;
       }
       .status.ok {
         background: rgba(76, 217, 100, 0.12);
@@ -152,7 +208,7 @@
       }
       .grid {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
         gap: 0 14px;
       }
       footer {
@@ -167,7 +223,17 @@
       .actions {
         display: flex;
         gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
         margin-top: 12px;
+      }
+      @container (max-width: 340px) {
+        header .sub {
+          display: none;
+        }
+        input[type="number"] {
+          max-width: none;
+        }
       }
     </style>
   </head>
@@ -177,8 +243,12 @@
         <header>
           <img src="icons/icon48.png" alt="" />
           <div>
-            <h1>◈ WarEra Lens</h1>
-            <div class="sub">Equipment · Cases · Travel | v1.4.0</div>
+            <h1>◈ WarEra Plus</h1>
+            <div class="sub">
+              Equipment · Craft Desk · Cases · Travel | v<span id="version"
+                >–</span
+              >
+            </div>
           </div>
         </header>
 
@@ -210,16 +280,75 @@
         </section>
 
         <section>
-          <h2>Behaviour</h2>
+          <h2>Decisions</h2>
           <div class="grid">
             <div>
-              <label for="margin">Min margin (%)</label>
+              <label for="margin">Minimum scrap ROI (%)</label>
               <input id="margin" type="number" min="-50" max="500" step="1" />
               <p class="help">
-                ROI = profit / purchase cost. Negative thresholds show amber
-                near misses, never profitable SNIPE labels.
+                SNIPE needs this ROI on the scrap value. A negative threshold
+                shows amber near misses, never a profitable label.
               </p>
             </div>
+            <div>
+              <label for="craftTargetPct">Craft target ROI (%)</label>
+              <input
+                id="craftTargetPct"
+                type="number"
+                min="-50"
+                max="500"
+                step="1"
+              />
+              <p class="help">
+                The Craft Desk solves the most scraps or steel may cost for this
+                return.
+              </p>
+            </div>
+            <div>
+              <label for="taxPct">Market tax (%)</label>
+              <input
+                id="taxPct"
+                type="number"
+                min="0"
+                max="100"
+                step="0.01"
+                placeholder="read from the page"
+              />
+              <p class="help">
+                Leave empty to use the rate the market page prints (else no
+                adjustment). Listing guidance shows what you net after it.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h2>Modules</h2>
+          <label class="toggle"
+            ><input id="equipment" type="checkbox" /> Equipment offers: scrap
+            profit, resale estimate, Details</label
+          >
+          <label class="toggle"
+            ><input id="craft" type="checkbox" /> Craft Desk and craft
+            ledger</label
+          >
+          <label class="toggle"
+            ><input id="cases" type="checkbox" /> Case values on market &amp;
+            inventory</label
+          >
+          <label class="toggle"
+            ><input id="travel" type="checkbox" /> Wooden-case travel
+            costs</label
+          >
+          <label class="toggle"
+            ><input id="picker" type="checkbox" /> Filter the inventory picker
+            to the market item</label
+          >
+        </section>
+
+        <details id="advanced">
+          <summary>Advanced</summary>
+          <div class="grid">
             <div>
               <label for="interval">Read the scrap price every (s)</label>
               <input id="interval" type="number" min="10" max="600" step="5" />
@@ -227,6 +356,17 @@
                 Equipment quotes; case books refresh every 60 seconds. Hidden
                 tabs pause. Requests are shared between tabs.
               </p>
+            </div>
+            <div>
+              <label for="craftBatch">Craft batch size</label>
+              <input
+                id="craftBatch"
+                type="number"
+                min="1"
+                max="1000"
+                step="1"
+              />
+              <p class="help">Crafts per batch on the Craft Desk.</p>
             </div>
           </div>
           <label for="sellFrom">Case drops: sell from this rarity up</label>
@@ -245,62 +385,53 @@
             item price (sold on the equipment market, a mean of recent sales).
             The case verdict uses this policy.
           </p>
-        </section>
-
-        <section>
-          <h2>Modules</h2>
           <label class="toggle"
-            ><input id="equipment" type="checkbox" /> Equipment values &amp;
-            recent sales</label
+            ><input id="collapsed" type="checkbox" /> Start the equipment panel
+            compact</label
           >
           <label class="toggle"
-            ><input id="cases" type="checkbox" /> Case values on market &amp;
-            inventory</label
+            ><input id="craftCollapsed" type="checkbox" /> Start the Craft Desk
+            compact</label
           >
           <label class="toggle"
-            ><input id="travel" type="checkbox" /> Wooden-case travel
-            costs</label
+            ><input id="casesCollapsed" type="checkbox" /> Start the case panel
+            compact</label
           >
           <label class="toggle"
-            ><input id="picker" type="checkbox" /> Filter inventory
-            picker</label
+            ><input id="roundTrip" type="checkbox" /> Include the return journey
+            by default</label
           >
-        </section>
-        <section>
-          <h2>Display</h2>
-          <label class="toggle"
-            ><input id="collapsed" type="checkbox" /> Compact equipment
-            panel</label
-          >
-          <label class="toggle"
-            ><input id="casesCollapsed" type="checkbox" /> Compact case
-            panel</label
-          >
-          <label class="toggle"
-            ><input id="roundTrip" type="checkbox" /> Include return journey by
-            default</label
-          >
+          <div class="row" style="margin-top: 10px">
+            <span id="recipes" class="help" style="margin: 0; flex: 1 1 160px"
+              >No craft recipes stored.</span
+            >
+            <button id="forgetRecipes" type="button" class="quiet" disabled>
+              Forget all recipes
+            </button>
+          </div>
           <p class="help">
-            Expanded cases show historical resale estimates. They are not
-            instant-sale quotes. Missing or stale data pauses recommendations.
+            Recipes are entered on the Craft Desk from the game's craft screen
+            and kept on this browser only. The craft ledger is exported and
+            imported from the desk itself.
           </p>
-        </section>
+        </details>
 
         <div class="actions">
           <button id="save" class="primary" type="submit">
             Save preferences
           </button>
-          <span id="saved" class="help" style="align-self: center"></span>
+          <span id="saved" class="help" style="margin: 0"></span>
         </div>
 
         <footer>
           <p>
-            Read-only: no purchases, game actions, session access or analytics.
-            Quotes are snapshots, not reserved liquidity.
+            Read-only decision support: no purchases, crafts, listings, game
+            actions, session access or analytics. Quotes are snapshots, not
+            reserved liquidity; expected values are not guarantees.
           </p>
           <p>
-            Upgraded from Scrap Sniper. Your existing settings and key stay in
-            this extension.
+            WarEra Plus continues WarEra Lens and Scrap Sniper. Your existing
+            settings and key stay in this extension.
           </p>
         </footer>
       </form>

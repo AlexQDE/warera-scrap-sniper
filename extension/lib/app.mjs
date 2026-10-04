@@ -3,6 +3,7 @@ import { DEFAULTS } from "./settings.mjs";
 import { TTL, freshness, quote } from "./quality.mjs";
 import { snapshotSummary } from "./cases.mjs";
 import { createEquipment } from "./equipment.mjs";
+import { createCraftDesk } from "./craftdesk.mjs";
 import { casesStripHtml, tripLineHtml } from "./casesview.mjs";
 import { panel, setHtml, notice, clock } from "./ui.mjs";
 import { createScheduler } from "./scheduler.mjs";
@@ -19,9 +20,13 @@ export async function startLens(runtime = chrome.runtime) {
     cases: null,
     avg: null,
     sales: null,
+    salesByCode: {},
+    ledger: null,
+    taxOnPage: null,
     errors: {},
     busy: new Set(),
   };
+  const SALES_CODES_KEPT = 12;
   let context = {};
   let disposed = false;
   let timer;
@@ -49,7 +54,7 @@ export async function startLens(runtime = chrome.runtime) {
     } catch (e) {
       if (/context invalidated|receiving end does not exist/i.test(e.message)) {
         state.invalidated = true;
-        state.setup = "WarEra Lens was updated. Reload this page.";
+        state.setup = "WarEra Plus was updated. Reload this page.";
         sched.schedule();
       } else {
         state.errors[msg.type] = e.message;
@@ -78,6 +83,7 @@ export async function startLens(runtime = chrome.runtime) {
         state.cases = null;
         state.avg = null;
         state.sales = null;
+        state.salesByCode = {};
         state.errors = {};
         state.rejected = false;
       }
@@ -85,7 +91,7 @@ export async function startLens(runtime = chrome.runtime) {
     }
     if (r.rejected) state.rejected = true;
     state.setup = state.invalidated
-      ? "WarEra Lens was updated. Reload this page."
+      ? "WarEra Plus was updated. Reload this page."
       : state.rejected
         ? "API key rejected. Check and save your key in settings."
         : r.hasKey
@@ -135,8 +141,19 @@ export async function startLens(runtime = chrome.runtime) {
         state.cases = null;
         state.avg = null;
         state.sales = null;
+        state.salesByCode = {};
       } else {
         if (r[kind]) state[kind] = r[kind];
+        if (kind === "sales" && r.sales?.code) {
+          // Keep the last few items' fills so rows of other codes keep their resale evidence.
+          const rest = { ...state.salesByCode };
+          delete rest[r.sales.code];
+          const kept = Object.entries(rest).slice(-(SALES_CODES_KEPT - 1));
+          state.salesByCode = Object.fromEntries([
+            ...kept,
+            [r.sales.code, r.sales],
+          ]);
+        }
         state.errors[kind] = r.error ? r.message : null;
       }
     }
@@ -161,7 +178,36 @@ export async function startLens(runtime = chrome.runtime) {
       salesWanted = code;
       if (context.equipment) void read("sales", false, code);
     },
+    rescan: () => sched.schedule(),
   });
+  const desk = createCraftDesk({
+    settings: () => state.settings,
+    save,
+    refresh: () => {
+      void read("book", true);
+      void read("cases", true);
+      if (desk.selected) void read("sales", true, desk.selected);
+      sched.schedule();
+    },
+    requestSales: (code) => {
+      if (context.craft) void read("sales", false, code);
+    },
+    rescan: () => sched.schedule(),
+    onLedger: async (entries) => {
+      const r = await send({ type: "ledgerSet", ledger: { entries } });
+      if (r?.ledger) state.ledger = r.ledger;
+      return r;
+    },
+  });
+  let ledgerRequested = false;
+  async function loadLedger() {
+    if (ledgerRequested || disposed) return;
+    ledgerRequested = true;
+    const r = await send({ type: "ledgerGet" });
+    if (r?.ledger) state.ledger = r.ledger;
+    else ledgerRequested = false; // asked again on the next scan
+    sched.schedule();
+  }
   const observer = new MutationObserver((muts) => {
     if (document.hidden || disposed) return;
     const own = (n) =>
@@ -211,6 +257,7 @@ export async function startLens(runtime = chrome.runtime) {
         ...state,
         error: state.errors.book,
         salesError: state.errors.sales,
+        salesBusy: state.busy.has("sales"),
         busy: state.busy.has("book"),
         action,
       });
@@ -218,6 +265,26 @@ export async function startLens(runtime = chrome.runtime) {
       const dialog = dom.pickerDialog();
       if (dialog) nextRoots.push(dialog);
     } else if (before.equipment) equipment.clear();
+    context.craft =
+      state.settings.craft &&
+      /^\/market\/equipments\/?$/.test(location.pathname);
+    if (context.craft) {
+      const bar = document.getElementById("scrap-sniper-bar");
+      const tax = dom.taxNotice();
+      state.taxOnPage = dom.taxRateFromText(tax?.textContent);
+      if (!state.ledger && !state.setup && !state.settings.craftCollapsed)
+        void loadLedger();
+      const result = desk.render(
+        {
+          ...state,
+          busy: state.busy.has("cases") || state.busy.has("book"),
+          action,
+        },
+        bar ?? tax,
+        { after: !!bar },
+      );
+      if (result) nextRoots.push(...result.roots);
+    } else desk.clear();
     const onCases =
       /^\/market\/?$/.test(location.pathname) ||
       /\/inventory\/?$/.test(location.pathname);
@@ -310,8 +377,9 @@ export async function startLens(runtime = chrome.runtime) {
   async function fetchVisible() {
     if (state.setup || disposed || document.hidden) return;
     const jobs = [];
-    if (context.equipment) jobs.push(read("book"));
-    if (context.cases || context.travel) jobs.push(read("cases"));
+    const deskOpen = context.craft && !state.settings.craftCollapsed;
+    if (context.equipment || deskOpen) jobs.push(read("book"));
+    if (context.cases || context.travel || deskOpen) jobs.push(read("cases"));
     if (context.cases && wantsAverages()) jobs.push(read("avg"));
     await Promise.all(jobs);
   }
@@ -348,10 +416,12 @@ export async function startLens(runtime = chrome.runtime) {
     sched.cancel();
     observer.disconnect();
     equipment.clear();
+    desk.clear();
     document.getElementById("scrap-sniper-cases")?.remove();
     for (const el of document.querySelectorAll(".ss-trip")) el.remove();
     document.removeEventListener("visibilitychange", visible);
   };
   await tick();
+  metrics.equipment = equipment.metrics;
   return { dispose, metrics, scan };
 }

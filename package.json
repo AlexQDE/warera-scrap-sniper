@@ -1,7 +1,7 @@
 {
-  "name": "warera-lens",
-  "version": "1.4.1",
-  "description": "Read-only WarEra equipment, case and travel insights with depth-aware quotes and explicit uncertainty.",
+  "name": "warera-plus",
+  "version": "1.6.0",
+  "description": "WarEra Plus: read-only decision support for WarEra (equipment offers, Craft Desk and ledger, cases, travel) with depth-aware quotes and explicit uncertainty.",
   "type": "module",
   "private": true,
   "scripts": {

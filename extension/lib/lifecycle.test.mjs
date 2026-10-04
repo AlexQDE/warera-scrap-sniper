@@ -183,6 +183,67 @@ describe("SPA lifecycle and DOM work", () => {
     expect(setHtml(el, "<button>Example</button>")).toBe(false);
     expect(el.firstChild).toBe(button);
   });
+  it("mounts the equipment panel and the Craft Desk once on the equipment market, removes them on navigation, restores them on return, and cleans up", async () => {
+    window.history.replaceState({}, "", "/market/equipments");
+    document.body.innerHTML =
+      '<main><div id="tax"><span>Market tax 5%</span></div><div><div id="item-code-selector-jet" style="border-color:rgb(57,15,16)"></div></div><div id="offers"></div></main>';
+    const runtime = mockRuntime({
+      settings: { ...DEFAULTS, craftCollapsed: false },
+    });
+    const base = runtime.sendMessage.getMockImplementation();
+    runtime.sendMessage.mockImplementation(async (msg) => {
+      if (msg.type === "book")
+        return {
+          book: {
+            at: new Date().toISOString(),
+            bid: 0.2,
+            ask: 0.21,
+            bids: [{ price: 0.2, quantity: 1e6 }],
+            asks: [{ price: 0.21, quantity: 1e6 }],
+          },
+        };
+      if (msg.type === "ledgerGet")
+        return { ledger: { version: 1, entries: [] } };
+      return base(msg);
+    });
+    app = await startLens(runtime);
+    await settle();
+    const panels = () => [
+      document.querySelectorAll("#scrap-sniper-bar").length,
+      document.querySelectorAll("#warera-plus-craft").length,
+    ];
+    expect(panels()).toEqual([1, 1]);
+    expect(
+      document.getElementById("scrap-sniper-bar").nextElementSibling.id,
+    ).toBe("warera-plus-craft");
+    expect(document.getElementById("warera-plus-craft").textContent).toContain(
+      "Craft Desk",
+    );
+    expect(
+      runtime.sendMessage.mock.calls.filter(([m]) => m.type === "ledgerGet"),
+    ).toHaveLength(1);
+    for (let i = 0; i < 50; i++)
+      document
+        .getElementById("offers")
+        .appendChild(document.createElement("div"));
+    await settle();
+    await settle(5100);
+    expect(panels()).toEqual([1, 1]);
+    expect(
+      runtime.sendMessage.mock.calls.filter(([m]) => m.type === "ledgerGet"),
+    ).toHaveLength(1);
+    window.history.pushState({}, "", "/profile");
+    await settle(5100);
+    expect(panels()).toEqual([0, 0]);
+    expect(document.querySelector("[data-lens]")).toBeNull();
+    window.history.pushState({}, "", "/market/equipments");
+    await settle(5100);
+    expect(panels()).toEqual([1, 1]);
+    app.dispose();
+    expect(panels()).toEqual([0, 0]);
+    expect(document.querySelector("[data-lens]")).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+  });
   it("does not starve under continuous mutations, and cancels on dispose", async () => {
     const run = vi.fn();
     const s = createScheduler(run);

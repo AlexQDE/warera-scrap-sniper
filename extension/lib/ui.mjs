@@ -3,14 +3,32 @@ import { escapeHtml, ago } from "./format.mjs";
 const lastHtml = new WeakMap();
 export function setHtml(el, html) {
   if (lastHtml.get(el) === html) return false;
-  const focused = el.contains(document.activeElement)
-    ? document.activeElement?.dataset?.action
+  // Keep keyboard focus (and a text field's caret) on the same control across a rewrite.
+  const active = el.contains(document.activeElement)
+    ? document.activeElement
     : null;
+  const focused = active?.dataset?.action
+    ? ["action", active.dataset.action]
+    : active?.dataset?.field
+      ? ["field", active.dataset.field]
+      : null;
+  const caret =
+    active && typeof active.selectionStart === "number"
+      ? [active.selectionStart, active.selectionEnd]
+      : null;
   el.innerHTML = html;
-  if (focused)
-    [...el.querySelectorAll("[data-action]")]
-      .find((node) => node.dataset.action === focused)
-      ?.focus({ preventScroll: true });
+  if (focused) {
+    const next = [...el.querySelectorAll(`[data-${focused[0]}]`)].find(
+      (node) => node.dataset[focused[0]] === focused[1],
+    );
+    next?.focus({ preventScroll: true });
+    if (next && caret && typeof next.setSelectionRange === "function")
+      try {
+        next.setSelectionRange(caret[0], caret[1]);
+      } catch {
+        /* a number field refuses a caret: keep focus only */
+      }
+  }
   lastHtml.set(el, html);
   return true;
 }
@@ -39,7 +57,7 @@ export function header(
     busy = false,
   } = {},
 ) {
-  return `<header class="lens-head"><span class="lens-brand">◈ WarEra Lens</span><span class="lens-section">${escapeHtml(title)}</span><span class="lens-status" data-status="${escapeHtml(status)}">${escapeHtml(status)} ${at ? `· ${timeLabel(at, now)}` : ""}</span><span class="lens-grow"></span><button type="button" data-action="refresh" aria-label="Refresh ${escapeHtml(title)}" ${busy ? "disabled" : ""}>${busy ? "Reading…" : "↻ Refresh"}</button>${collapse ? `<button type="button" data-action="collapse" aria-expanded="${!collapsed}">${collapsed ? "Details" : "Compact"}</button>` : ""}</header>`;
+  return `<header class="lens-head"><span class="lens-brand">◈ WarEra Plus</span><span class="lens-section">${escapeHtml(title)}</span><span class="lens-status" data-status="${escapeHtml(status)}">${escapeHtml(status)} ${at ? `· ${timeLabel(at, now)}` : ""}</span><span class="lens-grow"></span><button type="button" data-action="refresh" aria-label="Refresh ${escapeHtml(title)}" ${busy ? "disabled" : ""}>${busy ? "Reading…" : "↻ Refresh"}</button>${collapse ? `<button type="button" data-action="collapse" aria-expanded="${!collapsed}">${collapsed ? "Details" : "Compact"}</button>` : ""}</header>`;
 }
 export function notice(text, stale = false) {
   return `<div class="lens-notice" role="status">${escapeHtml(text)} <button type="button" data-action="${stale ? "reload" : "settings"}">${stale ? "Reload page" : "Settings"}</button></div>`;

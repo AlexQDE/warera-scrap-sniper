@@ -1,4 +1,5 @@
 // @ts-check
+import { normalizeRecipes } from "./craftdata.mjs";
 /**
  * Where the drop policy starts selling: drops of this rarity and above are
  * valued at the game's average item price (sold on the equipment market),
@@ -24,13 +25,29 @@ export const DEFAULTS = Object.freeze({
   travel: true,
   picker: true,
   sellFrom: "epic",
-  schemaVersion: 2,
+  craft: true,
+  craftCollapsed: true,
+  craftBatch: 1,
+  craftTargetPct: 20,
+  /** Market tax in percent; null means "not set": the page's notice is read, else no adjustment (the 1.4 convention). */
+  taxPct: /** @type {number | null} */ (null),
+  craftRecipes:
+    /** @type {Record<string, { scraps: number, steel: number }>} */ ({}),
+  schemaVersion: 3,
 });
 /** @param {unknown} value @param {number} min @param {number} max @param {number} fallback */
 const clamp = (value, min, max, fallback) =>
   Number.isFinite(Number(value))
     ? Math.min(max, Math.max(min, Math.round(Number(value))))
     : fallback;
+/** @param {unknown} value */
+const taxRate = (value) => {
+  if (value == null || value === "" || typeof value === "boolean") return null;
+  const n = Number(value);
+  return Number.isFinite(n)
+    ? Math.round(Math.min(100, Math.max(0, n)) * 100) / 100
+    : null;
+};
 /** Public preferences only. Never copy arbitrary storage fields across the content boundary.
  * @param {Record<string, unknown>} [input]
  */
@@ -56,5 +73,19 @@ export function preferences(input = {}) {
     sellFrom: SELL_FROM.includes(/** @type {string} */ (input.sellFrom))
       ? /** @type {string} */ (input.sellFrom)
       : DEFAULTS.sellFrom,
+    craft: input.craft !== false,
+    craftCollapsed:
+      typeof input.craftCollapsed === "boolean"
+        ? input.craftCollapsed
+        : DEFAULTS.craftCollapsed,
+    craftBatch: clamp(input.craftBatch, 1, 1000, DEFAULTS.craftBatch),
+    craftTargetPct: clamp(
+      input.craftTargetPct,
+      -50,
+      500,
+      DEFAULTS.craftTargetPct,
+    ),
+    taxPct: taxRate(input.taxPct),
+    craftRecipes: normalizeRecipes(input.craftRecipes),
   };
 }
