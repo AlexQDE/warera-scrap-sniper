@@ -52,7 +52,7 @@ export function panel(id, anchor, action) {
   return el;
 }
 /** Only this extension's own panels may sit between a panel and its anchor; anything else means the page moved and the panel follows. */
-function reaches(from, anchor) {
+export function reaches(from, anchor) {
   for (let n = from; n; n = n.nextElementSibling) {
     if (n === anchor) return true;
     if (!n.hasAttribute("data-lens")) return false;

@@ -47,6 +47,7 @@ beforeEach(() => {
   settings = preferences({ ...DEFAULTS, craftCollapsed: false });
   save = vi.fn((patch) => {
     settings = preferences({ ...settings, ...patch });
+    return settings;
   });
   onLedger = vi.fn(async (entries) => {
     state.ledger = { version: 1, entries };
@@ -212,9 +213,10 @@ describe("Craft Desk panel", () => {
     type("taxPct", "", "change");
     expect(save).toHaveBeenCalledWith({ taxPct: null });
   });
-  it("shows settings-backed fields from the settings once saved, so a change made elsewhere is not shadowed", () => {
+  it("shows settings-backed fields from the settings once saved, so a change made elsewhere is not shadowed", async () => {
     render();
     type("batch", "4", "change");
+    await flush();
     render();
     expect(el().querySelector('[data-field="batch"]').value).toBe("4");
     settings = preferences({ ...settings, craftBatch: 10 }); // changed in the popup
@@ -430,5 +432,131 @@ describe("craft ledger in the desk", () => {
     click('[data-action="desk-import-paste"]');
     render();
     expect(el().textContent).toContain("Import failed: not JSON");
+  });
+});
+
+describe("second review round", () => {
+  const worn = (code, prices, hours, state) =>
+    prices.map((price, i) => ({
+      price,
+      at: iso(hours[i] * 3600e3),
+      state,
+      code,
+    }));
+  it("measures the pace over the same comparable fills as the median", () => {
+    settings = preferences({
+      ...settings,
+      craftRecipes: { boots5: { scraps: 10, steel: 2 } },
+    });
+    state.salesByCode = {
+      boots5: {
+        code: "boots5",
+        at: iso(),
+        complete: true,
+        fills: [
+          ...worn("boots5", [10, 11, 12, 13, 14], [1, 2, 3, 4, 5], 100),
+          ...worn(
+            "boots5",
+            [1, 1, 1, 1, 1, 1, 1],
+            [10, 11, 12, 13, 14, 15, 16],
+            40,
+          ),
+        ],
+      },
+    };
+    render();
+    click('[data-action="desk-pick"][data-code="boots5"]');
+    render();
+    expect(el().textContent).toContain("Evidence: 5 comparable fills");
+    expect(el().textContent).toContain("pace 24.0/day"); // 5 fills over 5 h, not 12 over 16 h
+  });
+  it("keeps the typed setting and says so when the save was not applied", async () => {
+    save.mockImplementation(() => undefined); // the extension did not answer
+    render();
+    type("batch", "4", "change");
+    await flush();
+    render();
+    expect(el().querySelector('[data-field="batch"]').value).toBe("4");
+    expect(el().textContent).toContain("Settings: not saved");
+  });
+  it("labels a form without quantities as inferred, never vacuously manual", () => {
+    render();
+    click('[data-action="desk-ledger-new"]');
+    render();
+    expect(el().textContent).toContain("Prices are inferred");
+  });
+  it("blocks a pasted import while a save is running, on the import path itself", async () => {
+    settings = preferences({
+      ...settings,
+      craftRecipes: { boots5: { scraps: 10, steel: 2 } },
+    });
+    render();
+    click('[data-action="desk-pick"][data-code="boots5"]');
+    render();
+    click('[data-action="desk-ledger-new"]');
+    render();
+    let release;
+    onLedger.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = () =>
+            resolve({ ledger: (state.ledger = { version: 1, entries: [] }) });
+        }),
+    );
+    click('[data-action="desk-ledger-add"]');
+    render();
+    click('[data-action="desk-import-toggle"]');
+    render();
+    type("import-text", JSON.stringify({ kind: "craft-ledger", entries: [] }));
+    el().querySelector('[data-action="desk-import-paste"]').disabled = false; // as if the button had been enabled
+    click('[data-action="desk-import-paste"]');
+    expect(onLedger).toHaveBeenCalledTimes(1);
+    render();
+    expect(el().textContent).toContain("a save is still running");
+    release();
+    await flush();
+  });
+  it("does not close a form opened while an earlier save was finishing", async () => {
+    settings = preferences({
+      ...settings,
+      craftRecipes: { boots5: { scraps: 10, steel: 2 } },
+    });
+    render();
+    click('[data-action="desk-pick"][data-code="boots5"]');
+    render();
+    click('[data-action="desk-ledger-new"]');
+    render();
+    let release;
+    onLedger.mockImplementation(
+      (entries) =>
+        new Promise((resolve) => {
+          release = () =>
+            resolve({ ledger: (state.ledger = { version: 1, entries }) });
+        }),
+    );
+    click('[data-action="desk-ledger-add"]');
+    render();
+    click('[data-action="desk-ledger-new"]'); // a second form, opened during the save
+    render();
+    release();
+    await flush();
+    render();
+    expect(el().querySelector(".lens-form")).not.toBeNull();
+    expect(el().textContent).toContain("Recorded legendary boots");
+  });
+  it("stays put before its anchor when only the extension's own nodes sit between them", () => {
+    const tax = document.getElementById("tax");
+    desk.render(state, tax, { after: false });
+    const node = el();
+    const own = document.createElement("div");
+    own.dataset.lens = "";
+    tax.insertAdjacentElement("beforebegin", own); // between the desk and the tax notice
+    desk.render(state, tax, { after: false });
+    expect(el()).toBe(node);
+    expect(node.nextElementSibling).toBe(own);
+    const foreign = document.createElement("div");
+    tax.insertAdjacentElement("beforebegin", foreign); // the page moved: the desk follows
+    desk.render(state, tax, { after: false });
+    expect(el().nextElementSibling).toBe(tax);
   });
 });

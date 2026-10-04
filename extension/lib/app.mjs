@@ -21,6 +21,8 @@ export async function startLens(runtime = chrome.runtime) {
     avg: null,
     sales: null,
     salesByCode: {},
+    salesErrors: {},
+    salesReading: null,
     ledger: null,
     taxOnPage: null,
     errors: {},
@@ -86,6 +88,7 @@ export async function startLens(runtime = chrome.runtime) {
         state.avg = null;
         state.sales = null;
         state.salesByCode = {};
+        state.salesErrors = {};
         salesAttempts.clear();
         state.errors = {};
         state.rejected = false;
@@ -103,9 +106,11 @@ export async function startLens(runtime = chrome.runtime) {
     if (previousSetup !== state.setup) sched.schedule();
   }
   const save = async (patch) => {
-    applySettings(await send({ type: "saveSettings", settings: patch }));
+    const r = await send({ type: "saveSettings", settings: patch });
+    applySettings(r);
     scan();
     void fetchVisible();
+    return r?.settings ?? null;
   };
   async function read(kind, force = false, code) {
     if (
@@ -131,7 +136,10 @@ export async function startLens(runtime = chrome.runtime) {
       Date.now() - (salesAttempts.get(code) ?? 0) < SALES_RETRY_MS
     )
       return;
-    if (kind === "sales") salesAttempts.set(code, Date.now());
+    if (kind === "sales") {
+      salesAttempts.set(code, Date.now());
+      state.salesReading = code;
+    }
     state.busy.add(kind);
     const revision = state.authRevision;
     const r = await send({
@@ -140,6 +148,13 @@ export async function startLens(runtime = chrome.runtime) {
       ...(code ? { itemCode: code } : {}),
     });
     state.busy.delete(kind);
+    if (kind === "sales" && state.salesReading === code)
+      state.salesReading = null;
+    if (!r && kind === "sales")
+      state.salesErrors = {
+        ...state.salesErrors,
+        [code]: state.errors.sales ?? "The extension did not answer",
+      };
     if (revision !== state.authRevision || disposed) {
       sched.schedule();
       return;
@@ -153,6 +168,7 @@ export async function startLens(runtime = chrome.runtime) {
         state.avg = null;
         state.sales = null;
         state.salesByCode = {};
+        state.salesErrors = {};
       } else {
         if (r[kind]) state[kind] = r[kind];
         if (kind === "sales" && r.sales?.code) {
@@ -166,6 +182,11 @@ export async function startLens(runtime = chrome.runtime) {
           ]);
         }
         state.errors[kind] = r.error ? r.message : null;
+        if (kind === "sales")
+          state.salesErrors = {
+            ...state.salesErrors,
+            [code]: r.error ? r.message : null,
+          };
       }
     }
     sched.schedule();
@@ -268,6 +289,8 @@ export async function startLens(runtime = chrome.runtime) {
         ...state,
         error: state.errors.book,
         salesError: state.errors.sales,
+        salesErrors: state.salesErrors,
+        salesReading: state.salesReading,
         salesBusy: state.busy.has("sales"),
         busy: state.busy.has("book"),
         action,

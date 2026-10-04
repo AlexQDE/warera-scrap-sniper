@@ -255,19 +255,20 @@ export function createEquipment({
   function render(state) {
     // A scoped scan is trusted only when it finds a list (two rows or more);
     // one row says nothing about where the next ones will be inserted.
+    const periodic = now() - lastFullScan >= FULL_SCAN_EVERY;
+    if (periodic) rowCache.epoch++; // frames and borders are re-read on the periodic full scan
     const scoped =
-      listRoot?.isConnected && now() - lastFullScan < FULL_SCAN_EVERY
+      listRoot?.isConnected && !periodic
         ? dom.offerRows(listRoot, palette, rowCache)
         : [];
     let rows = scoped;
     if (scoped.length >= 2) metrics.scopedScans++;
     else {
-      rowCache.epoch++; // re-read frames and borders on a full scan
       rows = dom.offerRows(document, palette, rowCache);
       metrics.fullScans++;
       lastFullScan = now();
     }
-    listRoot = dom.rowsContainer(rows) ?? (rows.length ? listRoot : null);
+    listRoot = dom.rowsContainer(rows) ?? (rows.length >= 2 ? listRoot : null);
     metrics.rowsScanned += rows.length;
     const frames = dom.gridFrames();
     const nextGrid = frames[0]?.frame;
@@ -305,6 +306,15 @@ export function createEquipment({
     const salesFor = (c) =>
       (c && salesByCode[c]) ||
       (c && state.sales?.code === c ? state.sales : null);
+    // Errors and the read in flight are per item; the old single flags stay as the fallback.
+    const salesErrorFor = (c) =>
+      state.salesErrors
+        ? (state.salesErrors[c] ?? null)
+        : c === code
+          ? (state.salesError ?? null)
+          : null;
+    const salesReadingFor = (c) =>
+      state.salesReading != null ? state.salesReading === c : !!state.salesBusy;
     const valuations = rows.map((r) => {
       // Trust the row first; a just-changed grid selection can precede replacement of the list.
       const rarity =
@@ -366,8 +376,8 @@ export function createEquipment({
         hasQuote: !!book,
         fresh,
         error: state.error,
-        salesError: ownItem && !r.sales ? state.salesError : null,
-        salesLoading: ownItem && !r.sales && !!state.salesBusy,
+        salesError: ownItem && !r.sales ? salesErrorFor(r.code) : null,
+        salesLoading: ownItem && !r.sales && salesReadingFor(r.code),
         resale: r.resale,
         ownItem,
       });
@@ -398,7 +408,7 @@ export function createEquipment({
         open,
         i === best && fresh,
         key,
-        open ? (state.salesError ?? "") : "",
+        open ? (salesErrorFor(r.code) ?? "") : "",
         open ? Math.floor(now() / 60000) : "",
       ].join("|");
       if (rowMemo.get(el) === memo) continue;
@@ -414,7 +424,7 @@ export function createEquipment({
           fresh,
           book,
           rank,
-          salesError: state.salesError,
+          salesError: salesErrorFor(r.code),
         }),
       );
     }
@@ -441,19 +451,20 @@ export function createEquipment({
     const sales = salesComputed;
     const selectedEst =
       selectedSales && code ? resaleFor(code, selectedSales, null) : null;
+    const selectedError = salesErrorFor(code);
     const resaleSummary = !code
       ? "select an item"
-      : state.salesError && !selectedSales
+      : selectedError && !selectedSales
         ? "sales read failed"
         : selectedEst?.status === "ok"
           ? `${selectedEst.n} fills · median ${fmt(selectedEst.estimate)} g`
           : selectedEst
             ? `${selectedEst.n} of ${MIN_RESALE_SAMPLE} fills`
-            : state.salesBusy
+            : salesReadingFor(code)
               ? "reading…"
               : "no sales yet";
-    const salesLine = state.salesError
-      ? `<p class="lens-notice" role="status">Sales: ${escapeHtml(state.salesError)}${selectedSales ? ` · showing the last good read from ${escapeHtml(ago(selectedSales.at, now()))}` : ""}</p>`
+    const salesLine = selectedError
+      ? `<p class="lens-notice" role="status">Sales: ${escapeHtml(selectedError)}${selectedSales ? ` · showing the last good read from ${escapeHtml(ago(selectedSales.at, now()))}` : ""}</p>`
       : sales
         ? `<p class="lens-muted">${sales.count} sales of ${escapeHtml(dom.itemLabel(code))} · median ${fmt(sales.median)} g · low ${fmt(sales.low)} · high ${fmt(sales.high)}${selectedSales.complete ? " · 72h window" : " · capped sample, not the full 72h"}</p>`
         : '<p class="lens-muted">Select an item for recent sales.</p>';

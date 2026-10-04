@@ -38,7 +38,7 @@ The worker remembers a rejected key across worker restarts. Saving a key explici
 
 Keys are stored in extension-local storage restricted to trusted extension contexts. Content messages only receive public preferences and `hasKey`/rejection state. Requests omit credentials, disable HTTP caching and refuse redirects. Errors redact the supplied key before returning to the page. This is local browser storage, not an encrypted password vault.
 
-The content side keeps the fills of the last twelve items it read (`salesByCode`) so rows of other items keep their resale evidence; sales freshness is per item, so the grid's item and the desk's item never re-trigger each other, and a failed sales read is not asked again for 15 s (the next scan after that, at the latest the 30 s discovery scan, retries).
+The content side keeps the fills of the last twelve items it read (`salesByCode`) so rows of other items keep their resale evidence; sales freshness, errors and the read in flight are tracked per item, so the grid's item and the desk's item never re-trigger each other or report each other's outcome, and a failed sales read is not asked again for 15 s (the next scan after that, at the latest the 30 s discovery scan, retries).
 
 ## UI lifecycle and performance
 

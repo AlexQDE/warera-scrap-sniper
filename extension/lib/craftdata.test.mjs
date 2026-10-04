@@ -171,5 +171,9 @@ describe("outcomesFor", () => {
     });
     expect(mixed.outcomes[0].listing).toBe(22);
     expect(mixed.estimate.n).toBe(5);
+    expect(mixed.fills).toHaveLength(5); // the comparable list, for the pace and the ranks
+    expect(outcomesFor("boots5", { salesByCode: {}, now: NOW }).fills).toEqual(
+      [],
+    );
   });
 });

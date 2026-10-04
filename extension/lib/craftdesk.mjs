@@ -4,7 +4,13 @@
 // craft.mjs and resale.mjs, the provenance in craftdata.mjs, the ledger
 // rules in ledger.mjs. Every number on the desk names where it came from.
 import { fmt, signed, escapeHtml as esc } from "./format.mjs";
-import { setHtml, header, notice as noticeHtml, timeLabel } from "./ui.mjs";
+import {
+  setHtml,
+  header,
+  notice as noticeHtml,
+  timeLabel,
+  reaches,
+} from "./ui.mjs";
 import { nonNegative } from "./quality.mjs";
 import {
   craftPlan,
@@ -105,6 +111,11 @@ export function createCraftDesk({
 
   /** Save the ledger; true only when the worker confirmed the stored list. */
   async function persist(entries, message) {
+    if (busy) {
+      status = "Ledger: a save is still running; try again in a moment";
+      rescan();
+      return false;
+    }
     busy = true;
     rescan();
     let ok = false;
@@ -129,7 +140,12 @@ export function createCraftDesk({
     const t = e.target.closest("[data-action]");
     if (!t || !el()?.contains(t)) return;
     const a = t.dataset.action;
-    if (busy && LEDGER_WRITES.has(a)) return; // one save at a time
+    if (busy && LEDGER_WRITES.has(a)) {
+      // one save at a time, on every path that writes
+      status = "Ledger: a save is still running; try again in a moment";
+      rescan();
+      return;
+    }
     const s = settings();
     const entries = lastState?.ledger?.entries ?? [];
     const byId = (id) => entries.find((x) => x.id === id);
@@ -194,11 +210,13 @@ export function createCraftDesk({
         rescan();
         return;
       }
+      const saving = form;
       void persist(
         [entry, ...entries],
         `Recorded ${entry.label || itemLabel(entry.code) || "a craft"} (${entry.inputs.priceSource} prices)`,
       ).then((ok) => {
-        if (ok) form = null; // a failed save keeps the form for another try
+        // A failed save keeps the form for another try; a form opened meanwhile is not this one's to close.
+        if (ok && form === saving) form = null;
         rescan();
       });
     } else if (a === "desk-ledger-move") {
@@ -280,7 +298,9 @@ export function createCraftDesk({
       Number(f.scraps) > 0 ? f.sources?.scrap : null,
       Number(f.steel) > 0 ? f.sources?.steel : null,
     ].filter(Boolean);
-    return used.every((src) => src === "manual") ? "manual" : "inferred";
+    return used.length && used.every((src) => src === "manual")
+      ? "manual"
+      : "inferred";
   }
   function applyImport(text) {
     const entries = lastState?.ledger?.entries ?? [];
@@ -316,11 +336,27 @@ export function createCraftDesk({
       delete fields[f];
       rescan();
     } else if (f === "batch" || f === "taxPct" || f === "targetPct") {
-      // Settings own these from here on; the typed text must not shadow a later change made elsewhere.
-      delete fields[f];
-      if (f === "batch") save({ craftBatch: v });
-      else if (f === "taxPct") save({ taxPct: v === "" ? null : v });
-      else save({ craftTargetPct: v });
+      // Settings own these once saved; the typed text shadows them only until the save is confirmed.
+      fields[f] = v;
+      const patch =
+        f === "batch"
+          ? { craftBatch: v }
+          : f === "taxPct"
+            ? { taxPct: v === "" ? null : v }
+            : { craftTargetPct: v };
+      Promise.resolve(save(patch)).then(
+        (applied) => {
+          if (applied) delete fields[f];
+          else
+            status =
+              "Settings: not saved, the extension did not answer; try again";
+          rescan();
+        },
+        () => {
+          status = "Settings: not saved; try again";
+          rescan();
+        },
+      );
     } else if (f === "import-file") {
       if (busy) return;
       const file = e.target.files?.[0];
@@ -348,8 +384,8 @@ export function createCraftDesk({
       anchor.insertAdjacentElement(after ? "afterend" : "beforebegin", desk);
     } else if (
       after
-        ? anchor.nextElementSibling !== desk
-        : desk.nextElementSibling !== anchor
+        ? !reaches(anchor.nextElementSibling, desk)
+        : !reaches(desk.nextElementSibling, anchor)
     )
       anchor.insertAdjacentElement(after ? "afterend" : "beforebegin", desk);
     return desk;
@@ -504,7 +540,7 @@ export function createCraftDesk({
         : `<p class="lens-muted">Break-even listing <b>${fmt(breakEvenListing)} g</b>: the lowest listing that nets your cost of ${fmt(plan.cost.perCraft)} g per craft at ${tax.value}% tax, snapped up to the tick.</p>`;
     if (est?.status === "ok") {
       const sales = state.salesByCode?.[code];
-      const liq = sales ? liquidity(sales.fills, { now: now() }) : null;
+      const liq = o.fills?.length ? liquidity(o.fills, { now: now() }) : null;
       const row = (name, sc) =>
         sc
           ? `<div><small>${name}</small><b>${fmt(sc.price)} g</b><span>nets ${fmt(proceeds({ listing: sc.price, taxPct: tax.value }).sellerGets)} g after tax · ${esc(sc.basis)}</span></div>`

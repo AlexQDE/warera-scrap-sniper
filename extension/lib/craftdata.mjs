@@ -9,7 +9,7 @@
 import { RARITIES, WEAPONS, GEAR_CODES } from "./items.mjs";
 import { freshness, TTL, nonNegative as money } from "./quality.mjs";
 import { normalizeRecipe } from "./craft.mjs";
-import { resaleEstimate } from "./resale.mjs";
+import { comparableFills, resaleEstimate } from "./resale.mjs";
 
 /** @typedef {{ scraps: number, steel: number }} Recipe */
 /** @typedef {{ value: number | null, source: "manual" | "page" | "quote" | "fixture" | "none", note?: string }} Sourced */
@@ -156,14 +156,20 @@ export function outcomesFor(
       source: /** @type {const} */ ("none"),
       outcomes: [],
       estimate: null,
+      fills: [],
       note: "no recent fills read for this item; select it on the market",
     };
   const anyState = sales.fills.some((f) => f?.state != null);
-  const est = resaleEstimate(sales.fills, {
+  const fills = comparableFills(sales.fills, {
     code,
     now,
-    capped: !sales.complete,
     state: anyState ? 100 : null,
+  });
+  const est = resaleEstimate(fills, {
+    filter: false,
+    now,
+    capped: !sales.complete,
+    total: sales.fills.length,
   });
   const basis = anyState ? " at 90–100% durability" : "";
   if (est.status !== "ok")
@@ -171,6 +177,7 @@ export function outcomesFor(
       source: /** @type {const} */ ("none"),
       outcomes: [],
       estimate: est,
+      fills,
       note: `${est.n} of ${est.needed} comparable fills${basis} in ${est.windowHours} h`,
     };
   return {
@@ -183,6 +190,7 @@ export function outcomesFor(
       },
     ],
     estimate: est,
+    fills,
     note: `sales-weighted: assumes a crafted piece sells like recent fills${basis} (median of ${est.n})`,
   };
 }

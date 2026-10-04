@@ -56,7 +56,7 @@ beforeEach(() => {
   state = {
     book: { at: iso(), bids: [{ price: 0.2, quantity: 2000 }] },
     error: null,
-    salesError: null,
+    salesErrors: {},
     salesBusy: false,
     busy: false,
     setup: null,
@@ -94,10 +94,10 @@ describe("compact annotation", () => {
     equipment.render(state);
     expect(annotation().textContent).toContain("resale · reading sales");
     state.salesBusy = false;
-    state.salesError = "the API answered 503";
+    state.salesErrors = { knife: "the API answered 503" };
     equipment.render(state);
     expect(annotation().textContent).toContain("resale · sales read failed");
-    state.salesError = null;
+    state.salesErrors = {};
     state.salesByCode = {
       knife: {
         code: "knife",
@@ -237,7 +237,7 @@ describe("summary line and states", () => {
     const bar = () => document.getElementById("scrap-sniper-bar").textContent;
     expect(bar()).toContain("1 readable stats");
     expect(bar()).toContain("1 snipes");
-    state.salesError = "the API answered 503";
+    state.salesErrors = { knife: "the API answered 503" };
     equipment.render(state);
     expect(bar()).toContain("1 readable stats");
     expect(bar()).toContain("1 snipes");

@@ -319,6 +319,41 @@ describe("SPA lifecycle and DOM work", () => {
     expect(salesCalls(runtime, "jet")).toBe(2);
     expect(app.metrics.scans).toBeLessThan(12);
   });
+  it("keeps a failed read of the panel's item reported while the desk's item reads fine", async () => {
+    window.history.replaceState({}, "", "/market/equipments?item=jet");
+    marketFixture();
+    const runtime = marketRuntime(
+      {
+        craftCollapsed: false,
+        craftRecipes: { boots5: { scraps: 10, steel: 2 } },
+      },
+      (msg) =>
+        msg.itemCode === "jet"
+          ? { error: "http", message: "the API answered 503" }
+          : {
+              sales: {
+                code: msg.itemCode,
+                at: new Date().toISOString(),
+                complete: true,
+                fills: [],
+              },
+            },
+    );
+    app = await startLens(runtime);
+    await settle();
+    document
+      .querySelector('[data-action="desk-pick"][data-code="boots5"]')
+      .click();
+    await settle(3000);
+    expect(salesCalls(runtime, "boots5")).toBe(1);
+    expect(document.getElementById("scrap-sniper-bar").textContent).toContain(
+      "Resale: sales read failed",
+    );
+    expect(
+      document.querySelector('[data-action="desk-pick"][data-code="boots5"]')
+        .textContent,
+    ).toBe("no price"); // its own read worked (no steel book in this fixture); jet's failure is not its
+  });
   it("keeps both panels in place and a focused desk field focused across native mutations", async () => {
     window.history.replaceState({}, "", "/market/equipments");
     marketFixture();
