@@ -4,6 +4,15 @@ Read-only decision support inside [WarEra](https://app.warera.io): buy, craft, s
 
 The extension compares offers and estimates. It never buys, crafts, lists, opens a case or travels for you. It uses your own API key and has no runtime dependencies or build step.
 
+## What changed in 1.7.0
+
+The game knowledge the 1.6.0 build was missing, each fact with its provenance in [docs/GAME-FACTS.md](docs/GAME-FACTS.md).
+
+- **Recipes shipped.** Every Craft Desk cell carries the game's recipe: the tier's scrap value in scraps (6 / 18 / 54 / 162 / 486 / 1458) plus a steel fee of 1 / 2 / 4 / 8 / 16 / 32, doubled because a cell is a chosen slot. A recipe you type overrides the shipped one for that item; **Forget override** returns to the game's table. No cell reads `no recipe` any more, and the invented `fixtures/recipes.json` is gone.
+- **Random craft.** A seventh matrix column prices the random craft of each tier: half the steel, the slot picked by the game (30% weapon, 14% each armour slot), expected value over the six slots' sales estimates, `k/6 slots` until every slot has one. The detail of a chosen cell carries the same comparison.
+- **Reroll floor.** A crafted piece is at 100% durability and dismantles back into the tier's whole scrap ladder; only the steel is gone. The detail says what a roll sent straight back to scraps costs, which is far less than the input.
+- **Tax side corrected.** The market tax is the buyer's, at the buyer's own country's rate, and the seller receives the listing. The desk nets the listing to the seller and shows what a buyer in your country is shown; the break-even listing is the cost itself. The tax-notice parser now reads the live sentence ("All prices displayed include a 1% market tax from your country"), which 1.6.0 could not.
+
 ## What changed in 1.6.0
 
 Built on the published 1.4.1 code. (A local 1.5.x with unpublished changes existed on the author's machine; it was not available to this branch, see [docs/DELIVERY-2026-10-04.md](docs/DELIVERY-2026-10-04.md).)
@@ -50,11 +59,13 @@ Scrap profit is `quoted scrap proceeds − displayed purchase price`; ROI is tha
 
 The desk opens with **Details** under the equipment panel. Every number names its source.
 
-- **Recipe.** Pick a cell (tier × slot), enter scraps and steel from the game's craft screen, **Save recipe**. Recipes stay on this browser; none are shipped, so cells read `no recipe` until you enter them.
+- **Recipe.** Every cell (tier × slot) carries the game's recipe: the tier's scrap value in scraps and twice the base steel fee, because picking the slot doubles the steel. If the game's craft screen ever disagrees, type the numbers and **Save recipe**; the override stays on this browser and **Forget override** returns to the table.
+- **Random craft.** The last column of each tier prices crafting without choosing the slot: half the steel, the slot by the game's odds (30% weapon, 14% each armour slot), expected value over the six slots' sales estimates. It reads `k/6 slots` until every slot of the tier has an estimate.
+- **Reroll floor.** A crafted piece is at 100% and dismantles back into the tier's whole scrap ladder; the steel is the only input that is gone. The detail prices that floor at the scrap bid, so you know what a bad roll really costs.
 - **Prices.** Scrap and steel default to the best ask (what buying now costs) with their freshness; type your own to override. Batch, market tax and target ROI are kept in settings.
 - **Buying now against bidding.** "Buy now at the asks" walks the observed ask depth for the whole batch and has no price when the depth does not cover it. "Place bids at the best bid" (and one tick ahead of the queue) is cheaper but fills only if a seller comes down to it, maybe never; the saving is shown as conditional.
 - **Expected value.** The craft's outcomes are weighted by probability. With five or more comparable fills the single outcome is "sells like the last N fills" at their median, labelled as sales-weighted (it assumes a crafted piece sells like recent fills). Without them the EV is `unavailable`, never a guess. A desirable roll is one outcome among the others; it is not treated as the result.
-- **Money words.** _Listing_ is the price shown on the market; _nets_ is what the seller keeps after the market tax; _cost_ is what the inputs cost. The tax is applied once, on the sale leg. The rate is the one you set, else the one printed in the market's "Market tax" notice, else none.
+- **Money words.** _Listing_ is the price you set, and what you receive: the market tax is the buyer's, at the buyer's own country's rate, and the price a buyer sees already includes it. _Cost_ is what the inputs cost. The rate shown is the one you set, else the one printed in the market's notice ("All prices displayed include a N% market tax from your country"), else none; it only changes what a buyer is shown.
 - **Ceilings.** The most scraps may cost given the steel price (and the reverse) at break-even and at the target ROI, snapped down to the 0.001 tick, with the reason when there is none.
 - **Listing guidance.** Balanced (median) needs five comparable fills; quick (lower quartile) and patient (upper quartile) need eight. Evidence lists the sample, window, capping, spread, last fill and the recent pace, which is the market's pace, not your listing's queue.
 
@@ -74,7 +85,7 @@ The DOM adapter reads existing offer prices, item IDs, borders, map labels and t
 
 ## Development
 
-Use Node 22+ (CI runs 24):
+Use Node 24 (the `engines` field; CI runs 24):
 
 ```sh
 npm ci --ignore-scripts
@@ -96,7 +107,7 @@ Both run against `fixtures/market.html`, a synthetic stand-in for the equipment 
 
 WarEra Plus je novo ime postojeće ekstenzije (ranije WarEra Lens i Scrap Sniper); repozitorijum, podešavanja i sačuvani ključ ostaju isti. Ažuriraj postojeći `extension` folder, klikni Reload u `chrome://extensions`, pa osveži igru.
 
-Svaka ponuda nosi jedan red: oznaku, profit od rastavljanja sa ROI, procenu preprodaje iz uporedivih prodaja (potrebno je pet; za rang i kvartile osam) i dugme **Details** sa dokazima. Craft Desk ispod panela računa cenu po izradi i seriji, kupovinu odmah naspram postavljanja ponude, očekivanu vrednost preko slučajnih ishoda, granične cene otpada i čelika, i smernice za listanje; recepte unosiš sam iz igre. Knjiga izrada je ručna evidencija sa izvozom i uvozom; dobit je ostvarena tek kad upišeš prodaju.
+Svaka ponuda nosi jedan red: oznaku, profit od rastavljanja sa ROI, procenu preprodaje iz uporedivih prodaja (potrebno je pet; za rang i kvartile osam) i dugme **Details** sa dokazima. Craft Desk ispod panela računa cenu po izradi i seriji, kupovinu odmah naspram postavljanja ponude, očekivanu vrednost preko slučajnih ishoda, granične cene otpada i čelika, i smernice za listanje. Recepti su ugrađeni (scraps = vrednost tiera u otpadu, čelik 1/2/4/8/16/32, dupliran kad biraš slot; nasumična izrada troši pola čelika), a svako polje možeš prepisati ako ekran za izradu kaže drugačije. Porez na tržištu plaća kupac po stopi svoje države, prodavac dobija listiranu cenu. Knjiga izrada je ručna evidencija sa izvozom i uvozom; dobit je ostvarena tek kad upišeš prodaju.
 
 Pre korišćenja proveri aktuelne poreze, pravila igre i ponašanje na svom ekranu prema [kontrolnoj listi](docs/RELEASE-CHECKLIST.md). Ekstenzija ne izvršava transakcije niti klikće kontrole igre.
 

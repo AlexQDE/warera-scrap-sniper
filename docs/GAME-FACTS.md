@@ -235,6 +235,11 @@ In order of value, each small enough for one commit with tests:
 6. Rewrite the "Crafting" paragraph of the release checklist and the README's
    Craft Desk section from this file.
 
+Status: 1 to 4 and 6 shipped in 1.7.0 (`ladder.mjs` carries the table and
+the odds, `craftdata.mjs` the shipped recipes, the overrides and the random
+craft, `craft.mjs` the reroll floor; the desk passes the buyer-side tax mode
+and the notice parser reads both word orders). 5 is open.
+
 Separately, the author's local 1.5.2 (labelled stat reading in
 `statsdom.mjs`, `market.mjs` skills, the bounded Load-more loader) is still
 unmerged in the private repository; its row reader reads **labelled** numbers
