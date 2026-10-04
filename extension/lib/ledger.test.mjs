@@ -11,6 +11,9 @@ import {
   exportLedger,
   importLedger,
   normalizeLedger,
+  normalizeTombstones,
+  mergeLedgers,
+  MAX_TOMBSTONES,
 } from "./ledger.mjs";
 
 const NOW = Date.parse("2026-10-03T12:00:00.000Z");
@@ -296,5 +299,82 @@ describe("export and import", () => {
     expect(l.version).toBe(LEDGER_VERSION);
     expect(l.entries.map((e) => e.id)).toEqual(["test-000b", "test-000a"]);
     expect(normalizeLedger(undefined).entries).toEqual([]);
+  });
+});
+
+describe("merging a second tab's list", () => {
+  const base = createEntry(form, { now: NOW, id: "test-0001" });
+  const other = createEntry(
+    { ...form, label: "from tab A" },
+    { now: NOW + 1000, id: "test-0002" },
+  );
+  it("keeps both tabs' new entries, lets the newer edit win, honours removals and remembers them", () => {
+    const edited = {
+      ...base,
+      label: "edited later",
+      updatedAt: new Date(NOW + 5000).toISOString(),
+    };
+    const stale = {
+      ...base,
+      label: "stale copy",
+      updatedAt: new Date(NOW + 1000).toISOString(),
+    };
+    const m = mergeLedgers({
+      stored: [edited, other],
+      incoming: [
+        stale,
+        { ...other, id: "test-0003", label: "tab B's new one" },
+      ],
+      removed: ["test-0002"],
+      now: NOW + 9000,
+    });
+    expect(m.entries.map((e) => e.id).sort()).toEqual([
+      "test-0001",
+      "test-0003",
+    ]);
+    expect(m.entries.find((e) => e.id === "test-0001").label).toBe(
+      "edited later",
+    );
+    expect(m.tombstones["test-0002"]).toBe(new Date(NOW + 9000).toISOString());
+  });
+  it("does not let a stale copy bring back an entry deleted elsewhere, unless it was edited after the deletion", () => {
+    const tombstones = { "test-0002": new Date(NOW + 5000).toISOString() };
+    const stale = { ...other, updatedAt: new Date(NOW + 1000).toISOString() };
+    expect(
+      mergeLedgers({
+        stored: [base],
+        incoming: [base, stale],
+        tombstones,
+      }).entries.map((e) => e.id),
+    ).toEqual(["test-0001"]);
+    const revived = { ...other, updatedAt: new Date(NOW + 6000).toISOString() };
+    expect(
+      mergeLedgers({ stored: [base], incoming: [base, revived], tombstones })
+        .entries,
+    ).toHaveLength(2);
+  });
+  it("normalizes a stored ledger with its revision and tombstones, bounded", () => {
+    const l = normalizeLedger(
+      {
+        revision: 3,
+        entries: [base],
+        tombstones: {
+          "test-0009": new Date(NOW).toISOString(),
+          bad: "x",
+          "test-0008": "junk",
+        },
+      },
+      NOW,
+    );
+    expect(l.revision).toBe(3);
+    expect(Object.keys(l.tombstones)).toEqual(["test-0009"]);
+    expect(normalizeLedger({ revision: -1 }).revision).toBe(0);
+    const many = Object.fromEntries(
+      Array.from({ length: MAX_TOMBSTONES + 5 }, (_, i) => [
+        `dead-${String(i).padStart(4, "0")}`,
+        new Date(NOW + i * 1000).toISOString(),
+      ]),
+    );
+    expect(Object.keys(normalizeTombstones(many))).toHaveLength(MAX_TOMBSTONES);
   });
 });

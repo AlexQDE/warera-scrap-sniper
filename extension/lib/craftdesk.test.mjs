@@ -559,4 +559,42 @@ describe("second review round", () => {
     desk.render(state, tax, { after: false });
     expect(el().nextElementSibling).toBe(tax);
   });
+  it("names the removed id on a deletion so another tab's copy cannot bring it back", async () => {
+    settings = preferences({
+      ...settings,
+      craftRecipes: { boots5: { scraps: 10, steel: 2 } },
+    });
+    render();
+    click('[data-action="desk-pick"][data-code="boots5"]');
+    render();
+    click('[data-action="desk-ledger-new"]');
+    render();
+    click('[data-action="desk-ledger-add"]');
+    await flush();
+    render();
+    const id = onLedger.mock.calls[0][0][0].id;
+    click(
+      `[data-action="desk-ledger-move"][data-type="scrap"][data-id="${id}"]`,
+    );
+    await flush();
+    render();
+    click(
+      `[data-action="desk-ledger-move"][data-type="delete"][data-id="${id}"]`,
+    );
+    await flush();
+    expect(onLedger).toHaveBeenLastCalledWith([], [id]);
+    onLedger.mockImplementation(async (entries) => {
+      state.ledger = { version: 1, entries };
+      return { ledger: state.ledger, merged: true };
+    });
+    render();
+    click('[data-action="desk-ledger-new"]');
+    render();
+    click('[data-action="desk-ledger-add"]');
+    await flush();
+    render();
+    expect(el().textContent).toContain(
+      "merged with changes another tab made meanwhile",
+    );
+  });
 });

@@ -9,7 +9,7 @@ import { CASE_CODES, WOODEN_CODES, ALL_GEAR_CODES } from "./cases.mjs";
 import { makeSingleFlight } from "./flight.mjs";
 import { preferences } from "./settings.mjs";
 import { CACHE_VERSION, TTL, freshness } from "./quality.mjs";
-import { normalizeLedger } from "./ledger.mjs";
+import { normalizeLedger, mergeLedgers, LEDGER_VERSION } from "./ledger.mjs";
 
 /** The craft ledger is the player's own record: validated, bounded, kept across key changes, never sent anywhere. */
 export const LEDGER_BYTES = 512_000;
@@ -342,7 +342,31 @@ export function createController({
       }
       if (msg?.type === "ledgerSet")
         return serial(async () => {
-          const ledger = normalizeLedger(msg.ledger, now());
+          // A tab sends its whole list with the revision it read. If another
+          // tab wrote since, the lists are merged by id instead of the newer
+          // write silently replacing the older tab's entries; deletions are
+          // remembered so a stale copy cannot bring them back.
+          const { craftLedger } = await storage.get(["craftLedger"]);
+          const stored = normalizeLedger(craftLedger, now());
+          const incoming = normalizeLedger(msg.ledger, now());
+          const removed = (Array.isArray(msg.removed) ? msg.removed : [])
+            .map(String)
+            .slice(0, 500);
+          const conflict =
+            craftLedger != null && Number(msg.baseRevision) !== stored.revision;
+          const merged = mergeLedgers({
+            stored: conflict ? stored.entries : [],
+            incoming: incoming.entries,
+            removed,
+            tombstones: stored.tombstones,
+            now: now(),
+          });
+          const ledger = {
+            version: LEDGER_VERSION,
+            revision: stored.revision + 1,
+            entries: merged.entries,
+            tombstones: merged.tombstones,
+          };
           if (JSON.stringify(ledger).length > LEDGER_BYTES)
             return {
               error: "too-large",
@@ -350,7 +374,7 @@ export function createController({
                 "The craft ledger is too large to store; export and trim it",
             };
           await storage.set({ craftLedger: ledger });
-          return { ledger };
+          return { ledger, merged: conflict };
         });
       if (["book", "cases", "avg", "sales"].includes(msg?.type)) {
         if (msg.type === "sales" && !ITEM_CODES.has(msg.itemCode))

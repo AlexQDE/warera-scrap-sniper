@@ -12,6 +12,8 @@ import { nonNegative as money } from "./quality.mjs";
 
 export const LEDGER_VERSION = 1;
 export const MAX_ENTRIES = 500;
+/** Ids deleted recently are remembered so a tab holding an older copy cannot bring them back. */
+export const MAX_TOMBSTONES = 200;
 export const STATES = Object.freeze([
   "crafted",
   "listed",
@@ -336,15 +338,78 @@ export function importLedger(textValue, existing = [], now = Date.now()) {
 }
 
 /**
- * A stored ledger, validated and bounded; what the worker keeps.
+ * Deleted ids with the time of deletion, validated and bounded to the newest.
+ * @param {unknown} raw
+ * @returns {Record<string, string>}
+ */
+export function normalizeTombstones(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const pairs = Object.entries(/** @type {Record<string, unknown>} */ (raw))
+    .filter(([id]) => /^[A-Za-z0-9_-]{4,40}$/.test(id))
+    .map(([id, at]) => [id, when(at)])
+    .filter((pair) => pair[1] != null)
+    .sort(
+      (a, b) =>
+        Date.parse(/** @type {string} */ (b[1])) -
+        Date.parse(/** @type {string} */ (a[1])),
+    )
+    .slice(0, MAX_TOMBSTONES);
+  return Object.fromEntries(pairs);
+}
+
+/**
+ * A stored ledger, validated and bounded; what the worker keeps. `revision`
+ * counts the writes so a tab can tell whether another tab wrote since it
+ * read; `tombstones` remember recent deletions.
  * @param {unknown} raw @param {number} [now]
  */
 export function normalizeLedger(raw, now = Date.now()) {
-  const list = Array.isArray(raw) ? raw : /** @type {any} */ (raw)?.entries;
+  const r = /** @type {any} */ (raw);
+  const list = Array.isArray(raw) ? raw : r?.entries;
   const entries = (Array.isArray(list) ? list : [])
     .map((e) => normalizeEntry(e, now))
     .filter((e) => e != null)
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
     .slice(0, MAX_ENTRIES);
-  return { version: LEDGER_VERSION, entries };
+  const revision = Number(r?.revision);
+  return {
+    version: LEDGER_VERSION,
+    revision: Number.isSafeInteger(revision) && revision >= 0 ? revision : 0,
+    entries,
+    tombstones: normalizeTombstones(r?.tombstones),
+  };
+}
+
+/**
+ * Merge a tab's list into the stored one: by id, the newer `updatedAt` wins,
+ * the ids this tab removed go (and are remembered), and an id deleted
+ * elsewhere after this copy was last touched stays deleted. Both sides keep
+ * their new entries. Pure; the worker applies it on every write.
+ * @param {{ stored: ReadonlyArray<Entry>, incoming: ReadonlyArray<Entry>, removed?: ReadonlyArray<string>, tombstones?: Record<string, string>, now?: number }} input
+ */
+export function mergeLedgers({
+  stored,
+  incoming,
+  removed = [],
+  tombstones = {},
+  now = Date.now(),
+}) {
+  const dead = { ...tombstones };
+  const at = new Date(now).toISOString();
+  for (const id of removed) dead[String(id)] = at;
+  const byId = new Map(stored.map((e) => [e.id, e]));
+  for (const e of incoming) {
+    const buried = dead[e.id];
+    if (buried && Date.parse(buried) >= Date.parse(e.updatedAt)) continue;
+    const old = byId.get(e.id);
+    if (!old || Date.parse(e.updatedAt) >= Date.parse(old.updatedAt))
+      byId.set(e.id, e);
+  }
+  for (const id of removed) byId.delete(String(id));
+  return {
+    entries: [...byId.values()]
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+      .slice(0, MAX_ENTRIES),
+    tombstones: normalizeTombstones(dead),
+  };
 }

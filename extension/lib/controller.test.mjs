@@ -258,10 +258,9 @@ describe("background controller", () => {
   });
   it("stores a validated, bounded craft ledger for the page and keeps it across key changes and cleanup", async () => {
     const { controller, storage } = setup();
-    expect((await controller.handle({ type: "ledgerGet" })).ledger).toEqual({
-      version: 1,
-      entries: [],
-    });
+    expect(
+      (await controller.handle({ type: "ledgerGet" })).ledger,
+    ).toMatchObject({ version: 1, revision: 0, entries: [] });
     const entry = {
       id: "test-0001",
       createdAt: new Date(NOW).toISOString(),
@@ -297,6 +296,7 @@ describe("background controller", () => {
     const bounded = await controller.handle({
       type: "ledgerSet",
       ledger: huge,
+      baseRevision: saved.ledger.revision, // a current base replaces; a stale one would merge
     });
     expect(bounded.error).toBeUndefined();
     expect(bounded.ledger.entries).toHaveLength(500);
@@ -304,5 +304,44 @@ describe("background controller", () => {
     expect(JSON.stringify(storage.data.craftLedger).length).toBeLessThan(
       LEDGER_BYTES,
     );
+  });
+  it("merges a stale tab's ledger write instead of replacing the other tab's entries, and keeps deletions deleted", async () => {
+    const { controller } = setup();
+    const entry = (id, label = "") => ({
+      id,
+      createdAt: new Date(NOW).toISOString(),
+      updatedAt: new Date(NOW).toISOString(),
+      label,
+      code: "boots5",
+      inputs: { scraps: 1, steel: 0, scrapPrice: 0.2 },
+      state: "crafted",
+    });
+    const write = (entries, baseRevision, removed = []) =>
+      controller.handle({
+        type: "ledgerSet",
+        ledger: { entries },
+        baseRevision,
+        removed,
+      });
+    const first = await write([entry("tab-a-001")], 0);
+    expect(first.ledger.revision).toBe(1);
+    expect(first.merged).toBe(false);
+    // tab B read revision 0 before tab A wrote, and now sends its own entry only
+    const second = await write([entry("tab-b-001")], 0);
+    expect(second.merged).toBe(true);
+    expect(second.ledger.revision).toBe(2);
+    expect(second.ledger.entries.map((e) => e.id).sort()).toEqual([
+      "tab-a-001",
+      "tab-b-001",
+    ]);
+    // a deletion on the current revision, then a stale list that still holds the deleted entry
+    const third = await write([entry("tab-b-001")], 2, ["tab-a-001"]);
+    expect(third.ledger.entries.map((e) => e.id)).toEqual(["tab-b-001"]);
+    const fourth = await write([entry("tab-a-001"), entry("tab-b-001")], 1);
+    expect(fourth.merged).toBe(true);
+    expect(fourth.ledger.entries.map((e) => e.id)).toEqual(["tab-b-001"]);
+    expect(
+      (await controller.handle({ type: "ledgerGet" })).ledger.revision,
+    ).toBe(4);
   });
 });

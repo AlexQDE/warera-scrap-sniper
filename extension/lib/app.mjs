@@ -225,8 +225,13 @@ export async function startLens(runtime = chrome.runtime) {
       if (context.craft) void read("sales", false, code);
     },
     rescan: () => sched.schedule(),
-    onLedger: async (entries) => {
-      const r = await send({ type: "ledgerSet", ledger: { entries } });
+    onLedger: async (entries, removed = []) => {
+      const r = await send({
+        type: "ledgerSet",
+        ledger: { entries },
+        baseRevision: state.ledger?.revision ?? 0,
+        removed,
+      });
       if (r?.ledger) state.ledger = r.ledger;
       return r;
     },
@@ -239,6 +244,15 @@ export async function startLens(runtime = chrome.runtime) {
     if (r?.ledger) state.ledger = r.ledger;
     else ledgerRequested = false; // asked again on the next scan
     sched.schedule();
+  }
+  /** Another tab may have written: pick up a newer revision while the desk is open. */
+  async function refreshLedger() {
+    if (!state.ledger || disposed || document.hidden) return;
+    const r = await send({ type: "ledgerGet" });
+    if (r?.ledger && r.ledger.revision !== state.ledger?.revision) {
+      state.ledger = r.ledger;
+      sched.schedule();
+    }
   }
   const observer = new MutationObserver((muts) => {
     if (document.hidden || disposed) return;
@@ -433,6 +447,7 @@ export async function startLens(runtime = chrome.runtime) {
       }
       clock();
       void fetchVisible();
+      if (context.craft && !state.settings.craftCollapsed) void refreshLedger();
     }
     ticking = false;
     if (!disposed) timer = setTimeout(tick, 5000);

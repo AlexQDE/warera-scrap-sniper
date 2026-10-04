@@ -110,7 +110,7 @@ export function createCraftDesk({
   const el = () => document.getElementById(DESK_ID);
 
   /** Save the ledger; true only when the worker confirmed the stored list. */
-  async function persist(entries, message) {
+  async function persist(entries, message, removed = []) {
     if (busy) {
       status = "Ledger: a save is still running; try again in a moment";
       rescan();
@@ -120,12 +120,14 @@ export function createCraftDesk({
     rescan();
     let ok = false;
     try {
-      const r = await onLedger(entries);
+      const r = await onLedger(entries, removed);
       if (r?.error) status = `Ledger: ${r.message ?? r.error}`;
       else if (!r?.ledger)
         status = "Ledger: not saved, the extension did not answer; try again";
       else {
-        status = message;
+        status = r.merged
+          ? `${message} · merged with changes another tab made meanwhile`
+          : message;
         ok = true;
       }
     } catch (e) {
@@ -234,6 +236,7 @@ export function createCraftDesk({
         void persist(
           entries.filter((x) => x.id !== entry.id),
           "Entry deleted",
+          [entry.id],
         );
         return;
       }

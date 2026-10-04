@@ -230,8 +230,9 @@ describe("SPA lifecycle and DOM work", () => {
     await settle(5100);
     expect(panels()).toEqual([1, 1]);
     expect(
-      runtime.sendMessage.mock.calls.filter(([m]) => m.type === "ledgerGet"),
-    ).toHaveLength(1);
+      runtime.sendMessage.mock.calls.filter(([m]) => m.type === "ledgerGet")
+        .length,
+    ).toBeLessThanOrEqual(2); // the initial load plus one per-tick re-read for other tabs' writes
     window.history.pushState({}, "", "/profile");
     await settle(5100);
     expect(panels()).toEqual([0, 0]);
@@ -353,6 +354,52 @@ describe("SPA lifecycle and DOM work", () => {
       document.querySelector('[data-action="desk-pick"][data-code="boots5"]')
         .textContent,
     ).toBe("no price"); // its own read worked (no steel book in this fixture); jet's failure is not its
+  });
+  it("picks up a ledger written by another tab while the desk is open", async () => {
+    window.history.replaceState({}, "", "/market/equipments");
+    marketFixture();
+    const runtime = marketRuntime({ craftCollapsed: false });
+    let ledger = { version: 1, revision: 1, entries: [], tombstones: {} };
+    const inner = runtime.sendMessage.getMockImplementation();
+    runtime.sendMessage.mockImplementation(async (msg) =>
+      msg.type === "ledgerGet"
+        ? { ledger: structuredClone(ledger) }
+        : inner(msg),
+    );
+    app = await startLens(runtime);
+    await settle();
+    const desk = () => document.getElementById("warera-plus-craft").textContent;
+    expect(desk()).toContain("No crafts recorded yet");
+    const at = new Date().toISOString();
+    ledger = {
+      version: 1,
+      revision: 2,
+      tombstones: {},
+      entries: [
+        {
+          id: "other-tab-01",
+          createdAt: at,
+          updatedAt: at,
+          code: "boots5",
+          label: "from another tab",
+          inputs: {
+            scraps: 1,
+            steel: 0,
+            scrapPrice: 0.2,
+            steelPrice: null,
+            priceSource: "manual",
+          },
+          costBasis: 0.2,
+          result: { rarity: null, stat: null, durability: null, note: "" },
+          state: "crafted",
+          listing: { price: null, at: null },
+          sale: { proceeds: null, at: null, source: "manual" },
+          notes: "",
+        },
+      ],
+    };
+    await settle(5100);
+    expect(desk()).toContain("from another tab");
   });
   it("keeps both panels in place and a focused desk field focused across native mutations", async () => {
     window.history.replaceState({}, "", "/market/equipments");
