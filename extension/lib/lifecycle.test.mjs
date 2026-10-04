@@ -433,6 +433,67 @@ describe("SPA lifecycle and DOM work", () => {
     expect(boots[0][0].force).toBe(true);
     expect(salesCalls(runtime, "jet")).toBe(1);
   });
+  it("runs a forced refresh kept while the tab was hidden once it becomes visible", async () => {
+    window.history.replaceState({}, "", "/market/equipments?item=jet");
+    marketFixture();
+    let releaseJet = null;
+    const runtime = marketRuntime(
+      {
+        craftCollapsed: false,
+        craftRecipes: { boots5: { scraps: 10, steel: 2 } },
+      },
+      (msg) => {
+        const sales = {
+          sales: {
+            code: msg.itemCode,
+            at: new Date().toISOString(),
+            complete: true,
+            fills: [],
+          },
+        };
+        if (msg.itemCode === "jet" && msg.force)
+          return new Promise((resolve) => {
+            releaseJet = () => resolve(sales);
+          });
+        return sales;
+      },
+    );
+    app = await startLens(runtime);
+    await settle();
+    document
+      .querySelector('[data-action="desk-pick"][data-code="boots5"]')
+      .click();
+    await settle(3000);
+    expect(salesCalls(runtime, "boots5")).toBe(1);
+    document.querySelector('#scrap-sniper-bar [data-action="refresh"]').click();
+    await settle();
+    expect(releaseJet).not.toBeNull();
+    document
+      .querySelector('#warera-plus-craft [data-action="refresh"]')
+      .click();
+    await settle();
+    // the tab goes to the background before jet's read finishes
+    Object.defineProperty(document, "hidden", {
+      configurable: true,
+      value: true,
+    });
+    releaseJet();
+    await settle(3000);
+    expect(salesCalls(runtime, "boots5")).toBe(1); // nothing is read while hidden
+    Object.defineProperty(document, "hidden", {
+      configurable: true,
+      value: false,
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    await settle(1000);
+    const boots = runtime.sendMessage.mock.calls.filter(
+      ([m]) => m.type === "sales" && m.itemCode === "boots5",
+    );
+    expect(boots).toHaveLength(2);
+    expect(boots[1][0].force).toBe(true);
+    await settle(3000);
+    expect(salesCalls(runtime, "boots5")).toBe(2); // once
+  });
   it("retries a failing sales read after a pause, not on every scan", async () => {
     window.history.replaceState({}, "", "/market/equipments?item=jet");
     marketFixture();

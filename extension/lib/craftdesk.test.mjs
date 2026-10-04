@@ -924,6 +924,50 @@ describe("second review round", () => {
     });
     expect(el().textContent).toContain("Listed at 12.000 g");
   });
+  it("says when the latest sales read failed: the last good read stays, labelled as such, and a cell with no read says so", () => {
+    settings = preferences({
+      ...settings,
+      craftRecipes: {
+        boots5: { scraps: 10, steel: 2 },
+        helmet5: { scraps: 10, steel: 2 },
+      },
+    });
+    state.salesByCode = {
+      boots5: {
+        code: "boots5",
+        at: iso(600e3),
+        complete: true,
+        fills: fills("boots5", [10, 11, 12, 13, 14]),
+      },
+    };
+    state.salesErrors = {
+      boots5: "the API answered 503",
+      helmet5: "the API answered 503",
+    };
+    render();
+    click('[data-action="desk-pick"][data-code="boots5"]');
+    render();
+    const cell = (code) =>
+      el().querySelector(`[data-action="desk-pick"][data-code="${code}"]`);
+    expect(cell("boots5").textContent).toBe("+115% ⚠");
+    expect(cell("boots5").title).toContain(
+      "last read failed (the API answered 503); showing the last good read",
+    );
+    expect(cell("helmet5").textContent).toBe("read failed");
+    expect(cell("helmet5").title).toContain(
+      "sales read failed: the API answered 503",
+    );
+    const text = el().textContent;
+    expect(text).toContain("Evidence: 5 comparable fills");
+    expect(text).toContain(
+      "last read failed (the API answered 503): the last good read is shown",
+    );
+    // the next read succeeds: the labels go, the numbers stay
+    state.salesErrors = {};
+    render();
+    expect(cell("boots5").textContent).toBe("+115%");
+    expect(el().textContent).not.toContain("last read failed");
+  });
   it("keeps a setting typed while an earlier save of the same field was still pending", async () => {
     render();
     const apply = save.getMockImplementation();

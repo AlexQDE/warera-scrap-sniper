@@ -480,6 +480,7 @@ export async function startLens(runtime = chrome.runtime) {
   const visible = () => {
     if (!document.hidden) {
       clearTimeout(timer);
+      drainSales(); // reads kept while the tab was hidden go first, with their force flags
       void tick();
     }
   };

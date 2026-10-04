@@ -468,7 +468,7 @@ export function createCraftDesk({
       return { text: "no recipe", title: inputs.recipe.note };
     if (plan.ev.status === "ok" && plan.ev.roi != null)
       return {
-        text: pct(plan.ev.roi),
+        text: `${pct(plan.ev.roi)}${inputs.outcomes.error ? " ⚠" : ""}`,
         title: `expected profit ${signed(plan.ev.profit)} g per craft, ${inputs.outcomes.note}`,
       };
     if (plan.cost.total == null)
@@ -479,8 +479,10 @@ export function createCraftDesk({
     if (!inputs.outcomes.outcomes.length)
       return {
         text: inputs.outcomes.estimate
-          ? `${inputs.outcomes.estimate.n}/${MIN_RESALE_SAMPLE} fills`
-          : "no fills",
+          ? `${inputs.outcomes.estimate.n}/${MIN_RESALE_SAMPLE} fills${inputs.outcomes.error ? " ⚠" : ""}`
+          : inputs.outcomes.error
+            ? "read failed"
+            : "no fills",
         title: inputs.outcomes.note,
       };
     return { text: "–", title: plan.ev.reason ?? "unavailable" };
@@ -489,14 +491,25 @@ export function createCraftDesk({
   /** The outcomes of crafting `code`, memoised per sales snapshot and tax rate. */
   function outcomesOf(code, state, tax) {
     const sales = state.salesByCode?.[code];
+    const error = state.salesErrors?.[code] ?? null;
     // The window is measured from now, so a cached estimate turns over every five minutes and fills age out of it.
-    const key = `${code}|${sales?.at ?? ""}|${tax.value}|${Math.floor(now() / 300_000)}`;
+    const key = `${code}|${sales?.at ?? ""}|${error ?? ""}|${tax.value}|${Math.floor(now() / 300_000)}`;
     let o = outcomesMemo.get(key);
     if (!o) {
-      const outcomes = outcomesFor(code, {
+      const read = outcomesFor(code, {
         salesByCode: state.salesByCode,
         now: now(),
       });
+      // A refresh that failed leaves the last good read in place: still the evidence, but said to be that, as the panel does.
+      const outcomes = error
+        ? {
+            ...read,
+            error,
+            note: sales
+              ? `${read.note} · last read failed (${error}); showing the last good read`
+              : `sales read failed: ${error}`,
+          }
+        : { ...read, error: null };
       o = {
         outcomes,
         outcomeList: outcomes.outcomes.map((x) => ({
@@ -611,7 +624,7 @@ export function createCraftDesk({
           ? `<div><small>${name}</small><b>${fmt(sc.price)} g</b><span>nets ${fmt(proceeds({ listing: sc.price, taxPct: tax.value }).sellerGets)} g after tax · ${esc(sc.basis)}</span></div>`
           : `<div><small>${name}</small><b>–</b><span>needs 8 comparable fills (${est.n} now)</span></div>`;
       out.push(
-        `<h4>Listing guidance <small>listing = the price shown on the market; "nets" = what you keep at ${tax.value}% tax (${esc(tax.source === "none" ? "no rate read" : tax.source === "page" ? "rate read off the page" : "your rate")})</small></h4><div class="lens-grid3">${row("Quick sale", scenarios.quick)}${row("Balanced", scenarios.balanced)}${row("Patient", scenarios.patient)}</div><p class="lens-muted">Evidence: ${est.n} comparable fills in ${est.windowHours} h${est.capped ? " (capped sample)" : ""} · low ${fmt(est.low)} · high ${fmt(est.high)}${est.uncertaintyPct != null ? ` · ±${est.uncertaintyPct.toFixed(0)}% spread (MAD)` : ""} · last fill ${timeLabel(est.lastAt, now())}${liq?.medianGapHours != null ? ` · pace ${liq.perDay.toFixed(1)}/day, median gap ${liq.medianGapHours.toFixed(1)} h (recent pace, not your queue)` : ""}${sales ? ` · read ${timeLabel(sales.at, now())}` : ""}</p>${breakEvenLine}`,
+        `<h4>Listing guidance <small>listing = the price shown on the market; "nets" = what you keep at ${tax.value}% tax (${esc(tax.source === "none" ? "no rate read" : tax.source === "page" ? "rate read off the page" : "your rate")})</small></h4><div class="lens-grid3">${row("Quick sale", scenarios.quick)}${row("Balanced", scenarios.balanced)}${row("Patient", scenarios.patient)}</div><p class="lens-muted">Evidence: ${est.n} comparable fills in ${est.windowHours} h${est.capped ? " (capped sample)" : ""} · low ${fmt(est.low)} · high ${fmt(est.high)}${est.uncertaintyPct != null ? ` · ±${est.uncertaintyPct.toFixed(0)}% spread (MAD)` : ""} · last fill ${timeLabel(est.lastAt, now())}${liq?.medianGapHours != null ? ` · pace ${liq.perDay.toFixed(1)}/day, median gap ${liq.medianGapHours.toFixed(1)} h (recent pace, not your queue)` : ""}${sales ? ` · read ${timeLabel(sales.at, now())}` : ""}${o.error ? ` · <b>last read failed</b> (${esc(o.error)}): the last good read is shown` : ""}</p>${breakEvenLine}`,
       );
     } else
       out.push(
@@ -747,6 +760,7 @@ export function createCraftDesk({
         const key = [
           Math.floor(now() / 300_000),
           state.salesByCode?.[code]?.at ?? "",
+          state.salesErrors?.[code] ?? "",
           prices.scrap.value,
           prices.steel.value,
           tax.value,
