@@ -895,7 +895,7 @@ export function createCraftDesk({
       ? esc(c.username)
       : `player …${esc(String(id).slice(-6))}`;
     return box(
-      `${who} · ${c.days} days of your feed · read ${timeLabel(c.at, now())}${state.craftsBusy ? " · refreshing" : ""}`,
+      `${who} · ${c.days} days of your feed · read ${timeLabel(c.at, now())}${state.craftsBusy ? " · refreshing" : ""}${state.craftsError ? ` · <b>last read failed</b> (${esc(state.craftsError)}): the last good read is shown` : ""}`,
       `<div class="lens-windows"><button type="button" data-action="desk-window" data-window="today" aria-pressed="${craftWindow !== "7d"}">Today</button><button type="button" data-action="desk-window" data-window="7d" aria-pressed="${craftWindow === "7d"}">7 days</button></div>${tiles}${rows.length ? `<table class="lens-crafts"><thead><tr><th>When</th><th>Item</th><th>Roll</th><th>Cost</th><th>Now</th><th>P&amp;L</th></tr></thead><tbody>${rows.join("")}</tbody></table>${shown.length > 40 ? `<p class="lens-muted">${shown.length - 40} more not listed.</p>` : ""}` : `<p class="lens-muted">No crafts of yours ${craftWindow === "7d" ? "in the last 7 days" : "today (UTC)"} in the feed.</p>`}<p class="lens-muted">Cost = the recipe at the craft day's average scrap and steel prices (${s.craftSteelMode === "chosen" ? "chosen-slot steel, twice the fee" : "random-craft steel fee"}; change it in settings) · "clears" = the median of recent sales of the same roll, else of its band, else of the item · fates joined to your sales and dismantles by item id · days are UTC${covered ? "" : " · the feed was not fully covered (page cap), older rows may be missing"}.</p>`,
     );
   }

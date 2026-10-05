@@ -1390,6 +1390,16 @@ describe("second review round", () => {
         .getAttribute("aria-pressed"),
     ).toBe("true");
     expect(text()).toContain("Crafted 7 days");
+    // a refresh that failed keeps the last good read on screen, labelled as such, as every other panel does
+    state.craftsError = "the API answered 503";
+    render();
+    expect(text()).toContain(
+      "last read failed (the API answered 503): the last good read is shown",
+    );
+    expect(text()).toContain("clears 161.000 g");
+    state.craftsError = null;
+    render();
+    expect(text()).not.toContain("last read failed");
   });
   it("says when the account could not be read off the page, and never shows another account's feed", () => {
     state.craftsUserId = null;
