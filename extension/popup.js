@@ -32,6 +32,8 @@ function show(p) {
   for (const [id, key] of Object.entries(numbers)) $(id).value = p[key];
   $("taxPct").value = p.taxPct ?? "";
   $("sellFrom").value = SELL_FROM.includes(p.sellFrom) ? p.sellFrom : "epic";
+  $("userId").value = p.userId ?? "";
+  $("craftSteelMode").value = p.craftSteelMode ?? "random";
   for (const field of toggles) $(field).checked = p[field];
   const n = Object.keys(p.craftRecipes ?? {}).length;
   $("recipes").textContent = n
@@ -93,6 +95,8 @@ async function save(event) {
         apiKey: $("key").value.trim(),
         taxPct: $("taxPct").value === "" ? null : $("taxPct").value,
         sellFrom: $("sellFrom").value,
+        userId: $("userId").value.trim() || null,
+        craftSteelMode: $("craftSteelMode").value,
       },
     });
     if (r.error) throw new Error(r.message);

@@ -25,6 +25,8 @@ export async function startLens(runtime = chrome.runtime) {
     salesReading: null,
     ledger: null,
     taxOnPage: null,
+    crafts: null, // the player's own feed, replayed by the desk
+    craftsUserId: null, // the id it was read for: the setting, else the page's own-profile links
     errors: {},
     busy: new Set(),
   };
@@ -90,6 +92,7 @@ export async function startLens(runtime = chrome.runtime) {
         state.sales = null;
         state.salesByCode = {};
         state.salesErrors = {};
+        state.crafts = null;
         salesAttempts.clear();
         salesPending.clear();
         state.errors = {};
@@ -151,7 +154,11 @@ export async function startLens(runtime = chrome.runtime) {
     const r = await send({
       type: kind,
       force,
-      ...(code ? { itemCode: code } : {}),
+      ...(code
+        ? kind === "crafts"
+          ? { userId: code }
+          : { itemCode: code }
+        : {}),
     });
     state.busy.delete(kind);
     if (kind === "sales" && state.salesReading === code)
@@ -175,6 +182,7 @@ export async function startLens(runtime = chrome.runtime) {
         state.sales = null;
         state.salesByCode = {};
         state.salesErrors = {};
+        state.crafts = null;
       } else {
         if (r[kind]) state[kind] = r[kind];
         if (kind === "sales" && r.sales?.code) {
@@ -242,6 +250,7 @@ export async function startLens(runtime = chrome.runtime) {
       void read("book", true);
       void read("cases", true);
       if (desk.selected) void read("sales", true, desk.selected);
+      if (state.craftsUserId) void read("crafts", true, state.craftsUserId);
       sched.schedule();
     },
     requestSales: (code) => {
@@ -350,11 +359,19 @@ export async function startLens(runtime = chrome.runtime) {
       state.taxOnPage = dom.taxRateFromText(dom.taxNotice()?.textContent);
       if (!state.ledger && !state.setup && !state.settings.craftCollapsed)
         void loadLedger();
+      // Whose crafts: the id set in settings, else the one the page's own-profile links carry. Another account's feed is never shown.
+      state.craftsUserId = state.settings.userId ?? dom.ownUserId();
+      if (state.crafts && state.crafts.userId !== state.craftsUserId)
+        state.crafts = null;
+      if (state.craftsUserId && !state.setup && !state.settings.craftCollapsed)
+        void read("crafts", false, state.craftsUserId);
       // After the equipment bar; without that module, where the bar would go (the tax notice, else the grid's section).
       const result = desk.render(
         {
           ...state,
           busy: state.busy.has("cases") || state.busy.has("book"),
+          craftsError: state.errors.crafts ?? null,
+          craftsBusy: state.busy.has("crafts"),
           action,
         },
         bar ?? dom.marketAnchor(),

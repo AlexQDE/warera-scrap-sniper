@@ -385,6 +385,33 @@
             item price (sold on the equipment market, a mean of recent sales).
             The case verdict uses this policy.
           </p>
+          <label for="craftSteelMode">How you craft</label>
+          <select id="craftSteelMode">
+            <option value="random">
+              Random slot (default): the base steel fee, the game picks the slot
+            </option>
+            <option value="chosen">Chosen slot: twice the steel</option>
+          </select>
+          <p class="help">
+            Sets the steel charged to your observed crafts on the Craft Desk;
+            the game does not record which way a craft was made.
+          </p>
+          <label for="userId">Your player id (optional)</label>
+          <input
+            id="userId"
+            type="text"
+            inputmode="text"
+            autocomplete="off"
+            spellcheck="false"
+            maxlength="24"
+            pattern="[0-9a-f]{24}"
+            placeholder="read off the game page when empty"
+          />
+          <p class="help">
+            The 24-character id in your profile URL (app.warera.io/user/…).
+            Leave it empty: the Craft Desk reads it from the game page's own
+            inventory and skills links. Set it only to follow another account.
+          </p>
           <label class="toggle"
             ><input id="collapsed" type="checkbox" /> Start the equipment panel
             compact</label

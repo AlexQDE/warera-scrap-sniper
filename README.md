@@ -4,6 +4,13 @@ Read-only decision support inside [WarEra](https://app.warera.io): buy, craft, s
 
 The extension compares offers and estimates. It never buys, crafts, lists, opens a case or travels for you. It uses your own API key and has no runtime dependencies or build step.
 
+## What changed in 1.8.0
+
+- **Your crafts, observed.** The Craft Desk now opens with your own crafts, read from the game's transaction feed with your key: every craft of the last 7 days with its roll, what it cost, whether it is still yours, sold or scrapped, and what its roll clears at now. The headline mirrors the community ledger at warera-prices.web.app (crafting today, net value, crafted) and was checked against it on one account: the cost to the cent, the clearing prices within 2% (see [docs/GAME-FACTS.md](docs/GAME-FACTS.md) §10). Nothing is typed: the account is read off the page's own inventory and skills links, or set once in Advanced settings.
+- **Cost basis.** The recipe at the craft day's average scrap and steel prices from the game's own price history (`itemTrading.getItemTrading`), with the random-craft steel fee unless you set "How you craft" to chosen slot. A craft older than the 30-day history has no cost, never a guess.
+- **What a roll clears at.** The median of recent sales of the same roll value; of its fifth-of-range band when the roll itself has fewer than five sales; of the item when the band has fewer. The level used is printed on every row. Sales now carry the roll and the listing time, so older caches say "needs 5 recent sales" until their 3-minute refresh.
+- **Fates by item id.** A sale of yours or a dismantle with the crafted piece's id closes the craft; held pieces are priced, gone ones realized. Epic and up are counted in the sums, as on the site; lower tiers are listed and marked not counted.
+
 ## What changed in 1.7.0
 
 The game knowledge the 1.6.0 build was missing, each fact with its provenance in [docs/GAME-FACTS.md](docs/GAME-FACTS.md).
@@ -59,6 +66,7 @@ Scrap profit is `quoted scrap proceeds − displayed purchase price`; ROI is tha
 
 The desk opens with **Details** under the equipment panel. Every number names its source.
 
+- **Your crafts.** First on the desk: your own crafts replayed from the feed, today (UTC) or the last 7 days. _Crafting_ is what the pieces that are gone realized against their cost; _Net value_ is what the pieces you still hold clear at against their inputs; _Crafted_ counts them. Each row: when, the item, the roll, the cost, what it clears at (or sold for, or gave back in scraps) and the profit or loss. Rows below epic are listed but not summed. The account is the one the page shows as yours; set a player id in Advanced settings to follow another.
 - **Recipe.** Every cell (tier × slot) carries the game's recipe: the tier's scrap value in scraps and twice the base steel fee, because picking the slot doubles the steel. If the game's craft screen ever disagrees, type the numbers and **Save recipe**; the override stays on this browser and **Forget override** returns to the table.
 - **Random craft.** The last column of each tier prices crafting without choosing the slot: half the steel, the slot by the game's odds (30% weapon, 14% each armour slot), expected value over the six slots' sales estimates. It reads `k/6 slots` until every slot of the tier has an estimate.
 - **Reroll floor.** A crafted piece is at 100% and dismantles back into the tier's whole scrap ladder; the steel is the only input that is gone. The detail prices that floor at the scrap bid, so you know what a bad roll really costs.

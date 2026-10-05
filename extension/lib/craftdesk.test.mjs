@@ -1285,4 +1285,132 @@ describe("second review round", () => {
     );
     expect(el().textContent).not.toContain("overridden by you");
   });
+  it("replays the player's own crafts: cost at the day's averages, held pieces at what their roll clears, fates by item id", () => {
+    const ME = "697b55e4bcecf3b37667e0d1";
+    state.craftsUserId = ME;
+    state.crafts = {
+      userId: ME,
+      username: "Johnny_Sins",
+      at: iso(),
+      days: 7,
+      complete: { crafts: true, sales: true, dismantles: true },
+      crafts: [
+        {
+          id: "a3cb5c",
+          code: "tank",
+          skills: { attack: 159, criticalChance: 32 },
+          at: iso(3600e3),
+          scraps: 486,
+        },
+        {
+          id: "b06b3c",
+          code: "boots5",
+          skills: { dodge: 38 },
+          at: iso(3600e3 - 2000),
+          scraps: 486,
+        },
+        {
+          id: "d664c5",
+          code: "chest5",
+          skills: { armor: 46 },
+          at: iso(3600e3 - 5000),
+          scraps: 486,
+        },
+        {
+          id: "31f44d",
+          code: "chest1",
+          skills: { armor: 3 },
+          at: iso(7200e3),
+          scraps: 6,
+        },
+      ],
+      sales: [
+        {
+          itemId: "d664c5",
+          code: "chest5",
+          at: iso(1800e3),
+          money: 129.396,
+          seller: ME,
+          buyer: "x",
+        },
+      ],
+      dismantles: [],
+      averages: {
+        scraps: { "2026-10-03": 0.247778 },
+        steel: { "2026-10-03": 1.789756 },
+      },
+    };
+    state.salesByCode = {
+      tank: {
+        code: "tank",
+        at: iso(),
+        complete: true,
+        fills: fills("tank", [160, 161, 161, 162, 163]).map((f) => ({
+          ...f,
+          skills: { attack: 150, criticalChance: 32 },
+        })),
+      },
+    };
+    render();
+    const text = () => el().textContent;
+    expect(text()).toContain("Your crafts");
+    expect(text()).toContain("Johnny_Sins");
+    expect(requestSales).toHaveBeenCalledWith("boots5"); // the held piece without sales read yet
+    expect(requestSales).not.toHaveBeenCalledWith("chest5"); // sold: nothing to price
+    // 486 × 0.247778 + 16 × 1.789756 = 149.056 g per craft; the tank clears 161 (five sales of crit 32)
+    expect(text()).toContain("149.056");
+    expect(text()).toContain("clears 161.000 g");
+    expect(text()).toContain("5 sales of this roll");
+    expect(text()).toContain("crit chance 32 · attack 159");
+    expect(text()).toContain("sold 129.396 g");
+    // realized on the sold chest: 129.396 − 149.056 = −19.660; the net value waits for the boots' price
+    expect(text()).toContain("19.660");
+    expect(text()).toContain("1 of 2 priced");
+    expect(text()).toContain("1 below epic not counted");
+    expect(el().querySelectorAll(".lens-crafts tbody tr")).toHaveLength(4);
+    // with the boots priced, the held pieces are 161 + 187.25 = 348.25 against 298.112 of inputs: +50.138
+    state.salesByCode.boots5 = {
+      code: "boots5",
+      at: iso(),
+      complete: true,
+      fills: fills("boots5", [187.25, 187.25, 187.25, 187.25, 187.25]).map(
+        (f) => ({ ...f, skills: { dodge: 38 } }),
+      ),
+    };
+    render();
+    expect(text()).toContain("+50.138 g");
+    expect(text()).toContain(
+      "348.250 g at market against 298.112 g of inputs, 2 held unsold",
+    );
+    click('[data-action="desk-window"][data-window="7d"]');
+    render();
+    expect(
+      el()
+        .querySelector('[data-action="desk-window"][data-window="7d"]')
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(text()).toContain("Crafted 7 days");
+  });
+  it("says when the account could not be read off the page, and never shows another account's feed", () => {
+    state.craftsUserId = null;
+    render();
+    expect(el().textContent).toContain("account not found on this page");
+    state.craftsUserId = "697b55e4bcecf3b37667e0d1";
+    state.crafts = {
+      userId: "6993b905cd957d3e93bc35a6",
+      at: iso(),
+      crafts: [],
+      sales: [],
+      dismantles: [],
+      averages: {},
+    };
+    render();
+    expect(el().textContent).toContain("reading…");
+    expect(el().querySelector(".lens-crafts")).toBeNull();
+    state.craftsError = "the API answered 503";
+    render();
+    expect(el().textContent).toContain(
+      "Your crafts could not be read: the API answered 503",
+    );
+  });
 });

@@ -1,6 +1,6 @@
 {
   "name": "warera-plus",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "description": "WarEra Plus: read-only decision support for WarEra (equipment offers, Craft Desk and ledger, cases, travel) with depth-aware quotes and explicit uncertainty.",
   "type": "module",
   "private": true,

@@ -364,6 +364,52 @@
   border-left: 1px solid var(--lens-line);
   cursor: help;
 }
+[data-lens] .lens-own {
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--lens-line);
+}
+[data-lens] .lens-own h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+[data-lens] .lens-own h3 small,
+[data-lens] .lens-crafts small {
+  color: var(--lens-muted);
+  font-weight: 400;
+}
+[data-lens] .lens-windows {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+[data-lens] .lens-windows button[aria-pressed="true"] {
+  background: #2b3a52;
+  border-color: #6a8bb3;
+}
+[data-lens] .lens-crafts {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11.5px;
+  margin: 6px 0;
+}
+[data-lens] .lens-crafts th,
+[data-lens] .lens-crafts td {
+  padding: 3px 4px;
+  text-align: left;
+  border-bottom: 1px solid var(--lens-line);
+  vertical-align: top;
+}
+[data-lens] .lens-crafts thead th {
+  color: var(--lens-muted);
+  font-weight: 600;
+  font-size: 11px;
+}
+[data-lens] .lens-crafts td.lens-num {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
 [data-lens] .lens-detail h3,
 [data-lens] .lens-detail h4,
 [data-lens] .lens-ledger-box h3 {

@@ -3,6 +3,10 @@ import {
   fetchBooks,
   fetchSales,
   fetchEquipmentAvg,
+  fetchOwnActivity,
+  fetchInputAverages,
+  fetchOwner,
+  isId,
   holdUntil,
 } from "./api.mjs";
 import { CASE_CODES, WOODEN_CODES, ALL_GEAR_CODES } from "./cases.mjs";
@@ -75,7 +79,12 @@ export function createController({
     const token = `${generation}:${kind}:${code ?? ""}`;
     return once(token, async () => {
       await ready;
-      const cacheKey = kind === "sales" ? `sales:${code}` : kind;
+      const cacheKey =
+        kind === "sales"
+          ? `sales:${code}`
+          : kind === "crafts"
+            ? `crafts:${code}`
+            : kind;
       const got = await storage.get([
         "settings",
         "rejectedAuthRevision",
@@ -127,6 +136,14 @@ export function createController({
             ...(await fetchSales(fetchImpl, key, code, { now: now() })),
             code,
             hours: 72,
+          };
+        else if (kind === "crafts")
+          // The player's own feed (code is the player id), the input averages that cost it, and the name on it.
+          result = {
+            ...(await fetchOwnActivity(fetchImpl, key, code, { now: now() })),
+            ...(await fetchInputAverages(fetchImpl, key)),
+            ...(await fetchOwner(fetchImpl, key, code)),
+            userId: code,
           };
         else {
           const fetched = await fetchEquipmentAvg(
@@ -201,7 +218,8 @@ export function createController({
               Object.keys(all).filter(
                 (k) =>
                   ["book", "cases", "avg"].includes(k) ||
-                  k.startsWith("sales:"),
+                  k.startsWith("sales:") ||
+                  k.startsWith("crafts:"),
               ),
             );
             await storage.set({ rejectedAuthRevision: authRevision });
@@ -250,7 +268,9 @@ export function createController({
         await storage.remove(
           Object.keys(all).filter(
             (k) =>
-              ["book", "cases", "avg"].includes(k) || k.startsWith("sales:"),
+              ["book", "cases", "avg"].includes(k) ||
+              k.startsWith("sales:") ||
+              k.startsWith("crafts:"),
           ),
         );
         await storage.remove("rejectedAuthRevision");
@@ -269,7 +289,10 @@ export function createController({
     return serial(async () => {
       const all = await storage.get(null);
       const keys = Object.keys(all).filter(
-        (k) => ["book", "cases", "avg"].includes(k) || k.startsWith("sales:"),
+        (k) =>
+          ["book", "cases", "avg"].includes(k) ||
+          k.startsWith("sales:") ||
+          k.startsWith("crafts:"),
       );
       const ordered = keys
         .filter((k) => k.startsWith("sales:"))
@@ -419,10 +442,16 @@ export function createController({
             capped: merged.capped,
           };
         });
-      if (["book", "cases", "avg", "sales"].includes(msg?.type)) {
+      if (["book", "cases", "avg", "sales", "crafts"].includes(msg?.type)) {
         if (msg.type === "sales" && !ITEM_CODES.has(msg.itemCode))
           return { error: "bad-item", message: "Unknown equipment item" };
-        return read(msg.type, !!msg.force, msg.itemCode);
+        if (msg.type === "crafts" && !isId(msg.userId))
+          return { error: "bad-user", message: "Unknown player id" };
+        return read(
+          msg.type,
+          !!msg.force,
+          msg.type === "crafts" ? msg.userId : msg.itemCode,
+        );
       }
       return {
         error: "unknown-message",

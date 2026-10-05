@@ -20,6 +20,8 @@
     "extension/lib/offers.mjs",
     "extension/lib/craft.mjs",
     "extension/lib/craftdata.mjs",
-    "extension/lib/ledger.mjs"
+    "extension/lib/ledger.mjs",
+    "extension/lib/stats.mjs",
+    "extension/lib/observed.mjs"
   ]
 }

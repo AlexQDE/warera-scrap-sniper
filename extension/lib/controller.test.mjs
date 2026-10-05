@@ -515,4 +515,85 @@ describe("background controller", () => {
     );
     expect(cleared.settings.craftRecipes).toEqual({});
   });
+  it("reads the player's own feed as 'crafts' keyed by the player id, caches it with the account, and refuses a bad id", async () => {
+    const ME = "697b55e4bcecf3b37667e0d1";
+    const craftRow = {
+      _id: "tx1",
+      itemCode: "scraps",
+      quantity: 486,
+      sellerId: ME,
+      buyerId: ME,
+      transactionType: "craftItem",
+      item: {
+        _id: "6ac36a2b68df4b72cecefc0d",
+        code: "boots5",
+        skills: { dodge: 38 },
+        state: 100,
+      },
+      createdAt: new Date(NOW - 3600e3).toISOString(),
+    };
+    const f = vi.fn(async (url) => {
+      const u = new URL(url);
+      const input = JSON.parse(u.searchParams.get("input"));
+      const proc = u.pathname.split("/").pop();
+      if (proc === "transaction.getPaginatedTransactions")
+        return response({
+          items: input.transactionType === "craftItem" ? [craftRow] : [],
+          nextCursor: null,
+        });
+      if (proc === "itemTrading.getItemTrading")
+        return response({
+          itemCode: input.itemCode,
+          values: [
+            {
+              valueAt: "2026-09-16",
+              avgValue: input.itemCode === "scraps" ? 0.25 : 1.8,
+            },
+          ],
+        });
+      if (proc === "user.getUserLite")
+        return response({ _id: ME, username: "Johnny_Sins" });
+      return response();
+    });
+    const { controller, storage } = setup(f);
+    expect(
+      (await controller.handle({ type: "crafts", userId: "nope" })).error,
+    ).toBe("bad-user");
+    expect(
+      (await controller.handle({ type: "crafts", userId: "../settings" }))
+        .error,
+    ).toBe("bad-user");
+    const r = await controller.handle({ type: "crafts", userId: ME });
+    expect(r.error).toBeUndefined();
+    expect(r.crafts.userId).toBe(ME);
+    expect(r.crafts.username).toBe("Johnny_Sins");
+    expect(r.crafts.crafts).toEqual([
+      {
+        id: "6ac36a2b68df4b72cecefc0d",
+        code: "boots5",
+        skills: { dodge: 38 },
+        at: craftRow.createdAt,
+        scraps: 486,
+      },
+    ]);
+    expect(r.crafts.averages).toEqual({
+      scraps: { "2026-09-16": 0.25 },
+      steel: { "2026-09-16": 1.8 },
+    });
+    expect(r.crafts.complete).toEqual({
+      crafts: true,
+      sales: true,
+      dismantles: true,
+    });
+    expect(storage.data[`crafts:${ME}`].cacheVersion).toBe(CACHE_VERSION);
+    const calls = f.mock.calls.length;
+    await controller.handle({ type: "crafts", userId: ME });
+    expect(f.mock.calls.length).toBe(calls); // a fresh cache is reused
+    // the feed is the account's: a new key drops it with the other account data
+    await controller.handle(
+      { type: "saveSettings", settings: { apiKey: "another-key" } },
+      { trusted: true },
+    );
+    expect(storage.data[`crafts:${ME}`]).toBeUndefined();
+  });
 });

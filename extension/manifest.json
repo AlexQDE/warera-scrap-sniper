@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "WarEra Plus",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "minimum_chrome_version": "105",
   "description": "Read-only decision support for WarEra: scrap profit and resale evidence on equipment offers, a Craft Desk with a personal ledger, case and travel values. Your own API key, explicit uncertainty.",
   "icons": {
@@ -59,7 +59,9 @@
         "lib/craft.mjs",
         "lib/craftdata.mjs",
         "lib/craftdesk.mjs",
-        "lib/ledger.mjs"
+        "lib/ledger.mjs",
+        "lib/observed.mjs",
+        "lib/stats.mjs"
       ],
       "matches": ["https://app.warera.io/*"]
     }

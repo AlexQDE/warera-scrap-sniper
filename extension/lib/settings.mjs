@@ -33,6 +33,10 @@ export const DEFAULTS = Object.freeze({
   taxPct: /** @type {number | null} */ (null),
   craftRecipes:
     /** @type {Record<string, { scraps: number, steel: number }>} */ ({}),
+  /** The player's own id for the observed crafts; null means "read it off the game page's own-profile links". */
+  userId: /** @type {string | null} */ (null),
+  /** How the player crafts: "random" lets the game pick the slot at the base steel fee, "chosen" doubles the steel. */
+  craftSteelMode: /** @type {"random" | "chosen"} */ ("random"),
   schemaVersion: 3,
 });
 /** @param {unknown} value @param {number} min @param {number} max @param {number} fallback */
@@ -87,5 +91,9 @@ export function preferences(input = {}) {
     ),
     taxPct: taxRate(input.taxPct),
     craftRecipes: normalizeRecipes(input.craftRecipes),
+    userId: /^[0-9a-f]{24}$/.test(String(input.userId ?? "").trim())
+      ? String(input.userId).trim()
+      : null,
+    craftSteelMode: input.craftSteelMode === "chosen" ? "chosen" : "random",
   };
 }

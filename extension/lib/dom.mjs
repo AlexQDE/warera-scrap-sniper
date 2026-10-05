@@ -430,6 +430,25 @@ export function taxRateFromText(text) {
 }
 
 /**
+ * The logged-in player's own id, read off the page's own-profile links: the
+ * header links to `/user/<id>/inventory` and `/user/<id>/skills` for the
+ * player, never for anyone else (chat and ranking links point at `/user/<id>`
+ * with no such suffix). Two different ids on one page, or none, is null;
+ * the player can then set the id in settings.
+ * @param {ParentNode} [root]
+ */
+export function ownUserId(root = document) {
+  const ids = new Set();
+  for (const a of root.querySelectorAll('a[href^="/user/"]')) {
+    const m = /^\/user\/([0-9a-f]{24})\/(inventory|skills)$/.exec(
+      a.getAttribute("href") ?? "",
+    );
+    if (m) ids.add(m[1]);
+  }
+  return ids.size === 1 ? [...ids][0] : null;
+}
+
+/**
  * The inventory picker that "New item offer" -> "+" opens: a dialog whose text
  * starts with "Item" and that lists every owned piece as a skin image in a
  * rarity-bordered tile (450 of them for a full inventory, read 2026-09-03).

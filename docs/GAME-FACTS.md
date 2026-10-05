@@ -238,7 +238,53 @@ In order of value, each small enough for one commit with tests:
 Status: 1 to 4 and 6 shipped in 1.7.0 (`ladder.mjs` carries the table and
 the odds, `craftdata.mjs` the shipped recipes, the overrides and the random
 craft, `craft.mjs` the reroll floor; the desk passes the buyer-side tax mode
-and the notice parser reads both word orders). 5 is open.
+and the notice parser reads both word orders). 5 shipped in 1.8.0 as
+`stats.mjs` (fills now carry `skills`); the stat's place in its range on an
+offer's Details is still open.
+
+## 10. The community ledger's method, verified (2026-10-05)
+
+warera-prices.web.app/ledger replays a player's own feed in the browser with
+the player's API key. Read against the feed for one account (8 legendary
+crafts that morning, slot drawn at random, all still held):
+
+- **Cost = the recipe at the craft day's average input prices, random-craft
+  steel.** `itemTrading.getItemTrading {itemCode}` (keyed, bucket 500)
+  returns 30 daily rows `{valueAt, avgValue, totalValue, totalQuantity,
+transactionsCount}`. On 2026-10-05 scraps averaged 0.247778 and steel
+  1.789756: 486 × 0.247778 + 16 × 1.789756 = 149.056 per craft, × 8 =
+  1,192.45 against the site's 1,192.46. The chosen-slot fee (32 steel) would
+  give 177.69. **MEASURED** on the site's own numbers.
+- **The per-piece figures on its Desk tab are not costs.** Each is the
+  piece's clearing price × 1.01, the viewer's 1% buyer tax (Mali): 162.610
+  = 161.000 × 1.01, and so on for all seven. A second corroboration of §5.
+- **"Clears" = the median of recent sales of the same roll value.** For
+  the seven held pieces the median over the exact roll in the last 72 h
+  came within 2% of the site's figure (chest5 at 46 and 47 clear
+  differently, 129.396 and 131.231, so the site prices per roll value, not
+  per band); the fifth-of-range band and the whole item were further off.
+  The site's window is unknown; the 24-hour exact-roll median matched four
+  of seven to the cent.
+- **"At market" is the plain sum of the held pieces' clears**: 161.000 +
+  121.775 + 129.396 × 2 + 131.231 + 167.990 + 122.251 + 187.250 = 1,150.29.
+- **The headline counts epic and up** ("5 below epic not counted"), reports
+  "crafting today" as the realized result on pieces that are gone and "net
+  value" as the held pieces' clears against their inputs.
+- **"Sells 2.8h"** on a piece is the typical wait for that roll; fills
+  carry `offerCreatedAt`, so it is the median of createdAt − offerCreatedAt
+  over the roll's sales. Not shipped yet.
+- **The player's own feed**: `transaction.getPaginatedTransactions` takes
+  `userId` with the key (documented filter; a wrong id answers an empty
+  list, not an error). A craft row's `item` is the OUTPUT piece with `_id`,
+  `code`, `skills`, `state 100`; its `quantity` is the scraps consumed and
+  the steel is nowhere in the feed. A later sale (`sellerId` = the player)
+  or dismantle with the same `item._id` closes the craft; across 200 crafts,
+  75 sales and 100 dismantles of one account every join was by that id.
+- **The player's own id** is on the game page: the header links
+  `/user/<id>/inventory` and `/user/<id>/skills` are the logged-in player's
+  (chat and ranking links point at bare `/user/<id>`); `user.getUserLite
+{userId}` answers the key with the username. `user.getMe` stays
+  session-only.
 
 Separately, the author's local 1.5.2 (labelled stat reading in
 `statsdom.mjs`, `market.mjs` skills, the bounded Load-more loader) is still

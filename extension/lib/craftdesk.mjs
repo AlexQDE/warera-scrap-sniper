@@ -43,6 +43,14 @@ import {
 } from "./ledger.mjs";
 import { RARITIES, SLOTS } from "./items.mjs";
 import { itemLabel } from "./dom.mjs";
+import {
+  replayCrafts,
+  rollValue,
+  craftsSummary,
+  dayOf,
+  MIN_ROLL_SAMPLE,
+  COUNTED_FROM,
+} from "./observed.mjs";
 
 export const DESK_ID = "warera-plus-craft";
 const SLOT_HEADS = ["weapon", ...SLOTS];
@@ -105,8 +113,10 @@ export function createCraftDesk({
   let status = null; // one-line ledger feedback
   let lastState = null;
   let busy = false;
+  let craftWindow = "today"; // the window of the player's own crafts shown: today (UTC) or 7 days
   const outcomesMemo = new Map(); // code|sales.at|tax -> outcomes
   const cellMemo = new Map(); // code -> { key, html, plan }
+  const replayMemo = { key: "", entries: [] }; // the player's feed replayed, per read and steel mode
 
   function reset() {
     manual = {};
@@ -116,6 +126,7 @@ export function createCraftDesk({
     pending = null;
     importOpen = false;
     status = null;
+    craftWindow = "today";
     cellMemo.clear();
   }
   function clear() {
@@ -205,6 +216,9 @@ export function createCraftDesk({
       selected = t.dataset.code;
       delete fields["recipe-scraps"];
       delete fields["recipe-steel"];
+      rescan();
+    } else if (a === "desk-window") {
+      craftWindow = t.dataset.window === "7d" ? "7d" : "today";
       rescan();
     } else if (a === "desk-quotes") {
       // Back to the market's prices: only the typed scrap and steel prices go; a recipe, a pending price or a pasted import being entered stays.
@@ -766,6 +780,125 @@ export function createCraftDesk({
     );
     return out.join("");
   }
+  /** Words for the stat keys on the crafts table. */
+  const STAT_WORDS = {
+    attack: "attack",
+    criticalChance: "crit chance",
+    criticalDamages: "crit damage",
+    armor: "armor",
+    precision: "precision",
+    dodge: "dodge",
+  };
+  /**
+   * The player's own crafts of the window, replayed from the feed the worker
+   * read: cost at the craft day's averages, fate by item id, held pieces at
+   * what their roll clears at. The headline words mirror the community
+   * ledger's so the two can be compared side by side.
+   */
+  function ownCraftsHtml(state, s) {
+    const id = state.craftsUserId ?? null;
+    const c = state.crafts;
+    const box = (sub, body) =>
+      `<section class="lens-own"><h3>Your crafts <small>${sub}</small></h3>${body}</section>`;
+    if (!id)
+      return box(
+        "account not found on this page",
+        `<p class="lens-muted">The page did not show your own inventory or skills link, so your crafts cannot be read. Set your player id in the extension's Advanced settings (the 24 characters in your profile URL).</p>`,
+      );
+    if (!c || c.userId !== id)
+      return box(
+        state.craftsError ? "read failed" : "reading…",
+        `<p class="lens-muted">${state.craftsError ? `Your crafts could not be read: ${esc(state.craftsError)}. Refresh retries.` : "Reading your crafts, sales and dismantles of the last 7 days from the game's feed."}</p>`,
+      );
+    const key = `${c.at}|${c.userId}|${s.craftSteelMode}`;
+    if (replayMemo.key !== key) {
+      replayMemo.key = key;
+      replayMemo.entries = replayCrafts({
+        crafts: c.crafts,
+        sales: c.sales,
+        dismantles: c.dismantles,
+        me: c.userId,
+        averages: c.averages,
+        steelMode: s.craftSteelMode,
+      }).sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
+    }
+    const entries = replayMemo.entries;
+    const today = dayOf(new Date(now()).toISOString());
+    const from =
+      craftWindow === "7d"
+        ? dayOf(new Date(now() - 6 * 86400e3).toISOString())
+        : today;
+    const valueOf = (e) =>
+      rollValue(e.code, e.skills, state.salesByCode?.[e.code]?.fills ?? []);
+    const sum = craftsSummary(entries, { from, to: today, valueOf });
+    const shown = entries.filter((e) => e.day >= from && e.day <= today);
+    // The sales that price the held pieces, asked for one item at a time as the panel's are.
+    const want = [
+      ...new Set(
+        shown
+          .filter(
+            (e) =>
+              e.fate === "held" &&
+              RARITIES.indexOf(String(e.rarity)) >= COUNTED_FROM,
+          )
+          .map((e) => e.code),
+      ),
+    ].slice(0, 8);
+    for (const code of want)
+      if (!state.salesByCode?.[code] && !state.salesErrors?.[code])
+        requestSales(code);
+    const unrealizedCls =
+      sum.unrealized == null
+        ? ""
+        : sum.unrealized >= 0
+          ? "lens-pos"
+          : "lens-neg";
+    const realizedCls = !sum.goneKnown
+      ? ""
+      : sum.realized >= 0
+        ? "lens-pos"
+        : "lens-neg";
+    const windowWord = craftWindow === "7d" ? "7 days" : "today";
+    const tiles = `<div class="lens-grid3"><div><small>Crafting · ${windowWord}</small><b class="${realizedCls}">${sum.goneKnown ? `${signed(sum.realized)} g` : "–"}</b><span>${sum.goneKnown ? `realized on ${sum.sold + sum.scrapped} gone (${sum.sold} sold, ${sum.scrapped} scrapped)${sum.realizedPct != null ? ` · ${pct(sum.realizedPct, 1)}` : ""}` : `${sum.crafted} crafted — ${sum.held} still yours, not counted here`}${sum.below ? ` · ${sum.below} below epic not counted` : ""}</span></div><div><small>Net value</small><b class="${unrealizedCls}">${sum.unrealized != null ? `${signed(sum.unrealized)} g` : "–"}</b><span>${sum.held ? `${sum.covered === sum.held ? fmt(sum.atMarket) : `${fmt(sum.atMarket)} (${sum.covered} of ${sum.held} priced)`} g at market against ${fmt(sum.heldCost)} g of inputs, ${sum.held} held unsold` : "nothing held"}</span></div><div><small>Crafted ${windowWord}</small><b>${sum.crafted}</b><span>${sum.counted} counted (epic and up) · ${sum.held} held · ${sum.sold} sold · ${sum.scrapped} scrapped</span></div></div>`;
+    const rows = shown.slice(0, 40).map((e) => {
+      const v = e.fate === "held" ? valueOf(e) : null;
+      const stat =
+        e.stat && e.skills?.[e.stat] != null
+          ? `${STAT_WORDS[e.stat] ?? e.stat} ${e.skills[e.stat]}${e.slot === "weapon" && e.skills.attack != null ? ` · attack ${e.skills.attack}` : ""}`
+          : "roll unknown";
+      const worth =
+        e.fate === "sold"
+          ? `sold ${fmt(e.proceeds)} g`
+          : e.fate === "scrapped"
+            ? `scrapped${e.proceeds != null ? `: ${fmt(e.proceeds)} g in scraps` : ""}`
+            : v?.value != null
+              ? `clears ${fmt(v.value)} g <small>${v.level === "roll" ? `${v.n} sales of this roll` : v.level === "band" ? `${v.n} sales at ${v.band?.lo}–${v.band?.hi}` : `${v.n} sales of the item, any roll`}</small>`
+              : `<small>${state.salesErrors?.[e.code] ? "sales read failed" : state.salesByCode?.[e.code] ? `needs ${MIN_ROLL_SAMPLE} recent sales` : "reading sales…"}</small>`;
+      const pnl =
+        e.cost == null
+          ? null
+          : e.fate === "held"
+            ? v?.value == null
+              ? null
+              : v.value - e.cost
+            : e.proceeds == null
+              ? null
+              : e.proceeds - e.cost;
+      const cls = pnl == null ? "" : pnl >= 0 ? "lens-pos" : "lens-neg";
+      const when = new Date(e.at);
+      const time = `${String(when.getHours()).padStart(2, "0")}:${String(when.getMinutes()).padStart(2, "0")}`;
+      return `<tr><td>${craftWindow === "7d" ? `${esc(localDate(e.at))} ` : ""}${time}</td><td>${esc(itemLabel(e.code))}</td><td>${esc(stat)}</td><td class="lens-num">${e.cost == null ? "–" : fmt(e.cost)}</td><td>${worth}</td><td class="lens-num ${cls}">${pnl == null ? "–" : signed(pnl)}</td></tr>`;
+    });
+    const covered =
+      c.complete?.crafts && c.complete?.sales && c.complete?.dismantles;
+    const who = c.username
+      ? esc(c.username)
+      : `player …${esc(String(id).slice(-6))}`;
+    return box(
+      `${who} · ${c.days} days of your feed · read ${timeLabel(c.at, now())}${state.craftsBusy ? " · refreshing" : ""}`,
+      `<div class="lens-windows"><button type="button" data-action="desk-window" data-window="today" aria-pressed="${craftWindow !== "7d"}">Today</button><button type="button" data-action="desk-window" data-window="7d" aria-pressed="${craftWindow === "7d"}">7 days</button></div>${tiles}${rows.length ? `<table class="lens-crafts"><thead><tr><th>When</th><th>Item</th><th>Roll</th><th>Cost</th><th>Now</th><th>P&amp;L</th></tr></thead><tbody>${rows.join("")}</tbody></table>${shown.length > 40 ? `<p class="lens-muted">${shown.length - 40} more not listed.</p>` : ""}` : `<p class="lens-muted">No crafts of yours ${craftWindow === "7d" ? "in the last 7 days" : "today (UTC)"} in the feed.</p>`}<p class="lens-muted">Cost = the recipe at the craft day's average scrap and steel prices (${s.craftSteelMode === "chosen" ? "chosen-slot steel, twice the fee" : "random-craft steel fee"}; change it in settings) · "clears" = the median of recent sales of the same roll, else of its band, else of the item · fates joined to your sales and dismantles by item id · days are UTC${covered ? "" : " · the feed was not fully covered (page cap), older rows may be missing"}.</p>`,
+    );
+  }
   function ledgerHtml(state, tax) {
     const ledger = state.ledger;
     if (!ledger)
@@ -876,7 +1009,7 @@ export function createCraftDesk({
       setHtml(
         desk,
         head +
-          `<p class="lens-muted">Compare crafting by tier and slot, buy now against placed bids, break-even ceilings, listing guidance and your craft ledger. Open Details.</p>`,
+          `<p class="lens-muted">Your own crafts replayed from the feed (cost, what each roll clears at, profit or loss), crafting by tier and slot, buy now against placed bids, break-even ceilings, listing guidance and your craft ledger. Open Details.</p>`,
       );
       return { roots: [desk.parentElement] };
     }
@@ -944,7 +1077,7 @@ export function createCraftDesk({
         : "";
     const html =
       head +
-      `<div class="lens-desk"><div class="lens-inputs"><label>Scrap price ${numberField("scrapPrice", manual.scrapPrice ?? prices.scrap.value ?? "")}<small>${esc(prices.scrap.note)}</small></label><label>Steel price ${numberField("steelPrice", manual.steelPrice ?? prices.steel.value ?? "")}<small>${esc(prices.steel.note)}</small></label><label>Batch ${numberField("batch", s.craftBatch, "1", 'max="1000" inputmode="numeric"')}<small>crafts</small></label><label>Market tax % ${numberField("taxPct", s.taxPct ?? (tax.source === "page" ? tax.value : ""), "0.01", 'max="100" placeholder="' + esc(tax.source === "page" ? `${tax.value} (page)` : "0") + '"')}<small>${esc(tax.source === "manual" ? "your rate (the buyer's, by country)" : tax.source === "page" ? "read off the page notice" : "none read; the tax is the buyer's, so the listing is what you keep")}</small></label><label>Target ROI % ${numberField("targetPct", s.craftTargetPct, "1", 'min="-50" max="500"')}<small>for the ceilings</small></label><button type="button" data-action="desk-quotes">Use quotes</button></div>` +
+      `<div class="lens-desk">${ownCraftsHtml(state, s)}<div class="lens-inputs"><label>Scrap price ${numberField("scrapPrice", manual.scrapPrice ?? prices.scrap.value ?? "")}<small>${esc(prices.scrap.note)}</small></label><label>Steel price ${numberField("steelPrice", manual.steelPrice ?? prices.steel.value ?? "")}<small>${esc(prices.steel.note)}</small></label><label>Batch ${numberField("batch", s.craftBatch, "1", 'max="1000" inputmode="numeric"')}<small>crafts</small></label><label>Market tax % ${numberField("taxPct", s.taxPct ?? (tax.source === "page" ? tax.value : ""), "0.01", 'max="100" placeholder="' + esc(tax.source === "page" ? `${tax.value} (page)` : "0") + '"')}<small>${esc(tax.source === "manual" ? "your rate (the buyer's, by country)" : tax.source === "page" ? "read off the page notice" : "none read; the tax is the buyer's, so the listing is what you keep")}</small></label><label>Target ROI % ${numberField("targetPct", s.craftTargetPct, "1", 'min="-50" max="500"')}<small>for the ceilings</small></label><button type="button" data-action="desk-quotes">Use quotes</button></div>` +
       `<table class="lens-matrix"><caption>Expected ROI by tier and slot · the game's recipes, slot chosen${overrides ? ` (${overrides} overridden by you)` : ""}; random = the game picks the slot at half the steel${best}</caption><thead><tr><th>Tier</th>${SLOT_HEADS.map((h) => `<th>${h}</th>`).join("")}<th title="${esc(RANDOM_ODDS_TEXT)}">random</th></tr></thead><tbody>${matrix.join("")}</tbody></table>` +
       `<section class="lens-detail">${selected ? detailHtml(selected, state, s, tax, prices, recipes) : '<p class="lens-muted">Pick a cell to work a craft through: recipe, cost, buying now or bidding, expected value over its outcomes, break-even ceilings and listing guidance.</p>'}</section>` +
       `<section class="lens-ledger-box">${ledgerHtml(state, tax)}</section>` +

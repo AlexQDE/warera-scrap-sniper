@@ -12,7 +12,24 @@ describe("craft desk preferences", () => {
       craftTargetPct: 20,
       taxPct: null,
       craftRecipes: {},
+      userId: null,
+      craftSteelMode: "random",
     });
+  });
+  it("keeps a 24-hex player id and the chosen-slot mode, and drops anything else", () => {
+    expect(
+      prefs({
+        userId: " 697b55e4bcecf3b37667e0d1 ",
+        craftSteelMode: "chosen",
+      }),
+    ).toMatchObject({
+      userId: "697b55e4bcecf3b37667e0d1",
+      craftSteelMode: "chosen",
+    });
+    expect(prefs({ userId: "../settings", craftSteelMode: "x" })).toMatchObject(
+      { userId: null, craftSteelMode: "random" },
+    );
+    expect(prefs({ userId: 42 }).userId).toBeNull();
   });
   it("clamps the numbers, keeps a decimal tax rate, and validates recipes by code", () => {
     const p = prefs({

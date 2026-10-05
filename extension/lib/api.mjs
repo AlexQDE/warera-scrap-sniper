@@ -40,6 +40,21 @@ export const salesUrl = (itemCode, cursor) =>
     limit: 100,
     ...(cursor ? { cursor } : {}),
   });
+/** The player's own rows of one transaction type, newest first (openapi: userId is a documented filter; probed 2026-10-05 with the key). */
+export const ownUrl = (type, userId, cursor) =>
+  withInput("transaction.getPaginatedTransactions", {
+    transactionType: type,
+    userId,
+    limit: 100,
+    ...(cursor ? { cursor } : {}),
+  });
+/** Daily average prices of one resource over the last 30 days (what the game's own price history is built from). */
+export const tradingUrl = (itemCode) =>
+  withInput("itemTrading.getItemTrading", { itemCode });
+/** A player's public card, for the username behind an id. */
+export const userUrl = (userId) => withInput("user.getUserLite", { userId });
+/** A 24-hex Mongo id, the shape of every user and item id in the game. */
+export const isId = (value) => /^[0-9a-f]{24}$/.test(String(value ?? ""));
 
 export class ApiError extends Error {
   constructor(message, code, extra = {}) {
@@ -221,6 +236,10 @@ export async function fetchSales(
         at: it.createdAt,
         state: it.item?.state ?? null,
         code: it.item?.code ?? it.itemCode,
+        // the roll that sold, and when it was listed: what a stat is worth and how long it waited
+        skills: skillsOf(it.item),
+        listedAt:
+          typeof it.offerCreatedAt === "string" ? it.offerCreatedAt : null,
       });
     }
     if (complete) break;
@@ -234,6 +253,181 @@ export async function fetchSales(
     cursors.add(cursor);
   }
   return { fills, pages, complete };
+}
+
+/** An item's stat object with numeric values only; null when the row carries none. */
+function skillsOf(item) {
+  const raw = item?.skills;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const out = {};
+  for (const [k, v] of Object.entries(raw))
+    if (Number.isFinite(Number(v))) out[k] = Number(v);
+  return Object.keys(out).length ? out : null;
+}
+
+/**
+ * The player's own crafts, item-market rows and dismantles back `days`
+ * days, each type walked newest first at most `maxPages` pages of 100 and
+ * cut at the window; `complete` says per type whether the window was
+ * covered. Rows are reduced to what the replay needs; a craft row's `item`
+ * is the OUTPUT piece (state 100, with its roll), its `quantity` the scraps
+ * it consumed (probed 2026-10-05, docs/GAME-FACTS.md §3 and §10).
+ */
+export async function fetchOwnActivity(
+  fetchImpl,
+  key,
+  userId,
+  { days = 7, maxPages = 5, now = Date.now(), timeoutMs = TIMEOUT_MS } = {},
+) {
+  const k = cleanKey(key);
+  const id = String(userId ?? "");
+  if (!isId(id)) throw new ApiError("Invalid player id", "schema");
+  const cutoff = now - days * 86400e3;
+  const walk = async (type) => {
+    const rows = [];
+    const cursors = new Set();
+    const ids = new Set();
+    let cursor;
+    let pages = 0;
+    let complete = false;
+    while (pages < maxPages) {
+      const { data } = await call(fetchImpl, k, ownUrl(type, id, cursor), {
+        timeoutMs,
+      });
+      pages++;
+      if (!Array.isArray(data?.items))
+        throw new ApiError("Unexpected transactions schema", "schema");
+      for (const it of data.items) {
+        const at = Date.parse(it?.createdAt);
+        if (!Number.isFinite(at) || at > now + 5000) continue;
+        if (at < cutoff) {
+          complete = true;
+          break;
+        }
+        if (it._id && ids.has(it._id)) continue;
+        if (it._id) ids.add(it._id);
+        rows.push(it);
+      }
+      if (complete) break;
+      if (!data.nextCursor || data.items.length === 0) {
+        complete = true;
+        break;
+      }
+      if (typeof data.nextCursor !== "string" || cursors.has(data.nextCursor))
+        throw new ApiError("Invalid or repeated transactions cursor", "schema");
+      cursor = data.nextCursor;
+      cursors.add(cursor);
+    }
+    return { rows, pages, complete };
+  };
+  const c = await walk("craftItem");
+  const s = await walk("itemMarket");
+  const d = await walk("dismantleItem");
+  const crafts = c.rows.flatMap((it) =>
+    isId(it.item?._id) && typeof it.item?.code === "string"
+      ? [
+          {
+            id: it.item._id,
+            code: it.item.code,
+            skills: skillsOf(it.item),
+            at: it.createdAt,
+            scraps: Number(it.quantity) || 0,
+          },
+        ]
+      : [],
+  );
+  const sales = s.rows.flatMap((it) =>
+    positive(it.money) == null
+      ? []
+      : [
+          {
+            itemId: isId(it.item?._id) ? it.item._id : null,
+            code: it.item?.code ?? it.itemCode ?? null,
+            at: it.createdAt,
+            money: Number(it.money),
+            seller: isId(it.sellerId) ? it.sellerId : null,
+            buyer: isId(it.buyerId) ? it.buyerId : null,
+            listedAt:
+              typeof it.offerCreatedAt === "string" ? it.offerCreatedAt : null,
+          },
+        ],
+  );
+  const dismantles = d.rows.flatMap((it) =>
+    isId(it.item?._id)
+      ? [
+          {
+            itemId: it.item._id,
+            code: it.item?.code ?? null,
+            at: it.createdAt,
+            scraps: Number(it.quantity) || 0,
+          },
+        ]
+      : [],
+  );
+  return {
+    crafts,
+    sales,
+    dismantles,
+    complete: { crafts: c.complete, sales: s.complete, dismantles: d.complete },
+    pages: c.pages + s.pages + d.pages,
+    days,
+  };
+}
+
+/**
+ * The daily average price of each resource, keyed by UTC day: what the
+ * ledger prices a craft day's inputs at. A day without a usable value is
+ * left out, never filled in.
+ */
+export async function fetchInputAverages(
+  fetchImpl,
+  key,
+  codes = ["scraps", "steel"],
+  { timeoutMs = TIMEOUT_MS } = {},
+) {
+  const k = cleanKey(key);
+  const averages = {};
+  for (const code of codes) {
+    const { data } = await call(fetchImpl, k, tradingUrl(code), { timeoutMs });
+    if (!Array.isArray(data?.values))
+      throw new ApiError("Unexpected item trading schema", "schema");
+    const table = {};
+    for (const v of data.values) {
+      const day = String(v?.valueAt ?? "");
+      const avg = positive(v?.avgValue);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(day) && avg != null) table[day] = avg;
+    }
+    averages[code] = table;
+  }
+  return { averages };
+}
+
+/**
+ * The username behind a player id, for the desk's "Your crafts" header. A
+ * failure other than a rejected key or a rate limit leaves it unknown.
+ */
+export async function fetchOwner(
+  fetchImpl,
+  key,
+  userId,
+  { timeoutMs = TIMEOUT_MS } = {},
+) {
+  const k = cleanKey(key);
+  try {
+    const { data } = await call(fetchImpl, k, userUrl(String(userId)), {
+      timeoutMs,
+    });
+    return {
+      username: typeof data?.username === "string" ? data.username : null,
+    };
+  } catch (e) {
+    if (
+      e instanceof ApiError &&
+      ["key-rejected", "rate-limited", "no-key"].includes(e.code)
+    )
+      throw e;
+    return { username: null };
+  }
 }
 
 // ---------------------------------------------------------------- v0.26 cases -
