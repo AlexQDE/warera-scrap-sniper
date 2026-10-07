@@ -3,9 +3,11 @@
 // each craft cost, what became of it, and what its roll clears at now. Pure
 // functions over rows the worker already validated (api.fetchOwnActivity).
 //
-// The method is the community ledger's (warera-prices.web.app/ledger),
-// checked against it on 2026-10-05 for one account: cost reproduced to the
-// cent, clears within 2% on every held piece (docs/GAME-FACTS.md §10).
+// The method was checked on 2026-10-05, for one account, against the
+// community ledger site: cost reproduced to the cent, clears within 2% on
+// every held piece (docs/GAME-FACTS.md §10). That site has since gone
+// offline (Firebase "Site Not Found" on 2026-10-07); the extension's own
+// rules, the three below, are the reference now.
 //   cost    the recipe at the craft day's average scrap and steel prices
 //           (itemTrading.getItemTrading), with the random-craft steel fee
 //           unless the player says they choose the slot

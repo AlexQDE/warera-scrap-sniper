@@ -83,8 +83,32 @@ const feedFake = (byType, extra = {}) => {
   return { fetchImpl, calls };
 };
 
+/** The transaction type a recorded request asked for. */
+const typeOf = (call) =>
+  JSON.parse(new URL(call.url).searchParams.get("input")).transactionType;
+/** An ISO time `ms` before another. */
+const before = (iso, ms) => new Date(Date.parse(iso) - ms).toISOString();
+/** A fresh 24-hex item id: a 20-hex stem and a 4-digit counter. */
+const oid = (stem, n) => `${stem}${String(n).padStart(4, "0")}`;
+const CRAFT_STEM = "6ac36a2b68df4b72cece";
+const SALE_STEM = "6ac36a2b68df4b72cecf";
+const DISMANTLE_STEM = "6ac36a2b68df4b72ced0";
+/** A full page of 100 rows from `make(id, hoursAgo)`, hoursAgo rising row by row, with a cursor to the next page. */
+const crowd = (i, stem, firstHoursAgo, make) => ({
+  items: Array.from({ length: 100 }, (_, j) =>
+    make(oid(stem, i * 100 + j), firstHoursAgo + (i * 100 + j) / 1000),
+  ),
+  next: `c${i + 1}`,
+});
+const crowdCrafts = (i) =>
+  crowd(i, CRAFT_STEM, 1, (id, h) => craft(id, "jet", {}, h));
+const crowdSales = (i) =>
+  crowd(i, SALE_STEM, 0.1, (id, h) => sale(id, "jet", 2, h));
+const crowdDismantles = (i) =>
+  crowd(i, DISMANTLE_STEM, 0.1, (id, h) => dismantle(id, "jet", 6, h));
+
 describe("fetchOwnActivity", () => {
-  it("walks the player's crafts, market rows and dismantles with the key, cut at the window, reduced to what the replay needs", async () => {
+  it("walks the player's crafts (cut at the window), then market rows and dismantles (cut at the oldest craft) with the key, reduced to what the replay needs", async () => {
     const { fetchImpl, calls } = feedFake({
       craftItem: [
         {
@@ -106,10 +130,18 @@ describe("fetchOwnActivity", () => {
             sale(ID_A, "chest1", 2.5, 0.5),
             sale(ID_C, "boots5", 187.25, 0.7, "6993b905cd957d3e93bc35a6"),
             { ...sale("x", "jet", 0, 1), money: 0 }, // no money: dropped
+            sale("6ac2ca4de557c722fd5b2f98", "jet", 9, 5), // older than the oldest craft, inside the window: cut
           ],
         },
       ],
-      dismantleItem: [{ items: [dismantle(ID_C, "pants1", 6, 0.2)] }],
+      dismantleItem: [
+        {
+          items: [
+            dismantle(ID_C, "pants1", 6, 0.2),
+            dismantle("6ac2ca4de557c722fd5b2f97", "jet", 6, 5), // likewise cut
+          ],
+        },
+      ],
     });
     const r = await fetchOwnActivity(fetchImpl, "my-key", ME, {
       now: NOW,
@@ -164,26 +196,167 @@ describe("fetchOwnActivity", () => {
     expect(r.pages).toBe(4);
     expect(r.days).toBe(7);
   });
-  it("caps the pages per type and says the window was not covered", async () => {
-    const page = (i) => ({
-      items: Array.from({ length: 100 }, (_, j) =>
-        craft(
-          `6ac36a2b68df4b72cece${String(i * 100 + j).padStart(4, "0")}`,
-          "jet",
-          {},
-          1 + (i * 100 + j) / 1000,
-        ),
-      ),
-      next: `c${i + 1}`,
+  it("caps the pages per type with its own cap and says which feed was not covered", async () => {
+    const { fetchImpl, calls } = feedFake({
+      craftItem: [crowdCrafts(0), crowdCrafts(1), crowdCrafts(2)],
+      itemMarket: [crowdSales(0), crowdSales(1), crowdSales(2)],
+      dismantleItem: [crowdDismantles(0), crowdDismantles(1)],
     });
-    const { fetchImpl } = feedFake({ craftItem: [page(0), page(1), page(2)] });
     const r = await fetchOwnActivity(fetchImpl, "k", ME, {
       now: NOW,
-      maxPages: 2,
+      maxPages: 1,
+      salesPages: 2,
+      dismantlePages: 1,
     });
-    expect(r.crafts).toHaveLength(200);
-    expect(r.complete.crafts).toBe(false);
+    expect(r.crafts).toHaveLength(100);
+    expect(r.sales).toHaveLength(200);
+    expect(r.dismantles).toHaveLength(100);
+    expect(r.complete).toEqual({
+      crafts: false,
+      sales: false,
+      dismantles: false,
+    });
+    expect(calls.filter((c) => typeOf(c) === "craftItem")).toHaveLength(1);
+    expect(calls.filter((c) => typeOf(c) === "itemMarket")).toHaveLength(2);
+    expect(calls.filter((c) => typeOf(c) === "dismantleItem")).toHaveLength(1);
+    expect(r.pages).toBe(4);
+  });
+  it("keeps the caps apart: a feed that ends inside its own cap is complete while a capped one is not", async () => {
+    const { fetchImpl } = feedFake({
+      craftItem: [crowdCrafts(0), crowdCrafts(1)],
+      itemMarket: [
+        {
+          items: [sale(oid(SALE_STEM, 1), "jet", 2, 0.2)],
+          next: "c1",
+        },
+        { items: [sale(oid(SALE_STEM, 2), "jet", 2, 0.3)] }, // the feed ends here
+      ],
+      dismantleItem: [crowdDismantles(0), crowdDismantles(1)],
+    });
+    const r = await fetchOwnActivity(fetchImpl, "k", ME, {
+      now: NOW,
+      maxPages: 1,
+      salesPages: 2,
+      dismantlePages: 1,
+    });
+    expect(r.sales).toHaveLength(2);
+    expect(r.complete).toEqual({
+      crafts: false,
+      sales: true,
+      dismantles: false,
+    });
+  });
+  it("defaults to 5 craft pages, 25 market pages and 10 dismantle pages", async () => {
+    const endless = (stem, firstHoursAgo, make) =>
+      Array.from({ length: 40 }, (_, i) => crowd(i, stem, firstHoursAgo, make));
+    const { fetchImpl, calls } = feedFake({
+      // the oldest of the 500 crafts kept is ~5.5 h back, older than every market and dismantle row the caps allow
+      craftItem: endless(CRAFT_STEM, 5, (id, h) => craft(id, "jet", {}, h)),
+      itemMarket: endless(SALE_STEM, 0.01, (id, h) => sale(id, "jet", 2, h)),
+      dismantleItem: endless(DISMANTLE_STEM, 0.01, (id, h) =>
+        dismantle(id, "jet", 6, h),
+      ),
+    });
+    const r = await fetchOwnActivity(fetchImpl, "k", ME, { now: NOW });
+    expect(calls.filter((c) => typeOf(c) === "craftItem")).toHaveLength(5);
+    expect(calls.filter((c) => typeOf(c) === "itemMarket")).toHaveLength(25);
+    expect(calls.filter((c) => typeOf(c) === "dismantleItem")).toHaveLength(10);
+    expect(r.complete).toEqual({
+      crafts: false,
+      sales: false,
+      dismantles: false,
+    });
+  });
+  it("stops the item-market walk at the page that reaches one minute before the oldest craft, however many pages the window would allow", async () => {
+    const S = (n) => oid(SALE_STEM, n);
+    const { fetchImpl, calls } = feedFake({
+      craftItem: [{ items: [craft(ID_A, "chest1", { armor: 4 }, 10)] }],
+      itemMarket: [
+        {
+          items: [sale(S(1), "jet", 2, 1), sale(S(2), "jet", 2, 2)],
+          next: "c1",
+        },
+        {
+          items: [sale(S(3), "jet", 2, 6), sale(S(4), "jet", 2, 9)],
+          next: "c2",
+        },
+        {
+          items: [
+            sale(S(5), "jet", 2, 10), // the craft's own second: kept
+            sale(S(6), "jet", 2, 10 + 2 / 60), // two minutes before the craft: the cut
+            sale(S(7), "jet", 2, 11),
+          ],
+          next: "c3",
+        },
+        { items: [sale(S(8), "jet", 2, 20)] }, // inside the 7 days, never asked for
+      ],
+    });
+    const r = await fetchOwnActivity(fetchImpl, "k", ME, { now: NOW });
+    const market = calls.filter((c) => typeOf(c) === "itemMarket");
+    expect(market.map((c) => c.url)).toEqual([
+      ownUrl("itemMarket", ME),
+      ownUrl("itemMarket", ME, "c1"),
+      ownUrl("itemMarket", ME, "c2"),
+    ]);
+    expect(r.sales.map((x) => x.itemId)).toEqual([1, 2, 3, 4, 5].map(S));
     expect(r.complete.sales).toBe(true);
+    expect(r.pages).toBe(1 + 3 + 1);
+  });
+  it("asks for no market or dismantle rows when no craft is in the window", async () => {
+    for (const craftItem of [
+      [{ items: [] }],
+      [{ items: [craft(ID_A, "chest1", {}, 24 * 8)] }], // only a craft beyond 7 days
+    ]) {
+      const { fetchImpl, calls } = feedFake({
+        craftItem,
+        itemMarket: [{ items: [sale(ID_A, "chest1", 2.5, 0.5)] }],
+        dismantleItem: [{ items: [dismantle(ID_C, "pants1", 6, 0.2)] }],
+      });
+      const r = await fetchOwnActivity(fetchImpl, "k", ME, { now: NOW });
+      expect(calls.map(typeOf)).toEqual(["craftItem"]);
+      expect(r.crafts).toEqual([]);
+      expect(r.sales).toEqual([]);
+      expect(r.dismantles).toEqual([]);
+      expect(r.complete).toEqual({
+        crafts: true,
+        sales: true,
+        dismantles: true,
+      });
+      expect(r.pages).toBe(1);
+    }
+  });
+  it("keeps a sale or dismantle recorded 30 s before the oldest craft and cuts one 2 minutes before", async () => {
+    const craftAt = at(5);
+    const { fetchImpl } = feedFake({
+      craftItem: [{ items: [craft(ID_A, "chest1", { armor: 4 }, 5)] }],
+      itemMarket: [
+        {
+          items: [
+            { ...sale(ID_B, "jet", 2, 5), createdAt: before(craftAt, 30e3) },
+            { ...sale(ID_C, "jet", 2, 5), createdAt: before(craftAt, 120e3) },
+          ],
+        },
+      ],
+      dismantleItem: [
+        {
+          items: [
+            {
+              ...dismantle(ID_B, "jet", 6, 5),
+              createdAt: before(craftAt, 30e3),
+            },
+            {
+              ...dismantle(ID_C, "jet", 6, 5),
+              createdAt: before(craftAt, 120e3),
+            },
+          ],
+        },
+      ],
+    });
+    const r = await fetchOwnActivity(fetchImpl, "k", ME, { now: NOW });
+    expect(r.sales.map((x) => x.itemId)).toEqual([ID_B]);
+    expect(r.dismantles.map((x) => x.itemId)).toEqual([ID_B]);
+    expect(r.complete.sales).toBe(true);
+    expect(r.complete.dismantles).toBe(true);
   });
   it("refuses an id that is not a player id, and the schema check is a typed error", async () => {
     const { fetchImpl } = feedFake({});

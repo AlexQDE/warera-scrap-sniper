@@ -242,7 +242,11 @@ and the notice parser reads both word orders). 5 shipped in 1.8.0 as
 `stats.mjs` (fills now carry `skills`); the stat's place in its range on an
 offer's Details is still open.
 
-## 10. The community ledger's method, verified (2026-10-05)
+## 10. The community ledger's method, verified (2026-10-05) — historical
+
+The site `warera-prices.web.app` answered "Site Not Found" on 2026-10-07; the
+verification below stands as a record, and the extension no longer has
+anything to compare against.
 
 warera-prices.web.app/ledger replays a player's own feed in the browser with
 the player's API key. Read against the feed for one account (8 legendary
@@ -285,6 +289,11 @@ transactionsCount}`. On 2026-10-05 scraps averaged 0.247778 and steel
   (chat and ranking links point at bare `/user/<id>`); `user.getUserLite
 {userId}` answers the key with the username. `user.getMe` stays
   session-only.
+- **The market feed is far denser than the craft feed** (measured
+  2026-10-07, own account): the `itemMarket` feed of an active trader
+  carries about 100 rows per 3.5 hours, so a 500-row cap covers ~17 hours.
+  The sale/dismantle walk is therefore cut at the oldest craft in the window,
+  not at the window itself.
 
 Separately, the author's local 1.5.2 (labelled stat reading in
 `statsdom.mjs`, `market.mjs` skills, the bounded Load-more loader) is still

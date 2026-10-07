@@ -265,32 +265,51 @@ function skillsOf(item) {
   return Object.keys(out).length ? out : null;
 }
 
+/** How far before the oldest craft a sale or dismantle is still kept: a fate recorded in the same second as its craft must not be cut. */
+const FATE_GRACE_MS = 60_000;
+
 /**
- * The player's own crafts, item-market rows and dismantles back `days`
- * days, each type walked newest first at most `maxPages` pages of 100 and
- * cut at the window; `complete` says per type whether the window was
- * covered. Rows are reduced to what the replay needs; a craft row's `item`
- * is the OUTPUT piece (state 100, with its roll), its `quantity` the scraps
- * it consumed (probed 2026-10-05, docs/GAME-FACTS.md §3 and §10).
+ * The player's own crafts, item-market rows and dismantles, reduced to what
+ * the replay needs; a craft row's `item` is the OUTPUT piece (state 100,
+ * with its roll), its `quantity` the scraps it consumed (probed 2026-10-05,
+ * docs/GAME-FACTS.md §3 and §10).
+ *
+ * The crafts are walked first, newest first, back `days` days and at most
+ * `maxPages` pages of 100. A sale or a dismantle can only close a craft that
+ * happened before it, so the item-market and dismantle feeds are then walked
+ * newest first only back to one minute before the OLDEST craft kept (not to
+ * the window): an active trader's market feed is far denser than the craft
+ * feed (about 100 rows per 3.5 hours, measured 2026-10-07), and walking it
+ * for the whole window under a page cap would leave the older crafts without
+ * their sale. Those two walks have their own caps, `salesPages` and
+ * `dismantlePages`. With no craft in the window neither feed is requested.
+ * `complete` says per type whether the walk reached its cutoff or the end of
+ * the feed (true), or was stopped by its page cap (false).
  */
 export async function fetchOwnActivity(
   fetchImpl,
   key,
   userId,
-  { days = 7, maxPages = 5, now = Date.now(), timeoutMs = TIMEOUT_MS } = {},
+  {
+    days = 7,
+    maxPages = 5,
+    salesPages = 25,
+    dismantlePages = 10,
+    now = Date.now(),
+    timeoutMs = TIMEOUT_MS,
+  } = {},
 ) {
   const k = cleanKey(key);
   const id = String(userId ?? "");
   if (!isId(id)) throw new ApiError("Invalid player id", "schema");
-  const cutoff = now - days * 86400e3;
-  const walk = async (type) => {
+  const walk = async (type, cutoff, pageCap) => {
     const rows = [];
     const cursors = new Set();
     const ids = new Set();
     let cursor;
     let pages = 0;
     let complete = false;
-    while (pages < maxPages) {
+    while (pages < pageCap) {
       const { data } = await call(fetchImpl, k, ownUrl(type, id, cursor), {
         timeoutMs,
       });
@@ -320,9 +339,7 @@ export async function fetchOwnActivity(
     }
     return { rows, pages, complete };
   };
-  const c = await walk("craftItem");
-  const s = await walk("itemMarket");
-  const d = await walk("dismantleItem");
+  const c = await walk("craftItem", now - days * 86400e3, maxPages);
   const crafts = c.rows.flatMap((it) =>
     isId(it.item?._id) && typeof it.item?.code === "string"
       ? [
@@ -336,6 +353,17 @@ export async function fetchOwnActivity(
         ]
       : [],
   );
+  let s = { rows: [], pages: 0, complete: true };
+  let d = { rows: [], pages: 0, complete: true };
+  if (crafts.length) {
+    const oldest = crafts.reduce(
+      (min, x) => Math.min(min, Date.parse(x.at)),
+      Infinity,
+    );
+    const fateCutoff = oldest - FATE_GRACE_MS;
+    s = await walk("itemMarket", fateCutoff, salesPages);
+    d = await walk("dismantleItem", fateCutoff, dismantlePages);
+  }
   const sales = s.rows.flatMap((it) =>
     positive(it.money) == null
       ? []
