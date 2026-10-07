@@ -1,24 +1,36 @@
 import { describe, it, expect } from "vitest";
-import { DEFAULTS, SELL_FROM, preferences } from "./settings.mjs";
-const prefs = preferences;
+import { DEFAULTS, SELL_FROM, PANELS, preferences } from "./settings.mjs";
 
-describe("craft desk preferences", () => {
-  it("defaults the desk on, compact, batch 1, 20% target, no tax set and no recipes", () => {
-    const p = prefs({});
-    expect(p).toMatchObject({
+describe("preferences", () => {
+  it("defaults to the bar alone, both market modules on, no player id set", () => {
+    expect(preferences({})).toMatchObject({
+      minMarginPct: 0,
+      flipPct: 10,
+      intervalSec: 30,
+      panel: "none",
+      equipment: true,
       craft: true,
-      craftCollapsed: true,
-      craftBatch: 1,
-      craftTargetPct: 20,
-      taxPct: null,
-      craftRecipes: {},
+      cases: true,
+      travel: true,
+      picker: true,
       userId: null,
       craftSteelMode: "random",
+      sellFrom: "epic",
     });
+    expect(PANELS).toEqual(["none", "market", "craft", "ledger"]);
+  });
+  it("keeps a known panel and falls back to none for anything else, including the old collapsed flags", () => {
+    expect(preferences({ panel: "ledger" }).panel).toBe("ledger");
+    expect(preferences({ panel: "craft" }).panel).toBe("craft");
+    expect(preferences({ panel: "desk" }).panel).toBe("none");
+    expect(
+      preferences({ collapsed: false, craftCollapsed: false }),
+    ).not.toHaveProperty("collapsed");
+    expect(preferences({ craftCollapsed: false }).panel).toBe("none");
   });
   it("keeps a 24-hex player id and the chosen-slot mode, and drops anything else", () => {
     expect(
-      prefs({
+      preferences({
         userId: " 697b55e4bcecf3b37667e0d1 ",
         craftSteelMode: "chosen",
       }),
@@ -26,41 +38,29 @@ describe("craft desk preferences", () => {
       userId: "697b55e4bcecf3b37667e0d1",
       craftSteelMode: "chosen",
     });
-    expect(prefs({ userId: "../settings", craftSteelMode: "x" })).toMatchObject(
-      { userId: null, craftSteelMode: "random" },
-    );
-    expect(prefs({ userId: 42 }).userId).toBeNull();
+    expect(
+      preferences({ userId: "../settings", craftSteelMode: "x" }),
+    ).toMatchObject({ userId: null, craftSteelMode: "random" });
+    expect(preferences({ userId: 42 }).userId).toBeNull();
   });
-  it("clamps the numbers, keeps a decimal tax rate, and validates recipes by code", () => {
-    const p = prefs({
-      craft: false,
-      craftCollapsed: false,
-      craftBatch: 5000,
-      craftTargetPct: -80,
-      taxPct: "2.5",
-      craftRecipes: {
-        boots5: { scraps: 10, steel: 2 },
-        nope: { scraps: 1 },
-        jet: { scraps: -1 },
-      },
+  it("clamps the thresholds and the interval to whole numbers in range", () => {
+    const p = preferences({
+      minMarginPct: 999,
+      flipPct: -80,
+      intervalSec: 1,
+      roundTrip: true,
     });
-    expect(p).toMatchObject({
-      craft: false,
-      craftCollapsed: false,
-      craftBatch: 1000,
-      craftTargetPct: -50,
-      taxPct: 2.5,
-      craftRecipes: { boots5: { scraps: 10, steel: 2 } },
-    });
-    expect(prefs({ taxPct: "" }).taxPct).toBeNull();
-    expect(prefs({ taxPct: 250 }).taxPct).toBe(100);
-    expect(prefs({ taxPct: "x" }).taxPct).toBeNull();
+    expect(p.minMarginPct).toBe(500);
+    expect(p.flipPct).toBe(-50);
+    expect(p.intervalSec).toBe(10);
+    expect(p.roundTrip).toBe(true);
+    expect(preferences({ flipPct: "12.6" }).flipPct).toBe(13);
+    expect(preferences({ flipPct: "" }).flipPct).toBe(10);
+    expect(preferences({ flipPct: "x" }).flipPct).toBe(10);
+    expect(preferences({ flipPct: 0 }).flipPct).toBe(0);
   });
-});
-describe("preferences", () => {
-  it("defaults the drop policy to selling from epic upward", () => {
+  it("defaults the drop policy to selling from epic upward and rejects unknown policies", () => {
     expect(DEFAULTS.sellFrom).toBe("epic");
-    expect(preferences().sellFrom).toBe("epic");
     expect(SELL_FROM).toEqual([
       "never",
       "common",
@@ -70,23 +70,16 @@ describe("preferences", () => {
       "legendary",
       "mythic",
     ]);
-  });
-  it("keeps a valid policy and rejects anything else", () => {
     expect(preferences({ sellFrom: "never" }).sellFrom).toBe("never");
     expect(preferences({ sellFrom: "mythic" }).sellFrom).toBe("mythic");
     expect(preferences({ sellFrom: "purple" }).sellFrom).toBe("epic");
     expect(preferences({ sellFrom: 3 }).sellFrom).toBe("epic");
     expect(preferences({ sellFrom: null }).sellFrom).toBe("epic");
   });
-  it("still clamps the numbers and keeps the toggles", () => {
-    const p = preferences({
-      minMarginPct: 999,
-      intervalSec: 1,
-      roundTrip: true,
-    });
-    expect(p.minMarginPct).toBe(500);
-    expect(p.intervalSec).toBe(10);
-    expect(p.roundTrip).toBe(true);
-    expect(p.cases).toBe(true);
+  it("never copies arbitrary storage fields across", () => {
+    const p = preferences({ apiKey: "secret", revision: 7, foo: 1 });
+    expect(p).not.toHaveProperty("apiKey");
+    expect(p).not.toHaveProperty("revision");
+    expect(p).not.toHaveProperty("foo");
   });
 });

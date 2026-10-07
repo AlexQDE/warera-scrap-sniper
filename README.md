@@ -1,36 +1,19 @@
 # WarEra Plus
 
-Read-only decision support inside [WarEra](https://app.warera.io): buy, craft, sell, wait, or not enough evidence. Formerly **WarEra Lens**, originally **WarEra Scrap Sniper**; same extension, same settings and key.
+Read-only decision support inside [WarEra](https://app.warera.io): what an offer is worth, what a craft costs and returns, what your own crafts made. Formerly **WarEra Lens**, originally **WarEra Scrap Sniper**; same extension, same settings and key.
 
 The extension compares offers and estimates. It never buys, crafts, lists, opens a case or travels for you. It uses your own API key and has no runtime dependencies or build step.
 
-## What changed in 1.8.0
+## What changed in 2.0.0
 
-- **Your crafts, observed.** The Craft Desk now opens with your own crafts, read from the game's transaction feed with your key: every craft of the last 7 days with its roll, what it cost, whether it is still yours, sold or scrapped, and what its roll clears at now. The headline mirrors the community ledger at warera-prices.web.app (crafting today, net value, crafted) and was checked against it on one account: the cost to the cent, the clearing prices within 2% (see [docs/GAME-FACTS.md](docs/GAME-FACTS.md) §10). Nothing is typed: the account is read off the page's own inventory and skills links, or set once in Advanced settings.
-- **Cost basis.** The recipe at the craft day's average scrap and steel prices from the game's own price history (`itemTrading.getItemTrading`), with the random-craft steel fee unless you set "How you craft" to chosen slot. A craft older than the 30-day history has no cost, never a guess.
-- **What a roll clears at.** The median of recent sales of the same roll value; of its fifth-of-range band when the roll itself has fewer than five sales; of the item when the band has fewer. The level used is printed on every row. Sales now carry the roll and the listing time, so older caches say "needs 5 recent sales" until their 3-minute refresh.
-- **Fates by item id.** A sale of yours or a dismantle with the crafted piece's id closes the craft; held pieces are priced, gone ones realized. Epic and up are counted in the sums, as on the site; lower tiers are listed and marked not counted.
-
-## What changed in 1.7.0
-
-The game knowledge the 1.6.0 build was missing, each fact with its provenance in [docs/GAME-FACTS.md](docs/GAME-FACTS.md).
-
-- **Recipes shipped.** Every Craft Desk cell carries the game's recipe: the tier's scrap value in scraps (6 / 18 / 54 / 162 / 486 / 1458) plus a steel fee of 1 / 2 / 4 / 8 / 16 / 32, doubled because a cell is a chosen slot. A recipe you type overrides the shipped one for that item; **Forget override** returns to the game's table. No cell reads `no recipe` any more, and the invented `fixtures/recipes.json` is gone.
-- **Random craft.** A seventh matrix column prices the random craft of each tier: half the steel, the slot picked by the game (30% weapon, 14% each armour slot), expected value over the six slots' sales estimates, `k/6 slots` until every slot has one. The detail of a chosen cell carries the same comparison.
-- **Reroll floor.** A crafted piece is at 100% durability and dismantles back into the tier's whole scrap ladder; only the steel is gone. The detail says what a roll sent straight back to scraps costs, which is far less than the input.
-- **Tax side corrected.** The market tax is the buyer's, at the buyer's own country's rate, and the seller receives the listing. The desk nets the listing to the seller and shows what a buyer in your country is shown; the break-even listing is the cost itself. The tax-notice parser now reads the live sentence ("All prices displayed include a 1% market tax from your country"), which 1.6.0 could not.
-
-## What changed in 1.6.0
-
-Built on the published 1.4.1 code. (A local 1.5.x with unpublished changes existed on the author's machine; it was not available to this branch, see [docs/DELIVERY-2026-10-04.md](docs/DELIVERY-2026-10-04.md).)
-
-- **Equipment offers, redesigned.** Each offer carries one compact line: the verdict tag, scrap profit with ROI, a resale estimate from comparable completed sales, and a **Details** button (a real button: keyboard, `aria-expanded`). Native price and BUY stay untouched; clicks on the annotation's text fall through to the row as before, only its button and its Details text are the extension's. Details hold the dismantle walk, the resale evidence (sample, window, low–high, quartiles, spread, pace), the stat rank among listed peers and the quote age. Loading, failed, stale, insufficient and "select this item" states are spelled out instead of blanked.
-- **Resale thresholds, fixed and tested.** Five comparable fills support the resale estimate (the median with its range); eight valid peers are needed before a percentile rank or a quick/patient quartile scenario appears. The two bars are separate constants with boundary tests at 4/5 and 7/8.
-- **Readable stats counted independently.** How many rows read (durability and stat), whether a scrap quote exists, and whether it is fresh are three separate dimensions. A failed sales read changes the resale column only; the readable-stat count no longer drops to zero.
-- **Settings page, responsive.** No fixed minimum width; verified at 320, 380 and 560 px. Common settings (key, decisions, modules) up front, everything else under **Advanced**.
-- **Loader.** Offer rows are scanned inside the list container found last time (a full-page scan every 30 s or when the list is gone), each row's layout text and frame colour are read once per content change, and unchanged annotations are not rewritten. On the 60-row fixture, 40 mutation bursts cost 123 ms instead of 212 ms in Chromium, with layout-forcing text reads down from 5,000 to 0. Cancellation, freshness checks, the five-page sales cap and cleanup are unchanged.
-- **Craft Desk (new).** A compact panel under the equipment panel: expected ROI by tier and slot, cost per craft and per batch, buying now at the asks against placing bids, expected value over the craft's random outcomes, break-even and target-ROI ceilings for the scrap price given the steel price and the other way round, listing guidance with quick/balanced/patient scenarios where the evidence supports them, and a personal craft ledger with JSON export/import. Recipes are entered from the game's craft screen; nothing is assumed.
-- **Name.** WarEra Plus in every label and document. Storage keys, the extension identity and the repository name are unchanged.
+- **One bar instead of two panels.** On the equipment market the extension now adds a single slim bar above the grid: brand, quote freshness, the live counts (snipes, flips, rows) and three tabs, **Market**, **Craft**, **Ledger**. Nothing is open by default, so the game's grid stays where it was.
+- **Every offer gets a value, without selecting it.** Each row carries one line: the tag, the scrap profit with its ROI, and the piece's value. The value is the median of recent fills of the same roll (then of its band, then of the item) when the item's fills have been read, else the game's own average price for that item (`gameStat.getEquipmentAvgByCode`, the "Current value" the game prints), read for all 36 items in one call every 10 minutes. "resale · select this item" is gone.
+- **FLIP.** A second tag next to SNIPE: the value sits at least the FLIP threshold (default 10%) above the price. SNIPE outranks it. PASS replaces ABOVE TARGET.
+- **The craft board.** The Craft tab is one row per tier: the cost of a random craft at the observed scrap and steel asks, its expected value over the six slots' averages at the game's odds, the best slot to choose and the ROI either way. Open a tier for its six slots, the recipe, the chosen-slot cost and what a bad roll really costs once it is scrapped. The 36-cell matrix that read "no fills", the batch, the target ROI, the ceilings, the listing scenarios and the recipe overrides are gone.
+- **One ledger, observed.** The Ledger tab replays your own crafts from the game's feed with your key: every craft of the last 7 days with its roll, its cost at the craft day's average scrap and steel prices, whether it is still yours, sold or scrapped, and what its roll clears at now. The manual craft ledger (typed entries, export, import) is removed; what it stored stays in the browser untouched.
+- **The feed walk fixed.** Sales and dismantles are now walked back to the oldest craft in the window instead of being cut at 500 rows. An active trader makes about 100 market rows every 3.5 hours, so the old cap covered 17 hours and a piece sold earlier than that showed as held forever.
+- **The community ledger site is gone.** `warera-prices.web.app` answers "Site Not Found" since early October 2026. The extension never called it; the method it was checked against on 2026-10-05 is recorded in [docs/GAME-FACTS.md](docs/GAME-FACTS.md) §10 and is the extension's own now.
+- **Settings.** Two thresholds (SNIPE ROI, FLIP gap), the modules, and under Advanced the refresh interval, the case drop policy, how you craft (for the ledger's steel fee) and an optional player id.
 
 ## Install or update
 
@@ -39,45 +22,37 @@ Requires Chrome 105+ or a compatible Chromium browser.
 1. Download or clone this repository and select the branch/version you intend to test.
 2. Open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked** and select the `extension` folder.
 3. Open the WarEra Plus settings from its toolbar icon. Paste your own API key and **Save**. **Test** is a separate explicit action; saving does not automatically call the API.
-4. Reload the WarEra page. Offer annotations and the Craft Desk appear on the equipment market; cases on supported market/inventory views; travel estimates next to the nearest-case map entry.
+4. Reload the WarEra page. The bar and the offer tags appear on the equipment market; cases on supported market/inventory views; travel estimates next to the nearest-case map entry.
 
-For an existing unpacked install, update files in the **same extension folder**, reload the extension and then reload the game. Keep the original extension installation identity to preserve its settings. The rename retains existing storage keys and migrates preferences; it does not rename the GitHub repository or create a new extension identity.
+For an existing unpacked install, update files in the **same extension folder**, reload the extension and then reload the game. Keep the original extension installation identity to preserve its settings.
 
 Do not publish or merge a release before completing the [manual checklist](docs/RELEASE-CHECKLIST.md).
 
-## Equipment offers
+## Offer tags
 
-| Signal       | Meaning                                                                                        |
-| ------------ | ---------------------------------------------------------------------------------------------- |
-| SNIPE        | Nonnegative snapshot scrap profit at the requested minimum ROI, with enough observed bid depth |
-| NEAR MISS    | A loss within the explicitly negative ROI threshold; never counted as a profitable match       |
-| ABOVE TARGET | The offer does not meet the requested threshold                                                |
-| NO QUOTE     | No scrap quote, unreadable rarity or price, or insufficient observed bid depth                 |
-| READING      | The first scrap quote is still being read                                                      |
-| STALE        | The quote is older than the refresh interval or the last read failed; no action label          |
+| Tag       | Meaning                                                                                                     |
+| --------- | ----------------------------------------------------------------------------------------------------------- |
+| SNIPE     | The scraps the piece dismantles into, sold at the observed bids, beat its price by at least the minimum ROI |
+| FLIP      | Its value (same-roll fills, else the game's average) sits at least the FLIP threshold above its price       |
+| NEAR MISS | A scrap loss within an explicitly negative minimum ROI; never a profitable label                            |
+| PASS      | Neither                                                                                                     |
+| NO QUOTE  | No scrap quote, unreadable rarity or price, or too little observed bid depth                                |
+| READING   | The first scrap quote is still being read                                                                   |
+| STALE     | The quote is older than the refresh interval or the last read failed; no tag                                |
 
-Scrap profit is `quoted scrap proceeds − displayed purchase price`; ROI is that profit over the displayed price. Proceeds walk descending bid levels for the whole dismantle quantity (6 / 18 / 54 / 162 / 486 / 1458 scraps by rarity); they are never the top bid multiplied past the observed depth. Displayed prices receive no additional tax adjustment.
+Scrap profit is `quoted scrap proceeds − displayed purchase price`; proceeds walk descending bid levels for the whole dismantle quantity (6 / 18 / 54 / 162 / 486 / 1458 scraps by rarity) and are never the top bid multiplied past the observed depth. The market tax is the buyer's and the seller receives the listing, so displayed prices get no adjustment.
 
-**Resale** is the median of comparable completed sales of the same item in the last 72 hours: fills within ±10 durability of the offer when the fills carry a durability, all of them otherwise. It needs five comparable fills (`5 of 5 fills` is the bar; fewer shows the count and the observed range only). With eight, Details add the quartiles, the offer's price percentile among those fills and the quick/patient scenarios. Sales are read for the item selected in the market grid (five pages of 100 fills at most, cached three minutes); rows of other items show `select this item` until their sales have been read.
+**Value.** With the item's fills read (select it in the grid; five pages of 100 fills at most, 72 h, cached three minutes) the value is the median of fills of the same roll, of its fifth-of-range band when the roll has fewer than five, of the item when the band has fewer. The level used is printed on the row. Without them the value is the game's average for the item, any roll. A weapon's roll is keyed by its attack on the row; its crit is not read.
 
-**Readable stats** counts rows whose own durability and stat value parsed. The stat percentile among listed peers of the same item needs eight peers. The row reader was written against synthetic fixtures; see the checklist for the live check.
+**Details** (the ▸ button, a real button: keyboard, `aria-expanded`) hold the dismantle walk, the value evidence (fills, pace, the price's percentile among them), the stat rank among listed peers and the quote age. The rest of the line is the row's: clicks on it fall through to the game as before.
 
-## Craft Desk
+## Craft
 
-The desk opens with **Details** under the equipment panel. Every number names its source.
+The Craft tab prices one craft per tier from live quotes: the tier's scraps and the steel fee walked through the observed asks (the game's recipe, [docs/GAME-FACTS.md](docs/GAME-FACTS.md) §3: scraps equal to the tier's scrap value, steel 1 / 2 / 4 / 8 / 16 / 32, doubled for a chosen slot) against the game's average price per item. Random EV weights the six slots at the game's odds (30% weapon, 14% each armour slot) and is withheld while any slot lacks an average. The best chosen slot is the one with the highest average. A tier opens to its slots, the chosen-slot cost and the reroll loss: a crafted piece is at 100% and dismantles back into the tier's whole scrap ladder at the bid, only the steel and the spread are gone. Expected values, not promises.
 
-- **Your crafts.** First on the desk: your own crafts replayed from the feed, today (UTC) or the last 7 days. _Crafting_ is what the pieces that are gone realized against their cost; _Net value_ is what the pieces you still hold clear at against their inputs; _Crafted_ counts them. Each row: when, the item, the roll, the cost, what it clears at (or sold for, or gave back in scraps) and the profit or loss. Rows below epic are listed but not summed. The account is the one the page shows as yours; set a player id in Advanced settings to follow another.
-- **Recipe.** Every cell (tier × slot) carries the game's recipe: the tier's scrap value in scraps and twice the base steel fee, because picking the slot doubles the steel. If the game's craft screen ever disagrees, type the numbers and **Save recipe**; the override stays on this browser and **Forget override** returns to the table.
-- **Random craft.** The last column of each tier prices crafting without choosing the slot: half the steel, the slot by the game's odds (30% weapon, 14% each armour slot), expected value over the six slots' sales estimates. It reads `k/6 slots` until every slot of the tier has an estimate.
-- **Reroll floor.** A crafted piece is at 100% and dismantles back into the tier's whole scrap ladder; the steel is the only input that is gone. The detail prices that floor at the scrap bid, so you know what a bad roll really costs.
-- **Prices.** Scrap and steel default to the best ask (what buying now costs) with their freshness; type your own to override. Batch, market tax and target ROI are kept in settings.
-- **Buying now against bidding.** "Buy now at the asks" walks the observed ask depth for the whole batch and has no price when the depth does not cover it. "Place bids at the best bid" (and one tick ahead of the queue) is cheaper but fills only if a seller comes down to it, maybe never; the saving is shown as conditional.
-- **Expected value.** The craft's outcomes are weighted by probability. With five or more comparable fills the single outcome is "sells like the last N fills" at their median, labelled as sales-weighted (it assumes a crafted piece sells like recent fills). Without them the EV is `unavailable`, never a guess. A desirable roll is one outcome among the others; it is not treated as the result.
-- **Money words.** _Listing_ is the price you set, and what you receive: the market tax is the buyer's, at the buyer's own country's rate, and the price a buyer sees already includes it. _Cost_ is what the inputs cost. The rate shown is the one you set, else the one printed in the market's notice ("All prices displayed include a N% market tax from your country"), else none; it only changes what a buyer is shown.
-- **Ceilings.** The most scraps may cost given the steel price (and the reverse) at break-even and at the target ROI, snapped down to the 0.001 tick, with the reason when there is none.
-- **Listing guidance.** Balanced (median) needs five comparable fills; quick (lower quartile) and patient (upper quartile) need eight. Evidence lists the sample, window, capping, spread, last fill and the recent pace, which is the market's pace, not your listing's queue.
+## Ledger
 
-**Craft ledger.** Record a craft (prefilled from the current quotes, marked _inferred_ until you edit the prices, then _manual_), its result, list it, record the sale proceeds, keep or scrap it. Realized profit counts recorded sales with a known cost basis only; open pieces show an estimate labelled as such. Export and import are JSON files merged by id. Nothing is observed automatically; see the delivery report for why.
+The Ledger tab reads your own account off the page (the inventory and skills links), or the player id set in Advanced settings, and replays its feed: crafts, item-market rows and dismantles of the last 7 days. _Realized_ is what the pieces that are gone brought against their cost; _Held at market_ is what the pieces you still hold clear at against their inputs; _Crafted_ counts them. Epic and up are summed, lower tiers are listed. Cost is the recipe at the craft day's average scrap and steel prices (`itemTrading.getItemTrading`), with the random-craft steel fee unless "How you craft" says chosen slot. Fates are joined by item id; the held pieces are priced like the rows above, by their roll. Today (UTC) or 7 days.
 
 ## Cases and travel
 
@@ -85,9 +60,9 @@ Unchanged from 1.4.1. SELL / OPEN EV / UNCERTAIN follow the drop policy in Advan
 
 ## Refresh, privacy and safety
 
-Equipment refresh defaults to 30 seconds (10–600 configurable). Case and resource books refresh after 60 seconds, selected-item sales after 3 minutes, average prices after 10 minutes. Hidden tabs request nothing. API caches and active requests are shared by the background worker across tabs. Manual refresh does not bypass server cooldowns.
+The scrap book refreshes every 30 seconds by default (10–600 configurable). Case and resource books refresh after 60 seconds, an item's fills after 3 minutes, the game's average prices after 10 minutes, your feed after 3 minutes and only while the Ledger tab is open. Hidden tabs request nothing and render nothing until they are shown again. API caches and active requests are shared by the background worker across tabs. Manual refresh does not bypass server cooldowns.
 
-The key is stored locally in extension storage restricted to trusted extension contexts. Content scripts receive public preferences and data, not the key. API requests send it only to `api2.warera.io`, omit cookies/credentials and refuse redirects. There is no analytics or third-party backend. Local storage also holds preferences, bounded market/sales caches, your craft recipes and your craft ledger (at most 500 entries); it is not an encrypted secret vault. The ledger survives key changes and cache cleanup and leaves the browser only through your own export.
+The key is stored locally in extension storage restricted to trusted extension contexts. Content scripts receive public preferences and data, not the key. API requests send it only to `api2.warera.io`, omit cookies/credentials and refuse redirects. There is no analytics or third-party backend. Local storage also holds preferences and bounded market, fills, averages and feed caches; it is not an encrypted secret vault.
 
 The DOM adapter reads existing offer prices, item IDs, borders, map labels and the tax notice. Unknown or changed markup must fail closed. The interface is in English; localization is not implemented.
 
@@ -115,9 +90,9 @@ Both run against `fixtures/market.html`, a synthetic stand-in for the equipment 
 
 WarEra Plus je novo ime postojeće ekstenzije (ranije WarEra Lens i Scrap Sniper); repozitorijum, podešavanja i sačuvani ključ ostaju isti. Ažuriraj postojeći `extension` folder, klikni Reload u `chrome://extensions`, pa osveži igru.
 
-Svaka ponuda nosi jedan red: oznaku, profit od rastavljanja sa ROI, procenu preprodaje iz uporedivih prodaja (potrebno je pet; za rang i kvartile osam) i dugme **Details** sa dokazima. Craft Desk ispod panela računa cenu po izradi i seriji, kupovinu odmah naspram postavljanja ponude, očekivanu vrednost preko slučajnih ishoda, granične cene otpada i čelika, i smernice za listanje. Recepti su ugrađeni (scraps = vrednost tiera u otpadu, čelik 1/2/4/8/16/32, dupliran kad biraš slot; nasumična izrada troši pola čelika), a svako polje možeš prepisati ako ekran za izradu kaže drugačije. Porez na tržištu plaća kupac po stopi svoje države, prodavac dobija listiranu cenu. Knjiga izrada je ručna evidencija sa izvozom i uvozom; dobit je ostvarena tek kad upišeš prodaju.
+Na tržištu opreme stoji jedna traka sa tri kartice: **Market** (cene otpada po retkosti i prodaje izabranog predmeta), **Craft** (šta košta i koliko vredi izrada po tieru, nasumično ili sa izabranim slotom) i **Ledger** (tvoje izrade pročitane iz feeda igre: trošak, šta se desilo sa komadom i koliko taj roll danas vredi). Svaka ponuda nosi jedan red: oznaku (SNIPE kad otpad vredi više od cene, FLIP kad vrednost prelazi cenu za zadati procenat), profit od rastavljanja i vrednost komada (prodaje istog rolla ako su učitane, inače prosečna cena iz igre). Porez plaća kupac, prodavac dobija listiranu cenu.
 
-Pre korišćenja proveri aktuelne poreze, pravila igre i ponašanje na svom ekranu prema [kontrolnoj listi](docs/RELEASE-CHECKLIST.md). Ekstenzija ne izvršava transakcije niti klikće kontrole igre.
+Pre korišćenja proveri aktuelna pravila igre i ponašanje na svom ekranu prema [kontrolnoj listi](docs/RELEASE-CHECKLIST.md). Ekstenzija ne izvršava transakcije niti klikće kontrole igre.
 
 ## License
 

@@ -67,7 +67,8 @@ async function run(extensionDir) {
   const settings = {
     minMarginPct: 0,
     intervalSec: 30,
-    collapsed: true,
+    flipPct: 10,
+    panel: "none",
     casesCollapsed: true,
     roundTrip: false,
     equipment: true,
@@ -76,11 +77,8 @@ async function run(extensionDir) {
     picker: true,
     sellFrom: "epic",
     craft: true,
-    craftCollapsed: true,
-    craftBatch: 1,
-    craftTargetPct: 20,
-    taxPct: null,
-    craftRecipes: {},
+    userId: null,
+    craftSteelMode: "random",
   };
   const info = { settings, hasKey: true, revision: 1, authRevision: 1 };
   const runtime = {
@@ -111,8 +109,8 @@ async function run(extensionDir) {
           },
         };
       if (msg.type === "cases") return { cases: { at: iso(), books: {} } };
-      if (msg.type === "ledgerGet")
-        return { ledger: { version: 1, entries: [] } };
+      if (msg.type === "avg")
+        return { avg: { at: iso(), values: {}, times: {}, failures: {} } };
       return {};
     },
   };

@@ -23,7 +23,7 @@
           sans-serif;
       }
       main {
-        width: min(100%, 560px);
+        width: min(100%, 520px);
         margin: 0 auto;
         padding: 14px 16px 16px;
         container-type: inline-size;
@@ -158,11 +158,6 @@
       button.primary:hover {
         background: #24913f;
       }
-      button.quiet {
-        font-size: 12px;
-        min-height: 28px;
-        padding: 3px 9px;
-      }
       .toggle {
         color: #c8ccd4;
         font-size: 12.5px;
@@ -245,7 +240,7 @@
           <div>
             <h1>◈ WarEra Plus</h1>
             <div class="sub">
-              Equipment · Craft Desk · Cases · Travel | v<span id="version"
+              Market · Craft · Ledger · Cases · Travel | v<span id="version"
                 >–</span
               >
             </div>
@@ -280,43 +275,22 @@
         </section>
 
         <section>
-          <h2>Decisions</h2>
+          <h2>Tags on offers</h2>
           <div class="grid">
             <div>
-              <label for="margin">Minimum scrap ROI (%)</label>
+              <label for="margin">SNIPE: minimum scrap ROI (%)</label>
               <input id="margin" type="number" min="-50" max="500" step="1" />
               <p class="help">
-                SNIPE needs this ROI on the scrap value. A negative threshold
-                shows amber near misses, never a profitable label.
+                The scraps a piece dismantles into, sold at the observed bids,
+                must beat its price by this much. Negative shows near misses.
               </p>
             </div>
             <div>
-              <label for="craftTargetPct">Craft target ROI (%)</label>
-              <input
-                id="craftTargetPct"
-                type="number"
-                min="-50"
-                max="500"
-                step="1"
-              />
+              <label for="flipPct">FLIP: value above price (%)</label>
+              <input id="flipPct" type="number" min="-50" max="500" step="1" />
               <p class="help">
-                The Craft Desk solves the most scraps or steel may cost for this
-                return.
-              </p>
-            </div>
-            <div>
-              <label for="taxPct">Market tax (%)</label>
-              <input
-                id="taxPct"
-                type="number"
-                min="0"
-                max="100"
-                step="0.01"
-                placeholder="read from the page"
-              />
-              <p class="help">
-                Leave empty to use the rate the market page prints (else no
-                adjustment). Listing guidance shows what you net after it.
+                The piece's value (same-roll fills of the last 72 h, else the
+                game's average price) must sit this far above its price.
               </p>
             </div>
           </div>
@@ -325,12 +299,11 @@
         <section>
           <h2>Modules</h2>
           <label class="toggle"
-            ><input id="equipment" type="checkbox" /> Equipment offers: scrap
-            profit, resale estimate, Details</label
+            ><input id="equipment" type="checkbox" /> Offer tags and the Market
+            tab on the equipment market</label
           >
           <label class="toggle"
-            ><input id="craft" type="checkbox" /> Craft Desk and craft
-            ledger</label
+            ><input id="craft" type="checkbox" /> Craft and Ledger tabs</label
           >
           <label class="toggle"
             ><input id="cases" type="checkbox" /> Case values on market &amp;
@@ -348,27 +321,12 @@
 
         <details id="advanced">
           <summary>Advanced</summary>
-          <div class="grid">
-            <div>
-              <label for="interval">Read the scrap price every (s)</label>
-              <input id="interval" type="number" min="10" max="600" step="5" />
-              <p class="help">
-                Equipment quotes; case books refresh every 60 seconds. Hidden
-                tabs pause. Requests are shared between tabs.
-              </p>
-            </div>
-            <div>
-              <label for="craftBatch">Craft batch size</label>
-              <input
-                id="craftBatch"
-                type="number"
-                min="1"
-                max="1000"
-                step="1"
-              />
-              <p class="help">Crafts per batch on the Craft Desk.</p>
-            </div>
-          </div>
+          <label for="interval">Read the scrap book every (s)</label>
+          <input id="interval" type="number" min="10" max="600" step="5" />
+          <p class="help">
+            Steel and case books refresh every 60 seconds, the game's average
+            prices every 10 minutes, fills every 3 minutes. Hidden tabs pause.
+          </p>
           <label for="sellFrom">Case drops: sell from this rarity up</label>
           <select id="sellFrom">
             <option value="never">Never: scrap every drop</option>
@@ -380,12 +338,11 @@
             <option value="mythic">Mythic only</option>
           </select>
           <p class="help">
-            Rarities below the threshold are valued at the scrap bids
-            (dismantled at once); from the threshold up at the game's average
-            item price (sold on the equipment market, a mean of recent sales).
-            The case verdict uses this policy.
+            Rarities below the threshold are valued at the scrap bids, from the
+            threshold up at the game's average item price. The case verdict uses
+            this policy.
           </p>
-          <label for="craftSteelMode">How you craft</label>
+          <label for="craftSteelMode">How you craft (for the Ledger)</label>
           <select id="craftSteelMode">
             <option value="random">
               Random slot (default): the base steel fee, the game picks the slot
@@ -393,8 +350,8 @@
             <option value="chosen">Chosen slot: twice the steel</option>
           </select>
           <p class="help">
-            Sets the steel charged to your observed crafts on the Craft Desk;
-            the game does not record which way a craft was made.
+            The steel charged to your observed crafts; the game does not record
+            which way a craft was made.
           </p>
           <label for="userId">Your player id (optional)</label>
           <input
@@ -409,17 +366,9 @@
           />
           <p class="help">
             The 24-character id in your profile URL (app.warera.io/user/…).
-            Leave it empty: the Craft Desk reads it from the game page's own
+            Leave it empty: the Ledger reads it from the game page's own
             inventory and skills links. Set it only to follow another account.
           </p>
-          <label class="toggle"
-            ><input id="collapsed" type="checkbox" /> Start the equipment panel
-            compact</label
-          >
-          <label class="toggle"
-            ><input id="craftCollapsed" type="checkbox" /> Start the Craft Desk
-            compact</label
-          >
           <label class="toggle"
             ><input id="casesCollapsed" type="checkbox" /> Start the case panel
             compact</label
@@ -428,21 +377,6 @@
             ><input id="roundTrip" type="checkbox" /> Include the return journey
             by default</label
           >
-          <div class="row" style="margin-top: 10px">
-            <span id="recipes" class="help" style="margin: 0; flex: 1 1 160px"
-              >Using the game's recipe table; no overrides stored.</span
-            >
-            <button id="forgetRecipes" type="button" class="quiet" disabled>
-              Forget all overrides
-            </button>
-          </div>
-          <p class="help">
-            The Craft Desk ships the game's recipe table: the tier's scrap value
-            in scraps (6 to 1458) plus a steel fee (1 to 32, doubled when the
-            slot is chosen). A recipe typed on the desk overrides it for that
-            item and is kept on this browser only. The craft ledger is exported
-            and imported from the desk itself.
-          </p>
         </details>
 
         <div class="actions">

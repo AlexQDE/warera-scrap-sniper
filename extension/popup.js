@@ -6,16 +6,13 @@ const toggles = [
   "cases",
   "travel",
   "picker",
-  "collapsed",
-  "craftCollapsed",
   "casesCollapsed",
   "roundTrip",
 ];
 const numbers = {
   margin: "minMarginPct",
+  flipPct: "flipPct",
   interval: "intervalSec",
-  craftTargetPct: "craftTargetPct",
-  craftBatch: "craftBatch",
 };
 function status(text, kind = "") {
   $("status").textContent = text;
@@ -30,16 +27,10 @@ async function message(data) {
 }
 function show(p) {
   for (const [id, key] of Object.entries(numbers)) $(id).value = p[key];
-  $("taxPct").value = p.taxPct ?? "";
   $("sellFrom").value = SELL_FROM.includes(p.sellFrom) ? p.sellFrom : "epic";
   $("userId").value = p.userId ?? "";
   $("craftSteelMode").value = p.craftSteelMode ?? "random";
   for (const field of toggles) $(field).checked = p[field];
-  const n = Object.keys(p.craftRecipes ?? {}).length;
-  $("recipes").textContent = n
-    ? `${n} recipe override${n === 1 ? "" : "s"} stored on this browser; the game's table applies to the rest.`
-    : "Using the game's recipe table; no overrides stored.";
-  $("forgetRecipes").disabled = n === 0;
 }
 async function load() {
   try {
@@ -93,7 +84,6 @@ async function save(event) {
       settings: {
         ...patch,
         apiKey: $("key").value.trim(),
-        taxPct: $("taxPct").value === "" ? null : $("taxPct").value,
         sellFrom: $("sellFrom").value,
         userId: $("userId").value.trim() || null,
         craftSteelMode: $("craftSteelMode").value,
@@ -108,23 +98,8 @@ async function save(event) {
     $("save").disabled = false;
   }
 }
-async function forgetRecipes() {
-  $("forgetRecipes").disabled = true;
-  try {
-    const r = await message({
-      type: "saveSettings",
-      settings: { craftRecipes: {} },
-    });
-    show(preferences(r.settings));
-    status("Recipe overrides removed; the game's table applies.", "ok");
-  } catch (e) {
-    status(e.message, "bad");
-    $("forgetRecipes").disabled = false;
-  }
-}
 $("settings").addEventListener("submit", save);
 $("test").addEventListener("click", test);
-$("forgetRecipes").addEventListener("click", forgetRecipes);
 $("show").addEventListener("change", () => {
   $("key").type = $("show").checked ? "text" : "password";
 });

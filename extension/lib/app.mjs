@@ -5,8 +5,11 @@ import { snapshotSummary } from "./cases.mjs";
 import { createEquipment } from "./equipment.mjs";
 import { createCraftDesk } from "./craftdesk.mjs";
 import { casesStripHtml, tripLineHtml } from "./casesview.mjs";
+import { mountBar, headHtml, BAR_ID } from "./panel.mjs";
 import { panel, setHtml, notice, clock } from "./ui.mjs";
 import { createScheduler } from "./scheduler.mjs";
+
+const ON_EQUIPMENTS = /^\/market\/equipments\/?$/;
 
 export async function startLens(runtime = chrome.runtime) {
   const state = {
@@ -23,10 +26,10 @@ export async function startLens(runtime = chrome.runtime) {
     salesByCode: {},
     salesErrors: {},
     salesReading: null,
-    ledger: null,
     taxOnPage: null,
-    crafts: null, // the player's own feed, replayed by the desk
+    crafts: null, // the player's own feed, replayed by the ledger
     craftsUserId: null, // the id it was read for: the setting, else the page's own-profile links
+    selectedCode: null, // the item selected in the market grid
     errors: {},
     busy: new Set(),
   };
@@ -127,7 +130,7 @@ export async function startLens(runtime = chrome.runtime) {
       return;
     }
     const ttl = kind === "book" ? state.settings.intervalSec * 1000 : TTL[kind];
-    // Sales are fresh per item: the panel's item and the desk's item each keep their own read.
+    // Sales are fresh per item: the rows' item and the ledger's items each keep their own read.
     const held = kind === "sales" ? state.salesByCode[code] : state[kind];
     // A recorded read error ends a snapshot's exemption: a refresh that failed over a still-fresh cached read is
     // retried after the window below, so the warning clears on its own once a read succeeds.
@@ -186,7 +189,7 @@ export async function startLens(runtime = chrome.runtime) {
       } else {
         if (r[kind]) state[kind] = r[kind];
         if (kind === "sales" && r.sales?.code) {
-          // Keep the last few items' fills so rows of other codes keep their resale evidence.
+          // Keep the last few items' fills so rows of other codes keep their value evidence.
           const rest = { ...state.salesByCode };
           delete rest[r.sales.code];
           const kept = Object.entries(rest).slice(-(SALES_CODES_KEPT - 1));
@@ -205,7 +208,7 @@ export async function startLens(runtime = chrome.runtime) {
     }
     sched.schedule();
     if (kind === "sales" && !document.hidden) {
-      // The reads kept while this one ran go first, each with its force flag; the panel's item is asked for
+      // The reads kept while this one ran go first, each with its force flag; the grid's item is asked for
       // afterwards only when nothing is being read or waiting for it, so one refresh makes one read.
       drainSales();
       if (
@@ -229,68 +232,40 @@ export async function startLens(runtime = chrome.runtime) {
       if (state.busy.has("sales")) return;
     }
   }
+  const requestSales = (code) => {
+    if (context.equipment || context.craft) void read("sales", false, code);
+  };
   const equipment = createEquipment({
     settings: () => state.settings,
-    save,
-    refresh: () => {
-      void read("book", true);
-      if (salesWanted) void read("sales", true, salesWanted);
-      sched.schedule();
-    },
     requestSales: (code) => {
       salesWanted = code;
-      if (context.equipment) void read("sales", false, code);
+      requestSales(code);
     },
     rescan: () => sched.schedule(),
   });
   const desk = createCraftDesk({
     settings: () => state.settings,
-    save,
-    refresh: () => {
-      void read("book", true);
-      void read("cases", true);
-      if (desk.selected) void read("sales", true, desk.selected);
-      if (state.craftsUserId) void read("crafts", true, state.craftsUserId);
-      sched.schedule();
-    },
-    requestSales: (code) => {
-      if (context.craft) void read("sales", false, code);
-    },
-    rescan: () => sched.schedule(),
-    onLedger: async ({ changed = [], removed = [], baseRevision } = {}) => {
-      const r = await send({
-        type: "ledgerSet",
-        // What the desk rendered its rows from, not the newest revision this tab holds: a refresh may have landed in between.
-        baseRevision: Number.isSafeInteger(baseRevision) ? baseRevision : 0,
-        changed,
-        removed,
-      });
-      adoptLedger(r?.ledger);
-      return r;
-    },
+    requestSales,
   });
-  /** Take a ledger from the worker only when it is newer than the one held: answers can arrive out of order, and an old one must not roll the desk back. */
-  function adoptLedger(ledger) {
-    if (!ledger) return false;
-    if (state.ledger && !(ledger.revision > state.ledger.revision))
-      return false;
-    state.ledger = ledger;
-    return true;
-  }
-  let ledgerRequested = false;
-  async function loadLedger() {
-    if (ledgerRequested || disposed) return;
-    ledgerRequested = true;
-    const r = await send({ type: "ledgerGet" });
-    if (r?.ledger) adoptLedger(r.ledger);
-    else ledgerRequested = false; // asked again on the next scan
-    sched.schedule();
-  }
-  /** Another tab may have written: pick up a newer revision while the desk is open. */
-  async function refreshLedger() {
-    if (!state.ledger || disposed || document.hidden) return;
-    const r = await send({ type: "ledgerGet" });
-    if (adoptLedger(r?.ledger)) sched.schedule();
+  /** The bar's own controls: the tabs, refresh, and the desk's buttons. */
+  function onBarClick(e) {
+    const t = e.target.closest("[data-action]");
+    if (!t) return;
+    const name = t.dataset.action;
+    if (name === "tab") {
+      const tab = t.dataset.tab;
+      void save({ panel: state.settings.panel === tab ? "none" : tab });
+    } else if (name === "refresh") {
+      const open = state.settings.panel;
+      void read("book", true);
+      if (context.equipment || open === "craft") void read("avg", true);
+      if (open === "craft") void read("cases", true);
+      if (salesWanted) void read("sales", true, salesWanted);
+      if (open === "ledger" && state.craftsUserId)
+        void read("crafts", true, state.craftsUserId);
+      sched.schedule();
+    } else if (name === "settings" || name === "reload") action(name);
+    else if (desk.onClick(e)) sched.schedule();
   }
   const observer = new MutationObserver((muts) => {
     if (document.hidden || disposed) return;
@@ -325,60 +300,105 @@ export async function startLens(runtime = chrome.runtime) {
         characterData: true,
       });
   }
+  function removeBar() {
+    document.getElementById(BAR_ID)?.remove();
+    equipment.clear();
+    desk.clear();
+  }
   function scan() {
     if (disposed || document.hidden) return;
     const start = performance.now();
     lastScan = Date.now();
-    const before = context;
+    const onEquipments = ON_EQUIPMENTS.test(location.pathname);
     context = {
-      equipment:
-        state.settings.equipment &&
-        /^\/market\/equipments\/?$/.test(location.pathname),
+      equipment: state.settings.equipment && onEquipments,
+      craft: state.settings.craft && onEquipments,
     };
     const nextRoots = [];
-    if (context.equipment) {
-      const result = equipment.render({
-        ...state,
-        error: state.errors.book,
-        salesError: state.errors.sales,
-        salesErrors: state.salesErrors,
-        salesReading: state.salesReading,
-        salesBusy: state.busy.has("sales"),
-        busy: state.busy.has("book"),
-        action,
-      });
-      if (result) nextRoots.push(...result.roots);
-      const dialog = dom.pickerDialog();
+    const anchor =
+      context.equipment || context.craft ? dom.marketAnchor() : null;
+    if (anchor) {
+      const open = state.settings.panel;
+      const scanned = context.equipment
+        ? equipment.render({
+            ...state,
+            error: state.errors.book,
+            salesErrors: state.salesErrors,
+            salesReading: state.salesReading,
+            busy: state.busy.has("book"),
+          })
+        : null;
+      if (scanned) nextRoots.push(...scanned.roots);
+      else equipment.clear();
+      state.selectedCode =
+        scanned?.code ??
+        dom.selectedItemCode() ??
+        dom.filteredItemCode(location.search);
+      const dialog = context.equipment ? dom.pickerDialog() : null;
       if (dialog) nextRoots.push(dialog);
-    } else if (before.equipment) equipment.clear();
-    context.craft =
-      state.settings.craft &&
-      /^\/market\/equipments\/?$/.test(location.pathname);
-    if (context.craft) {
-      const bar = document.getElementById("scrap-sniper-bar");
-      state.taxOnPage = dom.taxRateFromText(dom.taxNotice()?.textContent);
-      if (!state.ledger && !state.setup && !state.settings.craftCollapsed)
-        void loadLedger();
-      // Whose crafts: the id set in settings, else the one the page's own-profile links carry. Another account's feed is never shown.
-      state.craftsUserId = state.settings.userId ?? dom.ownUserId();
-      if (state.crafts && state.crafts.userId !== state.craftsUserId)
-        state.crafts = null;
-      if (state.craftsUserId && !state.setup && !state.settings.craftCollapsed)
-        void read("crafts", false, state.craftsUserId);
-      // After the equipment bar; without that module, where the bar would go (the tax notice, else the grid's section).
-      const result = desk.render(
-        {
-          ...state,
-          busy: state.busy.has("cases") || state.busy.has("book"),
-          craftsError: state.errors.crafts ?? null,
-          craftsBusy: state.busy.has("crafts"),
-          action,
-        },
-        bar ?? dom.marketAnchor(),
-        { after: !!bar },
+      if (context.craft) {
+        state.taxOnPage = dom.taxRateFromText(dom.taxNotice()?.textContent);
+        // Whose crafts: the id set in settings, else the one the page's own-profile links carry. Another account's feed is never shown.
+        state.craftsUserId = state.settings.userId ?? dom.ownUserId();
+        if (state.crafts && state.crafts.userId !== state.craftsUserId)
+          state.crafts = null;
+        if (open === "ledger" && state.craftsUserId && !state.setup)
+          void read("crafts", false, state.craftsUserId);
+      }
+      const { bar, head, body } = mountBar(anchor, onBarClick);
+      const book = state.book;
+      const fresh =
+        !state.errors.book &&
+        freshness(book?.at, state.settings.intervalSec * 1000) === "fresh";
+      const tabs = [
+        ...(context.equipment ? ["market"] : []),
+        ...(context.craft ? ["craft", "ledger"] : []),
+      ];
+      const section = tabs.includes(open) ? open : "none";
+      setHtml(
+        head,
+        headHtml({
+          at: book?.at,
+          status: state.setup
+            ? "setup"
+            : !book && state.busy.has("book")
+              ? "loading"
+              : fresh
+                ? "fresh"
+                : "stale",
+          busy: state.busy.has("book") || state.busy.has("crafts"),
+          panel: section,
+          tabs,
+          pulse: context.equipment ? equipment.pulse() : "",
+          setup: !!state.setup,
+        }),
       );
-      if (result) nextRoots.push(...result.roots);
-    } else desk.clear();
+      if (state.setup) {
+        body.hidden = false;
+        setHtml(body, notice(state.setup, state.invalidated));
+      } else if (section === "none") {
+        body.hidden = true;
+        setHtml(body, "");
+      } else {
+        body.hidden = false;
+        if (section === "market")
+          equipment.renderMarket(body, {
+            ...state,
+            error: state.errors.book,
+          });
+        else
+          desk.render(
+            body,
+            {
+              ...state,
+              craftsError: state.errors.crafts ?? null,
+              craftsBusy: state.busy.has("crafts"),
+            },
+            section,
+          );
+      }
+      nextRoots.push(bar.parentElement);
+    } else removeBar();
     const onCases =
       /^\/market\/?$/.test(location.pathname) ||
       /\/inventory\/?$/.test(location.pathname);
@@ -463,18 +483,24 @@ export async function startLens(runtime = chrome.runtime) {
     metrics.scanMs += performance.now() - start;
     metrics.maxScanMs = Math.max(metrics.maxScanMs, performance.now() - start);
   }
-  // The average item prices drive the verdict whenever the drop policy sells
-  // any rarity (the default sells from epic), and the expanded details show
-  // them even when it does not.
+  // The average item prices drive the case verdict whenever the drop policy
+  // sells any rarity (the default sells from epic), and the expanded details
+  // show them even when it does not.
   const wantsAverages = () =>
     !state.settings.casesCollapsed || state.settings.sellFrom !== "never";
   async function fetchVisible() {
     if (state.setup || disposed || document.hidden) return;
     const jobs = [];
-    const deskOpen = context.craft && !state.settings.craftCollapsed;
-    if (context.equipment || deskOpen) jobs.push(read("book"));
-    if (context.cases || context.travel || deskOpen) jobs.push(read("cases"));
-    if (context.cases && wantsAverages()) jobs.push(read("avg"));
+    const open = state.settings.panel;
+    const craftOpen = context.craft && open === "craft";
+    if (context.equipment || craftOpen || (context.craft && open === "market"))
+      jobs.push(read("book"));
+    if (context.cases || context.travel || craftOpen) jobs.push(read("cases"));
+    // Every row is valued at the game's average until its item's fills are read; the craft board is built from them.
+    if (context.equipment || craftOpen || (context.cases && wantsAverages()))
+      jobs.push(read("avg"));
+    if (context.craft && open === "ledger" && state.craftsUserId)
+      jobs.push(read("crafts", false, state.craftsUserId));
     await Promise.all(jobs);
   }
   async function tick() {
@@ -493,7 +519,6 @@ export async function startLens(runtime = chrome.runtime) {
       }
       clock();
       void fetchVisible();
-      if (context.craft && !state.settings.craftCollapsed) void refreshLedger();
     }
     ticking = false;
     if (!disposed) timer = setTimeout(tick, 5000);
@@ -511,8 +536,7 @@ export async function startLens(runtime = chrome.runtime) {
     clearTimeout(timer);
     sched.cancel();
     observer.disconnect();
-    equipment.clear();
-    desk.clear();
+    removeBar();
     document.getElementById("scrap-sniper-cases")?.remove();
     for (const el of document.querySelectorAll(".ss-trip")) el.remove();
     document.removeEventListener("visibilitychange", visible);

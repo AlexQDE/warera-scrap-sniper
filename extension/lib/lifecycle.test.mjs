@@ -11,6 +11,7 @@ import {
 import { createScheduler } from "./scheduler.mjs";
 import { setHtml } from "./ui.mjs";
 
+const ME = "697b55e4bcecf3b37667e0d1";
 let app;
 beforeEach(() => {
   vi.useFakeTimers();
@@ -183,72 +184,33 @@ describe("SPA lifecycle and DOM work", () => {
     expect(setHtml(el, "<button>Example</button>")).toBe(false);
     expect(el.firstChild).toBe(button);
   });
-  it("mounts the equipment panel and the Craft Desk once on the equipment market, removes them on navigation, restores them on return, and cleans up", async () => {
-    window.history.replaceState({}, "", "/market/equipments");
-    document.body.innerHTML =
-      '<main><div id="tax"><span>Market tax 5%</span></div><div><div id="item-code-selector-jet" style="border-color:rgb(57,15,16)"></div></div><div id="offers"></div></main>';
-    const runtime = mockRuntime({
-      settings: { ...DEFAULTS, craftCollapsed: false },
-    });
-    const base = runtime.sendMessage.getMockImplementation();
-    runtime.sendMessage.mockImplementation(async (msg) => {
-      if (msg.type === "book")
-        return {
-          book: {
-            at: new Date().toISOString(),
-            bid: 0.2,
-            ask: 0.21,
-            bids: [{ price: 0.2, quantity: 1e6 }],
-            asks: [{ price: 0.21, quantity: 1e6 }],
-          },
-        };
-      if (msg.type === "ledgerGet")
-        return { ledger: { version: 1, entries: [] } };
-      return base(msg);
-    });
-    app = await startLens(runtime);
-    await settle();
-    const panels = () => [
-      document.querySelectorAll("#scrap-sniper-bar").length,
-      document.querySelectorAll("#warera-plus-craft").length,
-    ];
-    expect(panels()).toEqual([1, 1]);
-    expect(
-      document.getElementById("scrap-sniper-bar").nextElementSibling.id,
-    ).toBe("warera-plus-craft");
-    expect(document.getElementById("warera-plus-craft").textContent).toContain(
-      "Craft Desk",
-    );
-    expect(
-      runtime.sendMessage.mock.calls.filter(([m]) => m.type === "ledgerGet"),
-    ).toHaveLength(1);
-    for (let i = 0; i < 50; i++)
-      document
-        .getElementById("offers")
-        .appendChild(document.createElement("div"));
-    await settle();
-    await settle(5100);
-    expect(panels()).toEqual([1, 1]);
-    expect(
-      runtime.sendMessage.mock.calls.filter(([m]) => m.type === "ledgerGet")
-        .length,
-    ).toBeLessThanOrEqual(2); // the initial load plus one per-tick re-read for other tabs' writes
-    window.history.pushState({}, "", "/profile");
-    await settle(5100);
-    expect(panels()).toEqual([0, 0]);
-    expect(document.querySelector("[data-lens]")).toBeNull();
-    window.history.pushState({}, "", "/market/equipments");
-    await settle(5100);
-    expect(panels()).toEqual([1, 1]);
-    app.dispose();
-    expect(panels()).toEqual([0, 0]);
-    expect(document.querySelector("[data-lens]")).toBeNull();
-    expect(vi.getTimerCount()).toBe(0);
-  });
+
   const marketFixture = () => {
     document.body.innerHTML =
       '<main><div id="tax"><span>Market tax 5%</span></div><div><div id="item-code-selector-jet" style="z-index:1;border-color:rgb(57,15,16)"></div><div id="item-code-selector-boots5" style="border-color:rgb(43,43,18)"></div></div><div id="offers"></div></main>';
   };
+  /** A feed with one held legendary boots craft, so the Ledger asks for the boots' fills. */
+  const craftsFor = (userId) => ({
+    crafts: {
+      userId,
+      username: "Tester",
+      at: new Date().toISOString(),
+      days: 7,
+      complete: { crafts: true, sales: true, dismantles: true },
+      crafts: [
+        {
+          id: "held-boots-1",
+          code: "boots5",
+          skills: { dodge: 38 },
+          at: new Date(Date.now() - 3600e3).toISOString(),
+          scraps: 486,
+        },
+      ],
+      sales: [],
+      dismantles: [],
+      averages: {},
+    },
+  });
   const marketRuntime = (settings, salesImpl) => {
     const runtime = mockRuntime({ settings: { ...DEFAULTS, ...settings } });
     const base = runtime.sendMessage.getMockImplementation();
@@ -274,8 +236,7 @@ describe("SPA lifecycle and DOM work", () => {
                 fills: [],
               },
             };
-      if (msg.type === "ledgerGet")
-        return { ledger: { version: 1, entries: [] } };
+      if (msg.type === "crafts") return craftsFor(msg.userId);
       return base(msg);
     });
     return runtime;
@@ -284,114 +245,106 @@ describe("SPA lifecycle and DOM work", () => {
     runtime.sendMessage.mock.calls.filter(
       ([m]) => m.type === "sales" && m.itemCode === code,
     ).length;
-  it("mounts the Craft Desk on the grid's section when the Equipment module is off and the page shows no tax notice", async () => {
+  const bar = () => document.getElementById("scrap-sniper-bar");
+  const bodyText = () => bar().querySelector(".lens-body").textContent;
+
+  it("mounts the bar once on the equipment market with the open section, removes it on navigation, restores it on return, and cleans up", async () => {
+    window.history.replaceState({}, "", "/market/equipments");
+    marketFixture();
+    const runtime = marketRuntime({ panel: "craft" });
+    app = await startLens(runtime);
+    await settle();
+    const bars = () => document.querySelectorAll("#scrap-sniper-bar").length;
+    expect(bars()).toBe(1);
+    expect(bar().nextElementSibling.id).toBe("tax");
+    expect(bar().querySelectorAll('[data-action="tab"]')).toHaveLength(3);
+    expect(
+      bar()
+        .querySelector('[data-action="tab"][data-tab="craft"]')
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(bodyText()).toContain("Random EV");
+    expect(
+      runtime.sendMessage.mock.calls.filter(([m]) => m.type === "avg"),
+    ).toHaveLength(1); // the rows and the board are valued at the game's averages
+    expect(
+      runtime.sendMessage.mock.calls.filter(([m]) => m.type === "crafts"),
+    ).toHaveLength(0); // the feed is read only with the Ledger open
+    for (let i = 0; i < 50; i++)
+      document
+        .getElementById("offers")
+        .appendChild(document.createElement("div"));
+    await settle();
+    await settle(5100);
+    expect(bars()).toBe(1);
+    // the same tab closes the section; another opens it
+    bar().querySelector('[data-action="tab"][data-tab="craft"]').click();
+    await settle();
+    expect(bar().querySelector(".lens-body").hidden).toBe(true);
+    bar().querySelector('[data-action="tab"][data-tab="market"]').click();
+    await settle();
+    expect(bar().querySelector(".lens-body").hidden).toBe(false);
+    expect(bodyText()).toContain("mythic jet"); // the grid's selected item, its fills just read
+    window.history.pushState({}, "", "/profile");
+    await settle(5100);
+    expect(bars()).toBe(0);
+    expect(document.querySelector("[data-lens]")).toBeNull();
+    window.history.pushState({}, "", "/market/equipments");
+    await settle(5100);
+    expect(bars()).toBe(1);
+    app.dispose();
+    expect(bars()).toBe(0);
+    expect(document.querySelector("[data-lens]")).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it("mounts the bar on the grid's section with only the craft tabs when the Equipment module is off and the page shows no tax notice", async () => {
     window.history.replaceState({}, "", "/market/equipments");
     document.body.innerHTML =
       '<main><section id="market"><div><div id="item-code-selector-jet" style="border-color:rgb(57,15,16)"></div></div><div id="offers"></div></section></main>';
-    app = await startLens(
-      marketRuntime({ equipment: false, craftCollapsed: false }),
-    );
+    app = await startLens(marketRuntime({ equipment: false, panel: "craft" }));
     await settle();
-    expect(document.querySelectorAll("#scrap-sniper-bar")).toHaveLength(0);
-    const desk = () => document.querySelectorAll("#warera-plus-craft");
-    expect(desk()).toHaveLength(1);
-    expect(desk()[0].nextElementSibling?.id).toBe("market");
-    expect(desk()[0].textContent).toContain("Craft Desk");
-    expect(desk()[0].textContent).toContain("none read"); // no notice on the page: the tax field says so
+    expect(document.querySelectorAll("#scrap-sniper-bar")).toHaveLength(1);
+    expect(bar().nextElementSibling?.id).toBe("market");
+    expect(bar().querySelectorAll('[data-action="tab"]')).toHaveLength(2);
+    expect(
+      bar().querySelector('[data-action="tab"][data-tab="market"]'),
+    ).toBeNull();
+    expect(bodyText()).toContain("Random EV");
     for (let i = 0; i < 20; i++)
       document
         .getElementById("offers")
         .appendChild(document.createElement("div"));
     await settle(5100);
-    expect(desk()).toHaveLength(1);
-    // a notice appearing later becomes the anchor and the rate, with no second desk
+    expect(document.querySelectorAll("#scrap-sniper-bar")).toHaveLength(1);
+    // a notice appearing later becomes the anchor, with no second bar
     const notice = document.createElement("div");
     notice.innerHTML = "<span>Market tax 5%</span>";
     document.getElementById("market").prepend(notice);
     await settle(5100);
-    expect(desk()).toHaveLength(1);
-    expect(desk()[0].nextElementSibling).toBe(notice);
-    expect(desk()[0].textContent).toContain("read off the page notice");
+    expect(document.querySelectorAll("#scrap-sniper-bar")).toHaveLength(1);
+    expect(bar().nextElementSibling).toBe(notice);
     window.history.pushState({}, "", "/profile");
     await settle(5100);
-    expect(desk()).toHaveLength(0);
+    expect(document.querySelectorAll("#scrap-sniper-bar")).toHaveLength(0);
     window.history.pushState({}, "", "/market/equipments");
     await settle(5100);
-    expect(desk()).toHaveLength(1);
+    expect(document.querySelectorAll("#scrap-sniper-bar")).toHaveLength(1);
   });
-  it("reads the panel's item and the desk's item once each instead of looping between them", async () => {
+  it("reads the grid's item and the ledger's held item once each instead of looping between them", async () => {
     window.history.replaceState({}, "", "/market/equipments?item=jet");
     marketFixture();
-    const runtime = marketRuntime({
-      craftCollapsed: false,
-      craftRecipes: { boots5: { scraps: 10, steel: 2 } },
-    });
+    const runtime = marketRuntime({ panel: "ledger", userId: ME });
     app = await startLens(runtime);
-    await settle();
-    document
-      .querySelector('[data-action="desk-pick"][data-code="boots5"]')
-      .click();
     await settle(3000);
+    expect(
+      runtime.sendMessage.mock.calls.filter(([m]) => m.type === "crafts"),
+    ).toHaveLength(1);
+    expect(bodyText()).toContain("Tester");
     expect(salesCalls(runtime, "jet")).toBe(1);
     expect(salesCalls(runtime, "boots5")).toBe(1);
     expect(app.metrics.scans).toBeLessThan(10);
   });
-  it("runs a forced refresh of the desk's item after the panel's item read that was in flight, instead of dropping it", async () => {
-    window.history.replaceState({}, "", "/market/equipments?item=jet");
-    marketFixture();
-    let releaseJet = null;
-    const runtime = marketRuntime(
-      {
-        craftCollapsed: false,
-        craftRecipes: { boots5: { scraps: 10, steel: 2 } },
-      },
-      (msg) => {
-        const sales = {
-          sales: {
-            code: msg.itemCode,
-            at: new Date().toISOString(),
-            complete: true,
-            fills: [],
-          },
-        };
-        // the panel's forced jet read is slow
-        if (msg.itemCode === "jet" && msg.force)
-          return new Promise((resolve) => {
-            releaseJet = () => resolve(sales);
-          });
-        return sales;
-      },
-    );
-    app = await startLens(runtime);
-    await settle();
-    document
-      .querySelector('[data-action="desk-pick"][data-code="boots5"]')
-      .click();
-    await settle(3000);
-    expect(salesCalls(runtime, "jet")).toBe(1);
-    expect(salesCalls(runtime, "boots5")).toBe(1);
-    document.querySelector('#scrap-sniper-bar [data-action="refresh"]').click();
-    await settle();
-    expect(salesCalls(runtime, "jet")).toBe(2);
-    expect(releaseJet).not.toBeNull();
-    // meanwhile the desk's Refresh asks for boots5 again, by force, although its snapshot is fresh
-    document
-      .querySelector('#warera-plus-craft [data-action="refresh"]')
-      .click();
-    await settle();
-    expect(salesCalls(runtime, "boots5")).toBe(1); // single-flight: it waits for jet
-    releaseJet();
-    await settle(1000);
-    expect(salesCalls(runtime, "boots5")).toBe(2); // then runs, forced
-    const last = runtime.sendMessage.mock.calls
-      .filter(([m]) => m.type === "sales" && m.itemCode === "boots5")
-      .at(-1)[0];
-    expect(last.force).toBe(true);
-    await settle(3000);
-    expect(salesCalls(runtime, "boots5")).toBe(2); // once, no loop
-    expect(salesCalls(runtime, "jet")).toBe(2);
-  });
-  it("runs one forced read for the panel's new item when its refresh was queued behind another read, not a plain read and then the forced one", async () => {
+  it("runs one forced read for the grid's new item when its refresh was queued behind another read, not a plain read and then the forced one", async () => {
     window.history.replaceState({}, "", "/market/equipments?item=jet");
     marketFixture();
     let releaseJet = null;
@@ -414,14 +367,14 @@ describe("SPA lifecycle and DOM work", () => {
     await settle();
     expect(salesCalls(runtime, "jet")).toBe(1);
     expect(releaseJet).not.toBeNull();
-    // the selection moves to the boots while jet's read is in flight, and the panel's Refresh is clicked
+    // the selection moves to the boots while jet's read is in flight, and Refresh is clicked
     document.getElementById("item-code-selector-jet").style.zIndex = "";
     document.getElementById("item-code-selector-boots5").style.zIndex = "1";
     document
       .getElementById("offers")
       .appendChild(document.createElement("div"));
     await settle(5100);
-    document.querySelector('#scrap-sniper-bar [data-action="refresh"]').click();
+    bar().querySelector('[data-action="refresh"]').click();
     await settle();
     expect(salesCalls(runtime, "boots5")).toBe(0); // waits for jet
     releaseJet();
@@ -433,71 +386,10 @@ describe("SPA lifecycle and DOM work", () => {
     expect(boots[0][0].force).toBe(true);
     expect(salesCalls(runtime, "jet")).toBe(1);
   });
-  it("runs a forced refresh kept while the tab was hidden once it becomes visible", async () => {
-    window.history.replaceState({}, "", "/market/equipments?item=jet");
-    marketFixture();
-    let releaseJet = null;
-    const runtime = marketRuntime(
-      {
-        craftCollapsed: false,
-        craftRecipes: { boots5: { scraps: 10, steel: 2 } },
-      },
-      (msg) => {
-        const sales = {
-          sales: {
-            code: msg.itemCode,
-            at: new Date().toISOString(),
-            complete: true,
-            fills: [],
-          },
-        };
-        if (msg.itemCode === "jet" && msg.force)
-          return new Promise((resolve) => {
-            releaseJet = () => resolve(sales);
-          });
-        return sales;
-      },
-    );
-    app = await startLens(runtime);
-    await settle();
-    document
-      .querySelector('[data-action="desk-pick"][data-code="boots5"]')
-      .click();
-    await settle(3000);
-    expect(salesCalls(runtime, "boots5")).toBe(1);
-    document.querySelector('#scrap-sniper-bar [data-action="refresh"]').click();
-    await settle();
-    expect(releaseJet).not.toBeNull();
-    document
-      .querySelector('#warera-plus-craft [data-action="refresh"]')
-      .click();
-    await settle();
-    // the tab goes to the background before jet's read finishes
-    Object.defineProperty(document, "hidden", {
-      configurable: true,
-      value: true,
-    });
-    releaseJet();
-    await settle(3000);
-    expect(salesCalls(runtime, "boots5")).toBe(1); // nothing is read while hidden
-    Object.defineProperty(document, "hidden", {
-      configurable: true,
-      value: false,
-    });
-    document.dispatchEvent(new Event("visibilitychange"));
-    await settle(1000);
-    const boots = runtime.sendMessage.mock.calls.filter(
-      ([m]) => m.type === "sales" && m.itemCode === "boots5",
-    );
-    expect(boots).toHaveLength(2);
-    expect(boots[1][0].force).toBe(true);
-    await settle(3000);
-    expect(salesCalls(runtime, "boots5")).toBe(2); // once
-  });
   it("retries a failed forced refresh of a cached item after the retry window, and the warning clears", async () => {
     window.history.replaceState({}, "", "/market/equipments?item=jet");
     marketFixture();
-    const runtime = marketRuntime({}, (msg) =>
+    const runtime = marketRuntime({ panel: "market" }, (msg) =>
       msg.force
         ? { error: "http", message: "the API answered 503" }
         : {
@@ -512,292 +404,78 @@ describe("SPA lifecycle and DOM work", () => {
     app = await startLens(runtime);
     await settle(3000);
     expect(salesCalls(runtime, "jet")).toBe(1);
-    const bar = () => document.getElementById("scrap-sniper-bar").textContent;
-    document.querySelector('#scrap-sniper-bar [data-action="refresh"]').click();
+    bar().querySelector('[data-action="refresh"]').click();
     await settle(500);
     expect(salesCalls(runtime, "jet")).toBe(2);
-    expect(bar()).toContain("last read failed");
+    expect(bodyText()).toContain("last read failed");
     // the cached read is still fresh, but the error ends its exemption: the next discovery scan past the window asks again, once
     await settle(40_000);
     expect(salesCalls(runtime, "jet")).toBe(3);
-    expect(bar()).not.toContain("last read failed");
+    expect(bodyText()).not.toContain("last read failed");
   });
   it("retries a failing sales read after a pause, not on every scan", async () => {
     window.history.replaceState({}, "", "/market/equipments?item=jet");
     marketFixture();
-    const runtime = marketRuntime({}, () => ({
+    const runtime = marketRuntime({ panel: "market" }, () => ({
       error: "http",
       message: "the API answered 503",
     }));
     app = await startLens(runtime);
     await settle(3000);
     expect(salesCalls(runtime, "jet")).toBe(1);
-    expect(document.getElementById("scrap-sniper-bar").textContent).toContain(
-      "sales read failed",
-    );
+    expect(bodyText()).toContain("the API answered 503");
     await settle(16_000);
     expect(salesCalls(runtime, "jet")).toBe(1); // inside the retry window, and nothing scanned
     await settle(15_000); // the 30 s discovery scan asks again, once
     expect(salesCalls(runtime, "jet")).toBe(2);
     expect(app.metrics.scans).toBeLessThan(12);
   });
-  it("keeps a failed read of the panel's item reported while the desk's item reads fine", async () => {
+  it("keeps a failed read of the grid's item apart from the ledger's item, which reads fine", async () => {
     window.history.replaceState({}, "", "/market/equipments?item=jet");
     marketFixture();
-    const runtime = marketRuntime(
-      {
-        craftCollapsed: false,
-        craftRecipes: { boots5: { scraps: 10, steel: 2 } },
-      },
-      (msg) =>
-        msg.itemCode === "jet"
-          ? { error: "http", message: "the API answered 503" }
-          : {
-              sales: {
-                code: msg.itemCode,
-                at: new Date().toISOString(),
-                complete: true,
-                fills: [],
-              },
+    const runtime = marketRuntime({ panel: "ledger", userId: ME }, (msg) =>
+      msg.itemCode === "jet"
+        ? { error: "http", message: "the API answered 503" }
+        : {
+            sales: {
+              code: msg.itemCode,
+              at: new Date().toISOString(),
+              complete: true,
+              fills: [],
             },
+          },
     );
     app = await startLens(runtime);
-    await settle();
-    document
-      .querySelector('[data-action="desk-pick"][data-code="boots5"]')
-      .click();
     await settle(3000);
     expect(salesCalls(runtime, "boots5")).toBe(1);
-    expect(document.getElementById("scrap-sniper-bar").textContent).toContain(
-      "Resale: sales read failed",
+    expect(bodyText()).toContain("needs 5 recent sales"); // its own read worked, empty
+    expect(bodyText()).not.toContain("sales read failed"); // jet's failure is not its
+  });
+  it("keeps the bar in place and a focused tier button focused across native mutations", async () => {
+    window.history.replaceState({}, "", "/market/equipments");
+    marketFixture();
+    app = await startLens(marketRuntime({ panel: "craft" }));
+    await settle();
+    const node = bar();
+    const button = node.querySelector(
+      '[data-action="desk-tier"][data-tier="4"]',
     );
-    expect(
-      document.querySelector('[data-action="desk-pick"][data-code="boots5"]')
-        .textContent,
-    ).toBe("no price"); // its own read worked (no steel book in this fixture); jet's failure is not its
-  });
-  it("picks up a ledger written by another tab while the desk is open", async () => {
-    window.history.replaceState({}, "", "/market/equipments");
-    marketFixture();
-    const runtime = marketRuntime({ craftCollapsed: false });
-    let ledger = { version: 1, revision: 1, entries: [], tombstones: {} };
-    const inner = runtime.sendMessage.getMockImplementation();
-    runtime.sendMessage.mockImplementation(async (msg) =>
-      msg.type === "ledgerGet"
-        ? { ledger: structuredClone(ledger) }
-        : inner(msg),
-    );
-    app = await startLens(runtime);
-    await settle();
-    const desk = () => document.getElementById("warera-plus-craft").textContent;
-    expect(desk()).toContain("No crafts recorded yet");
-    const at = new Date().toISOString();
-    ledger = {
-      version: 1,
-      revision: 2,
-      tombstones: {},
-      entries: [
-        {
-          id: "other-tab-01",
-          createdAt: at,
-          updatedAt: at,
-          code: "boots5",
-          label: "from another tab",
-          inputs: {
-            scraps: 1,
-            steel: 0,
-            scrapPrice: 0.2,
-            steelPrice: null,
-            priceSource: "manual",
-          },
-          costBasis: 0.2,
-          result: { rarity: null, stat: null, durability: null, note: "" },
-          state: "crafted",
-          listing: { price: null, at: null },
-          sale: { proceeds: null, at: null, source: "manual" },
-          notes: "",
-        },
-      ],
-    };
-    await settle(5100);
-    expect(desk()).toContain("from another tab");
-  });
-  it("writes with the revision the desk rendered, not one refreshed in the window before the re-render, so the worker can drop the stale edit", async () => {
-    window.history.replaceState({}, "", "/market/equipments");
-    marketFixture();
-    const runtime = marketRuntime({
-      craftCollapsed: false,
-      craftRecipes: { boots5: { scraps: 10, steel: 2 } },
-    });
-    const at = new Date().toISOString();
-    const mine = {
-      id: "mine-0001",
-      createdAt: at,
-      updatedAt: at,
-      code: "boots5",
-      label: "mine",
-      inputs: {
-        scraps: 10,
-        steel: 2,
-        scrapPrice: 0.2,
-        steelPrice: 1.5,
-        priceSource: "manual",
-      },
-      costBasis: 5,
-      result: { rarity: null, stat: null, durability: null, note: "" },
-      state: "crafted",
-      listing: { price: null, at: null },
-      sale: { proceeds: null, at: null, source: "manual" },
-      notes: "",
-    };
-    let ledger = { version: 1, revision: 1, entries: [mine], tombstones: {} };
-    const inner = runtime.sendMessage.getMockImplementation();
-    const writes = [];
-    runtime.sendMessage.mockImplementation(async (msg) => {
-      if (msg.type === "ledgerGet") return { ledger: structuredClone(ledger) };
-      if (msg.type === "ledgerSet") {
-        writes.push(msg);
-        // the worker: the entry is tombstoned at revision 2, so a base below 2 loses
-        const dropped =
-          msg.baseRevision < 2 ? msg.changed.map((e) => e.id) : [];
-        return { ledger: structuredClone(ledger), merged: true, dropped };
-      }
-      return inner(msg);
-    });
-    app = await startLens(runtime);
-    await settle();
-    const keep = () =>
-      document.querySelector(
-        '[data-action="desk-ledger-move"][data-type="keep"][data-id="mine-0001"]',
-      );
-    expect(keep()).not.toBeNull();
-    const reads = () =>
-      runtime.sendMessage.mock.calls.filter(([m]) => m.type === "ledgerGet")
-        .length;
-    // another tab deletes the entry; this tab's next tick picks revision 2 up
-    ledger = {
-      version: 1,
-      revision: 2,
-      entries: [],
-      tombstones: { "mine-0001": { at, revision: 2 } },
-    };
-    const before = reads();
-    for (let t = 0; t < 5200 && reads() === before; t += 50)
-      await vi.advanceTimersByTimeAsync(50);
-    expect(reads()).toBe(before + 1);
-    // the refresh landed, the re-render (100 ms) has not: the row is still on screen, rendered from revision 1
-    expect(keep()).not.toBeNull();
-    keep().click();
-    await settle(400);
-    expect(writes).toHaveLength(1);
-    expect(writes[0].baseRevision).toBe(1);
-    expect(writes[0].changed.map((e) => e.id)).toEqual(["mine-0001"]);
-    expect(keep()).toBeNull();
-    expect(document.getElementById("warera-plus-craft").textContent).toContain(
-      "deleted in another tab meanwhile",
-    );
-  });
-  it("ignores a ledger refresh that answers late with an older revision than the tab already holds", async () => {
-    window.history.replaceState({}, "", "/market/equipments");
-    marketFixture();
-    const runtime = marketRuntime({
-      craftCollapsed: false,
-      craftRecipes: { boots5: { scraps: 10, steel: 2 } },
-    });
-    let revision = 1;
-    let entries = [];
-    const held = []; // ledger reads not yet answered, each with the snapshot the worker took
-    const writes = [];
-    const inner = runtime.sendMessage.getMockImplementation();
-    runtime.sendMessage.mockImplementation((msg) => {
-      if (msg.type === "ledgerGet") {
-        const ledger = {
-          version: 1,
-          revision,
-          entries: structuredClone(entries),
-          tombstones: {},
-        };
-        return new Promise((resolve) => held.push(() => resolve({ ledger })));
-      }
-      if (msg.type === "ledgerSet") {
-        writes.push(msg);
-        revision++;
-        entries = [...entries, ...msg.changed];
-        return Promise.resolve({
-          ledger: {
-            version: 1,
-            revision,
-            entries: structuredClone(entries),
-            tombstones: {},
-          },
-          merged: false,
-          dropped: [],
-          conflicts: [],
-        });
-      }
-      return inner(msg);
-    });
-    app = await startLens(runtime);
-    await settle();
-    expect(held).toHaveLength(1);
-    held.shift()(); // the initial load answers at once
-    await settle();
-    // the first tick's refresh is slow: it is answered only after this tab's own write below
-    const before = held.length;
-    for (let t = 0; t < 5200 && held.length === before; t += 50)
-      await vi.advanceTimersByTimeAsync(50);
-    expect(held).toHaveLength(before + 1);
-    const slow = held.shift();
-    document
-      .querySelector('[data-action="desk-pick"][data-code="boots5"]')
-      .click();
-    await settle();
-    document.querySelector('[data-action="desk-ledger-new"]').click();
-    await settle();
-    document.querySelector('[data-action="desk-ledger-add"]').click();
-    await settle();
-    expect(writes).toHaveLength(1);
-    const id = writes[0].changed[0].id;
-    const row = () =>
-      document.querySelector(
-        `[data-action="desk-ledger-move"][data-type="keep"][data-id="${id}"]`,
-      );
-    expect(row()).not.toBeNull();
-    // the slow answer arrives now, from before the write: revision 1, no entries. It must not roll the desk back.
-    slow();
-    await settle();
-    expect(row()).not.toBeNull();
-    row().click();
-    await settle();
-    expect(writes).toHaveLength(2);
-    expect(writes[1].baseRevision).toBe(2);
-    for (const answer of held) answer(); // nothing left hanging
-  });
-  it("keeps both panels in place and a focused desk field focused across native mutations", async () => {
-    window.history.replaceState({}, "", "/market/equipments");
-    marketFixture();
-    app = await startLens(marketRuntime({ craftCollapsed: false }));
-    await settle();
-    const bar = document.getElementById("scrap-sniper-bar");
-    const desk = document.getElementById("warera-plus-craft");
-    const input = desk.querySelector('[data-field="scrapPrice"]');
-    input.focus();
-    expect(document.activeElement).toBe(input);
+    button.focus();
+    expect(document.activeElement).toBe(button);
     for (let i = 0; i < 5; i++) {
       document
         .getElementById("offers")
         .appendChild(document.createElement("div"));
       await settle(1100);
     }
-    expect(document.getElementById("scrap-sniper-bar")).toBe(bar);
-    expect(document.getElementById("warera-plus-craft")).toBe(desk);
-    expect(bar.nextElementSibling).toBe(desk);
-    expect(document.activeElement).toBe(input);
+    expect(bar()).toBe(node);
+    expect(bar().nextElementSibling.id).toBe("tax");
+    expect(document.activeElement.dataset.tier).toBe("4");
   });
   it("survives repeated navigation away and back without duplicate panels or leaked nodes", async () => {
     window.history.replaceState({}, "", "/market/equipments");
     marketFixture();
-    app = await startLens(marketRuntime({ craftCollapsed: false }));
+    app = await startLens(marketRuntime({ panel: "craft" }));
     await settle();
     const count = () => document.querySelectorAll("[data-lens]").length;
     const first = count();
@@ -809,7 +487,6 @@ describe("SPA lifecycle and DOM work", () => {
       window.history.pushState({}, "", "/market/equipments");
       await settle(5100);
       expect(document.querySelectorAll("#scrap-sniper-bar")).toHaveLength(1);
-      expect(document.querySelectorAll("#warera-plus-craft")).toHaveLength(1);
       expect(count()).toBe(first);
     }
     app.dispose();

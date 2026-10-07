@@ -1,7 +1,7 @@
 {
   "name": "warera-plus",
-  "version": "1.8.0",
-  "description": "WarEra Plus: read-only decision support for WarEra (equipment offers, Craft Desk and ledger, cases, travel) with depth-aware quotes and explicit uncertainty.",
+  "version": "2.0.0",
+  "description": "WarEra Plus: read-only decision support for WarEra (SNIPE and FLIP tags on equipment offers, a craft board at live prices, your own crafts replayed from the feed, cases, travel) with depth-aware quotes and explicit uncertainty.",
   "type": "module",
   "private": true,
   "scripts": {

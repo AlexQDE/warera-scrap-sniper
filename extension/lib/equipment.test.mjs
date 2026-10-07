@@ -24,8 +24,6 @@ beforeEach(() => {
   settings = { ...DEFAULTS };
   equipment = createEquipment({
     settings: () => settings,
-    save: (p) => Object.assign(settings, p),
-    refresh: vi.fn(),
     requestSales: vi.fn(),
   });
   state = {
@@ -55,7 +53,6 @@ it("values the row rarity, not a newly selected unrelated grid item", () => {
   equipment.render(state);
   expect(row.querySelector(".ss-verdict")).toBe(annotation);
   expect(annotation.firstChild).toBe(content);
-  expect(document.querySelectorAll("#scrap-sniper-bar")).toHaveLength(1);
 });
 it("distinguishes near losses, missing depth and stale quotes", () => {
   price = 1.3;
@@ -78,9 +75,6 @@ it("removes annotations on setup errors and fully restores DOM on cleanup", () =
   equipment.render(state);
   expect(row.querySelector(".ss-verdict")).toBeNull();
   expect(row.dataset.scrapSniper).toBeUndefined();
-  expect(document.getElementById("scrap-sniper-bar").textContent).toContain(
-    "Add your API key",
-  );
   equipment.clear();
   expect(document.querySelector("[data-lens]")).toBeNull();
   expect(document.getElementById("buy")).not.toBeNull();

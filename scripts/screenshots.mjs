@@ -4,7 +4,7 @@
 //
 // Serves the extension (and, with --before, an older copy of it) next to
 // fixtures/market.html, boots the content app in headless Chromium with a
-// mock runtime (synthetic quotes, fills and ledger; no API, no key), and
+// mock runtime (synthetic quotes, averages and fills; no API, no key), and
 // captures the equipment market, the Craft Desk and the settings page at
 // wide and narrow widths. The same page then runs the loader benchmark:
 // mutation bursts against a 60-row list, counting layout-forcing reads.
@@ -67,7 +67,7 @@ const base = `http://127.0.0.1:${server.address().port}`;
 await mkdir(outDir, { recursive: true });
 
 // The mock runtime the content app talks to instead of the worker: one
-// synthetic scrap book, resource books, 72 h of fills per item, a ledger.
+// synthetic scrap book, resource books, the game's averages, 72 h of fills per item.
 const RUNTIME = `(() => {
   const NOW = Date.now();
   const iso = (msAgo = 0) => new Date(NOW - msAgo).toISOString();
@@ -77,12 +77,10 @@ const RUNTIME = `(() => {
   let seed = 11;
   const rnd = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
   const fillsFor = (code) => Array.from({ length: code === 'jet' ? 23 : code === 'knife' ? 4 : 9 }, (_, i) => ({ price: Number(((BASE[code] ?? 10) * (0.85 + rnd() * 0.3)).toFixed(3)), at: iso((i * 3 + rnd() * 2) * 3600e3), state: rnd() > 0.8 ? 60 + Math.round(rnd() * 40) : 100, code }));
-  const settings = Object.assign({ minMarginPct: 0, intervalSec: 30, collapsed: true, casesCollapsed: true, roundTrip: false, equipment: true, cases: true, travel: true, picker: true, sellFrom: 'epic', craft: true, craftCollapsed: true, craftBatch: 5, craftTargetPct: 20, taxPct: null, craftRecipes: {}, schemaVersion: 3 }, window.__settings ?? {});
+  const settings = Object.assign({ minMarginPct: 0, flipPct: 10, intervalSec: 30, panel: 'none', casesCollapsed: true, roundTrip: false, equipment: true, cases: true, travel: true, picker: true, sellFrom: 'epic', craft: true, userId: null, craftSteelMode: 'random', schemaVersion: 4 }, window.__settings ?? {});
   const info = { settings, hasKey: true, revision: 1, authRevision: 1 };
-  const entry = (id, code, state, extra) => ({ id, createdAt: iso(2 * 86400e3), updatedAt: iso(86400e3), code, label: '', inputs: { scraps: 270, steel: 4, scrapPrice: 0.221, steelPrice: 1.612, priceSource: 'inferred' }, costBasis: 270 * 0.221 + 4 * 1.612, result: { rarity: 'rare', stat: 48, durability: 100, note: 'synthetic entry' }, state, listing: { price: null, at: null }, sale: { proceeds: null, at: null, source: 'manual' }, notes: '', ...extra });
-  let ledger = { version: 1, entries: [entry('fx00000001', 'chest3', 'sold', { listing: { price: 78, at: iso(80000e3) }, sale: { proceeds: 74.1, at: iso(40000e3), source: 'manual' } }), entry('fx00000002', 'chest3', 'listed', { listing: { price: 82.5, at: iso(30000e3) } })] };
   const books = { scraps: book(0.221, 0.224), steel: book(1.612, 1.655), oil: book(0.241, 0.249), woodenCase: book(7.4, 7.9), case1: book(3.4, 3.6), case2: book(21.5, 22.4) };
-  window.__mock = { settings, ledger: () => ledger, calls: [] };
+  window.__mock = { settings, calls: [] };
   return {
     sendMessage: async (msg) => {
       window.__mock.calls.push(msg.type);
@@ -91,10 +89,8 @@ const RUNTIME = `(() => {
         case 'saveSettings': Object.assign(settings, msg.settings); info.revision++; return structuredClone(info);
         case 'book': return { book: books.scraps };
         case 'cases': return { cases: { at: iso(), books } };
-        case 'avg': return { avg: { at: iso(), values: {}, times: {}, failures: {} } };
+        case 'avg': return { avg: { at: iso(), values: Object.fromEntries(Object.entries(BASE).map(([c, v]) => [c, v])), times: Object.fromEntries(Object.keys(BASE).map((c) => [c, iso()])), failures: {} } };
         case 'sales': return { sales: { code: msg.itemCode, hours: 72, at: iso(), complete: msg.itemCode !== 'jet', fills: fillsFor(msg.itemCode) } };
-        case 'ledgerGet': return { ledger: structuredClone(ledger) };
-        case 'ledgerSet': ledger = { version: 1, entries: msg.ledger.entries }; return { ledger: structuredClone(ledger) };
         default: return {};
       }
     },
@@ -169,21 +165,15 @@ console.log("after:");
   await page.close();
 }
 {
-  // The desk ships the game's recipe table, so the screenshots need none.
   for (const width of [1280, 420]) {
-    const page = await openMarket({
-      width,
-      settings: { craftCollapsed: false },
-    });
-    await page.locator("[data-action='desk-pick'][data-code='jet']").click();
+    const page = await openMarket({ width, settings: { panel: "craft" } });
+    await page.locator("[data-action='desk-tier'][data-tier='6']").click();
     await page.waitForTimeout(600);
     await shot(
       page,
       `craftdesk-${width === 1280 ? "wide" : "narrow"}`,
-      "#warera-plus-craft",
+      "#scrap-sniper-bar",
     );
-    if (width === 1280)
-      await shot(page, "ledger-wide", "#warera-plus-craft .lens-ledger-box");
     await page.close();
   }
 }
@@ -201,7 +191,7 @@ if (beforeDir) {
     const page = await openMarket({
       prefix: "/old",
       width,
-      settings: { collapsed: false },
+      settings: { panel: "market" },
     });
     await shot(page, name);
     await page.close();

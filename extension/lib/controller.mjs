@@ -13,16 +13,6 @@ import { CASE_CODES, WOODEN_CODES, ALL_GEAR_CODES } from "./cases.mjs";
 import { makeSingleFlight } from "./flight.mjs";
 import { preferences } from "./settings.mjs";
 import { CACHE_VERSION, TTL, freshness } from "./quality.mjs";
-import {
-  normalizeLedger,
-  normalizeEntry,
-  mergeLedgers,
-  LEDGER_VERSION,
-} from "./ledger.mjs";
-import { applyRecipeOps } from "./craftdata.mjs";
-
-/** The craft ledger is the player's own record: validated, bounded, kept across key changes, never sent anywhere. */
-export const LEDGER_BYTES = 512_000;
 
 const CASE_BOOKS = [
   ...new Set([...CASE_CODES, ...WOODEN_CODES, "scraps", "oil"]),
@@ -245,17 +235,8 @@ export function createController({
         nextKey !== keyOf(settings) ||
         (savesKey &&
           rejectedAuthRevision === (Number(settings.authRevision) || 0));
-      // A recipe change arrives as operations on the stored table (set / remove), never as a tab's whole copy of it.
-      const recipes = patch.craftRecipeOps
-        ? {
-            craftRecipes: applyRecipeOps(
-              settings.craftRecipes,
-              patch.craftRecipeOps,
-            ),
-          }
-        : {};
       const next = {
-        ...preferences({ ...settings, ...patch, ...recipes }),
+        ...preferences({ ...settings, ...patch }),
         revision: (Number(settings.revision) || 0) + 1,
         authRevision:
           (Number(settings.authRevision) || 0) + (resetsAuth ? 1 : 0),
@@ -374,74 +355,6 @@ export function createController({
           }
         });
       }
-      if (msg?.type === "ledgerGet") {
-        const { craftLedger } = await storage.get(["craftLedger"]);
-        return { ledger: normalizeLedger(craftLedger, now()) };
-      }
-      if (msg?.type === "ledgerSet")
-        return serial(async () => {
-          // A tab sends only what it changed: the entries it created or
-          // edited and the ids it removed, with the revision it read. They
-          // are merged onto what is stored, so a tab's untouched (and maybe
-          // stale) copy of the rest can neither overwrite nor revive anything;
-          // deletions are remembered with the revision they made, so an edit
-          // from a tab that read an older revision loses however it is
-          // stamped, and an entry changed since the tab read keeps its stored
-          // copy against the tab's edit or deletion; the tab is told which
-          // ids were dropped or conflicted. A write from a base older than
-          // the deletion history still held is refused whole, with the
-          // current ledger, so the tab reloads and tries again.
-          const { craftLedger } = await storage.get(["craftLedger"]);
-          const stored = normalizeLedger(craftLedger, now());
-          // Each entry is validated on its own, not as a bounded ledger: what the cap cannot hold is reported, never cut here.
-          const changed = (Array.isArray(msg.changed) ? msg.changed : [])
-            .map((e) => normalizeEntry(e, now()))
-            .filter((e) => e != null);
-          const removed = (Array.isArray(msg.removed) ? msg.removed : [])
-            .map(String)
-            .slice(0, 500);
-          const revision = stored.revision + 1;
-          const merged = mergeLedgers({
-            stored: stored.entries,
-            incoming: changed,
-            removed,
-            tombstones: stored.tombstones,
-            baseRevision: Number(msg.baseRevision),
-            revision,
-            horizon: stored.horizon,
-            now: now(),
-          });
-          if (merged.stale)
-            return {
-              error: "stale",
-              message:
-                "this tab's copy of the ledger was too old to apply safely; it has been reloaded, try again",
-              ledger: stored,
-            };
-          const ledger = {
-            version: LEDGER_VERSION,
-            revision,
-            entries: merged.entries,
-            tombstones: merged.tombstones,
-            horizon: merged.horizon,
-          };
-          if (JSON.stringify(ledger).length > LEDGER_BYTES)
-            return {
-              error: "too-large",
-              message:
-                "The craft ledger is too large to store; export and trim it",
-            };
-          await storage.set({ craftLedger: ledger });
-          return {
-            ledger,
-            merged:
-              craftLedger != null &&
-              Number(msg.baseRevision) !== stored.revision,
-            dropped: merged.dropped,
-            conflicts: merged.conflicts,
-            capped: merged.capped,
-          };
-        });
       if (["book", "cases", "avg", "sales", "crafts"].includes(msg?.type)) {
         if (msg.type === "sales" && !ITEM_CODES.has(msg.itemCode))
           return { error: "bad-item", message: "Unknown equipment item" };

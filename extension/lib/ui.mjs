@@ -3,7 +3,7 @@ import { escapeHtml, ago } from "./format.mjs";
 const lastHtml = new WeakMap();
 /** What makes a control the same control after a rewrite: its action or field plus the code, id or type it carries. */
 const controlKey = (node) =>
-  ["action", "field", "code", "id", "type"]
+  ["action", "field", "code", "id", "type", "tab", "tier", "window"]
     .map((k) => node.dataset[k] ?? "")
     .join("\u0000");
 /** Age labels ("12s ago") are kept current by clock(); a passing second must not count as new markup. */
