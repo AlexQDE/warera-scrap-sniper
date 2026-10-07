@@ -278,7 +278,7 @@ export function createEquipment({
           : `${value.n} sales any stats`
       : salesState;
     const worth = value
-      ? `<span class="lens-kv"><b class="${gapPct != null && value.matched ? (gapPct >= 0 ? "lens-pos" : "lens-neg") : ""}">~${fmt(value.amount)} g</b><small>sells · ${gapPct != null ? `${signed(gapPct, 0)}% · ` : ""}${escapeHtml(basis)}</small></span>`
+      ? `<span class="lens-kv"><b class="${gapPct != null && value.matched ? (gapPct >= 0 ? "lens-pos" : "lens-neg") : ""}">~${fmt(value.amount)} g</b><small>sells · ${gapPct != null && value.matched ? `${signed(gapPct, 0)}% · ` : ""}${escapeHtml(basis)}</small></span>`
       : `<span class="lens-kv"><b>–</b><small>sells · ${escapeHtml(salesState)}</small></span>`;
     return `<span class="lens-tag" data-kind="${kind}">${TAGS[kind]}</span>${scrap}${worth}<button type="button" data-action="details" aria-expanded="${open}" aria-label="${open ? "Hide" : "Show"} details for this offer">${open ? "▾" : "▸"}</button>${open ? detailsHtml(r, ctx) : ""}`;
   }

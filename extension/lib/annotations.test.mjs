@@ -217,7 +217,7 @@ describe("row annotation", () => {
     state.avg = { at: iso(), values: { knife: 1.5 }, times: { knife: iso() } };
     equipment.render(state);
     expect(annotation().textContent).toContain("~1.500 g");
-    expect(annotation().textContent).toContain("sells · +50% · game avg");
+    expect(annotation().textContent).toContain("sells · game avg"); // no gap figure on a number that rests on no stats
     state.salesReading = "knife";
     state.avg = null;
     equipment.render(state);
