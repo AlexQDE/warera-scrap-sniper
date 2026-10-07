@@ -448,7 +448,7 @@ describe("SPA lifecycle and DOM work", () => {
     app = await startLens(runtime);
     await settle(3000);
     expect(salesCalls(runtime, "boots5")).toBe(1);
-    expect(bodyText()).toContain("needs 5 recent sales"); // its own read worked, empty
+    expect(bodyText()).toContain("no sales in 7 d"); // its own read worked, empty
     expect(bodyText()).not.toContain("sales read failed"); // jet's failure is not its
   });
   it("keeps the bar in place and a focused tier button focused across native mutations", async () => {

@@ -24,36 +24,45 @@ export function codeFor(slot, rarity) {
 }
 
 const DURABILITY_RE = /^(\d{1,3})\s*%$/;
-const STAT_RE = /^\+?(\d{1,6})$/;
+const STAT_RE = /^\+?(\d{1,6})\s*%?$/;
 const NAMED_STAT_RE =
-  /^(?:attack|defense|defence|damage|health|hp|power|armou?r|stat)\s*[:+]?\s*(\d{1,6})$/i;
+  /^(?:attack|defense|defence|damage|health|hp|power|armou?r|stat)\s*[:+]?\s*(\d{1,6})\s*%?$/i;
 
 /**
  * The numbers an offer row prints, read off its visible lines (as
- * dom.offerRows lists them): the durability "NN%" and the stat value, the
- * bare integer that is neither the price (the number right before BUY) nor
- * the durability. Fails closed: a row missing either is "unreadable" with
- * the reason, never guessed. Layout read from synthetic fixtures; see the
- * release checklist for the live check.
+ * dom.offerRows lists them). The live rows (2026-10-07): a weapon prints
+ * `101`, `16%`, `100%` (attack, crit, durability), an armour piece `12%`,
+ * `100%` (its stat, durability) or `46`, `100%` for armor. So the
+ * durability is the LAST `NN%` line before the price (the line right before
+ * BUY), and every number printed before it is a stat, in order. Fails
+ * closed: a row with no durability or no stat is "unreadable" with the
+ * reason, never guessed.
  * @param {ReadonlyArray<string> | null | undefined} lines
+ * @returns {{ readable: boolean, durability: number | null, stat: number | null, stats: number[], reason: string | null }}
  */
 export function readStats(lines) {
   const list = (lines ?? []).map((l) => String(l ?? "").trim());
   const buy = list.findIndex((l) => /^buy$/i.test(l));
   const priceIndex = buy > 0 ? buy - 1 : -1;
-  let durability = null;
-  let stat = null;
+  /** @type {Array<{ value: number, pct: boolean }>} */
+  const numbers = [];
   for (const [i, line] of list.entries()) {
     if (i === priceIndex) continue;
     if (buy >= 0 && i > buy) break;
-    const d = DURABILITY_RE.exec(line);
-    if (d && durability == null && Number(d[1]) <= 100) {
-      durability = Number(d[1]);
-      continue;
-    }
     const s = NAMED_STAT_RE.exec(line) ?? STAT_RE.exec(line);
-    if (s && stat == null) stat = Number(s[1]);
+    if (s) numbers.push({ value: Number(s[1]), pct: DURABILITY_RE.test(line) });
   }
+  let durabilityAt = -1;
+  for (let i = numbers.length - 1; i >= 0; i--)
+    if (numbers[i].pct && numbers[i].value <= 100) {
+      durabilityAt = i;
+      break;
+    }
+  const durability = durabilityAt >= 0 ? numbers[durabilityAt].value : null;
+  const stats = (durabilityAt >= 0 ? numbers.slice(0, durabilityAt) : numbers)
+    .filter((n) => !(n.pct && n.value > 100))
+    .map((n) => n.value);
+  const stat = stats.length ? stats[0] : null;
   const reason =
     buy < 0
       ? "no BUY control"
@@ -64,7 +73,7 @@ export function readStats(lines) {
           : stat == null
             ? "no stat value"
             : null;
-  return { readable: reason == null, durability, stat, reason };
+  return { readable: reason == null, durability, stat, stats, reason };
 }
 
 /**

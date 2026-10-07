@@ -23,21 +23,40 @@ describe("codeFor", () => {
 });
 
 describe("readStats", () => {
-  it("reads the durability and the stat value, skipping the price before BUY", () => {
+  it("reads a live weapon row: attack, crit, then the durability as the last percentage before the price", () => {
     const r = readStats([
-      "Item",
-      "270",
-      "50%",
-      "Seller",
-      "2h ago",
-      "430.5",
+      "101",
+      "16%",
+      "100%",
+      "Pyle_prapyle",
+      "now",
+      "40.4",
       "BUY",
     ]);
     expect(r).toEqual({
       readable: true,
-      durability: 50,
-      stat: 270,
+      durability: 100,
+      stat: 101,
+      stats: [101, 16],
       reason: null,
+    });
+  });
+  it("reads a live armour row whose stat is printed as a percentage, and one printed bare", () => {
+    expect(
+      readStats(["12%", "100%", "Oldehove", "32m", "13.45", "BUY"]),
+    ).toEqual({
+      readable: true,
+      durability: 100,
+      stat: 12,
+      stats: [12],
+      reason: null,
+    });
+    expect(
+      readStats(["46", "84%", "Seller", "1h", "120", "BUY"]),
+    ).toMatchObject({
+      durability: 84,
+      stat: 46,
+      stats: [46],
     });
   });
   it("accepts a named stat and a plus sign, and ignores lines after BUY", () => {
@@ -58,14 +77,17 @@ describe("readStats", () => {
       stat: 270,
       reason: "no durability",
     });
-    expect(readStats(["50%", "430.5", "BUY"])).toMatchObject({
+    expect(readStats(["100%", "430.5", "BUY"])).toMatchObject({
       readable: false,
       reason: "no stat value",
     });
     expect(readStats(["Seller", "430.5", "BUY"]).reason).toBe(
       "no durability or stat",
     );
-    expect(readStats(["270", "150%", "430.5", "BUY"]).durability).toBeNull();
+    expect(readStats(["270", "150%", "430.5", "BUY"])).toMatchObject({
+      durability: null,
+      stats: [270],
+    });
     expect(readStats(null).readable).toBe(false);
   });
 });

@@ -12,12 +12,11 @@ import { itemLabel, rarityFromItemCode } from "./dom.mjs";
 import { comparableFills } from "./resale.mjs";
 import {
   replayCrafts,
-  rollValue,
   craftsSummary,
   dayOf,
-  MIN_ROLL_SAMPLE,
   COUNTED_FROM,
 } from "./observed.mjs";
+import { similarValue, WINDOW_HOURS } from "./similar.mjs";
 
 const pct = (v, d = 0) => (v == null ? "–" : `${signed(v * 100, d)}%`);
 /** The player's local calendar date, not the UTC one. */
@@ -125,13 +124,14 @@ export function createCraftDesk({
         const fills = sales
           ? comparableFills(sales.fills, {
               code: pickedTier,
+              hours: WINDOW_HOURS,
               now: now(),
               state: null,
             })
           : [];
         const fillsLine = pickedTier
           ? sales
-            ? `${esc(itemLabel(pickedTier))}: ${fills.length} fills in 72 h${fills.length ? ` · median ${fmt(median(fills.map((f) => f.price)))} g · ${fmt(Math.min(...fills.map((f) => f.price)))}–${fmt(Math.max(...fills.map((f) => f.price)))}` : ""} (selected in the grid)`
+            ? `${esc(itemLabel(pickedTier))}: ${fills.length} sales in 7 d${fills.length ? ` · median ${fmt(median(fills.map((f) => f.price)))} g · ${fmt(Math.min(...fills.map((f) => f.price)))}–${fmt(Math.max(...fills.map((f) => f.price)))}` : ""} (selected in the grid)`
             : `${esc(itemLabel(pickedTier))}: reading its fills…`
           : "select an item of this tier in the grid for its same-roll fills";
         return `${main}<tr class="lens-tier-detail"><td colspan="6"><div class="lens-chips">${slots}</div><p>Recipe ${r.scraps} scraps + ${r.steelRandom} steel at random, ${r.steelChosen} steel for a chosen slot (${chosenCost}). Random EV = the six slots' averages at the game's odds (30% weapon, 14% each armour slot); ${floor}.</p><p class="lens-muted">${fillsLine}</p></td></tr>`;
@@ -176,12 +176,14 @@ export function createCraftDesk({
       craftWindow === "7d"
         ? dayOf(new Date(now() - 6 * 86400e3).toISOString())
         : today;
+    // The same number a row of this piece would show: the sales of its own stats in the last 7 days.
     const valueOf = (e) =>
-      rollValue(
+      similarValue(
         e.code,
         e.skills,
         comparableFills(state.salesByCode?.[e.code]?.fills ?? [], {
           code: e.code,
+          hours: WINDOW_HOURS,
           now: now(),
           state: null,
         }),
@@ -217,8 +219,8 @@ export function createCraftDesk({
           : e.fate === "scrapped"
             ? `scrapped${e.proceeds != null ? `: ${fmt(e.proceeds)} g in scraps` : ""}`
             : v?.value != null
-              ? `clears ${fmt(v.value)} g <small>${v.level === "roll" ? `${v.n} sales of this roll` : v.level === "band" ? `${v.n} sales at ${v.band?.lo}–${v.band?.hi}` : `${v.n} sales, any roll`}</small>`
-              : `<small>${state.salesErrors?.[e.code] ? "sales read failed" : state.salesByCode?.[e.code] ? `needs ${MIN_ROLL_SAMPLE} recent sales` : "reading sales…"}</small>`;
+              ? `clears ${fmt(v.value)} g <small>${esc(v.label)}</small>`
+              : `<small>${state.salesErrors?.[e.code] ? "sales read failed" : state.salesByCode?.[e.code] ? esc(v?.label ?? "too few sales with these stats") : "reading sales…"}</small>`;
       const pnl =
         e.cost == null
           ? null
@@ -240,7 +242,7 @@ export function createCraftDesk({
       : `player …${esc(String(id).slice(-6))}`;
     return head(
       `<b>${who}</b> · ${c.days} days of your feed · read ${timeLabel(c.at, now())}${state.craftsBusy ? " · refreshing" : ""}${state.craftsError ? ` · <b>last read failed</b> (${esc(state.craftsError)}): the last good read is shown` : ""}`,
-      `<div class="lens-windows"><button type="button" data-action="desk-window" data-window="today" aria-pressed="${craftWindow !== "7d"}">Today</button><button type="button" data-action="desk-window" data-window="7d" aria-pressed="${craftWindow === "7d"}">7 days</button></div>${tiles}${rows.length ? `<table class="lens-crafts"><thead><tr><th>When</th><th>Item</th><th>Roll</th><th class="lens-num">Cost</th><th>Now</th><th class="lens-num">P&amp;L</th></tr></thead><tbody>${rows.join("")}</tbody></table>${shown.length > LEDGER_ROWS ? `<p class="lens-muted">${shown.length - LEDGER_ROWS} more not listed.</p>` : ""}` : `<p class="lens-muted">No crafts of yours ${craftWindow === "7d" ? "in the last 7 days" : "today (UTC)"} in the feed.</p>`}<p class="lens-muted lens-legend">Cost = the recipe at the craft day's average scrap and steel prices (${s.craftSteelMode === "chosen" ? "chosen-slot steel, twice the fee" : "random-craft steel fee"}; change it in settings) · clears = the median of recent sales of the same roll, else of its band, else of the item · fates joined to your sales and dismantles by item id · days are UTC${covered ? "" : " · the feed was not fully covered, older rows may be missing"}.</p>`,
+      `<div class="lens-windows"><button type="button" data-action="desk-window" data-window="today" aria-pressed="${craftWindow !== "7d"}">Today</button><button type="button" data-action="desk-window" data-window="7d" aria-pressed="${craftWindow === "7d"}">7 days</button></div>${tiles}${rows.length ? `<table class="lens-crafts"><thead><tr><th>When</th><th>Item</th><th>Roll</th><th class="lens-num">Cost</th><th>Now</th><th class="lens-num">P&amp;L</th></tr></thead><tbody>${rows.join("")}</tbody></table>${shown.length > LEDGER_ROWS ? `<p class="lens-muted">${shown.length - LEDGER_ROWS} more not listed.</p>` : ""}` : `<p class="lens-muted">No crafts of yours ${craftWindow === "7d" ? "in the last 7 days" : "today (UTC)"} in the feed.</p>`}<p class="lens-muted lens-legend">Cost = the recipe at the craft day's average scrap and steel prices (${s.craftSteelMode === "chosen" ? "chosen-slot steel, twice the fee" : "random-craft steel fee"}; change it in settings) · clears = the median of the last 7 days' sales of the same stats (else similar stats) · fates joined to your sales and dismantles by item id · days are UTC${covered ? "" : " · the feed was not fully covered, older rows may be missing"}.</p>`,
     );
   }
 

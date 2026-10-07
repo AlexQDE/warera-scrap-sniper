@@ -186,6 +186,13 @@ tiers are intentional, so a stat value maps back to its rarity unambiguously.
   ("winterJet") when skinned and the plain code otherwise.
 - Offer rows: 12 per page behind a translated "Load more"; the price is the
   line right before **BUY**; your own listing shows **DELETE** instead.
+- Offer row lines (read live 2026-10-07): a weapon prints its attack, its
+  crit and the durability in that order (`101`, `16%`, `100%`, then the
+  seller, the age, the price, BUY); an armour piece prints its one stat and
+  the durability (`12%`, `100%` for precision gloves; armor is printed bare,
+  `46`). So the durability is the last percentage before the price and
+  every number before it is a stat. Under a selected item the page shows a
+  minimum-stat filter (ATTACK / CRIT. CHANCE for a weapon), empty by default.
 - Literal English anchors in every locale: "Buy", "market tax" / "Taxed
   price", the grid titles, the picker label "Item", "New item offer".
 - The grid's "Current value" is `gameStat.getEquipmentAvgByCode`, a mean of

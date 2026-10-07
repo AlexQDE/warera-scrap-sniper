@@ -123,9 +123,13 @@ export function createController({
           result = await fetchBooks(fetchImpl, key, CASE_BOOKS);
         else if (kind === "sales")
           result = {
-            ...(await fetchSales(fetchImpl, key, code, { now: now() })),
+            ...(await fetchSales(fetchImpl, key, code, {
+              now: now(),
+              hours: 168,
+              maxPages: 10,
+            })),
             code,
-            hours: 72,
+            hours: 168,
           };
         else if (kind === "crafts")
           // The player's own feed (code is the player id), the input averages that cost it, and the name on it.

@@ -21,6 +21,7 @@
     "extension/lib/craft.mjs",
     "extension/lib/craftdata.mjs",
     "extension/lib/craftboard.mjs",
+    "extension/lib/similar.mjs",
     "extension/lib/stats.mjs",
     "extension/lib/observed.mjs"
   ]

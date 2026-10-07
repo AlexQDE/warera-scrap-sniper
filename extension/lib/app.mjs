@@ -33,7 +33,7 @@ export async function startLens(runtime = chrome.runtime) {
     errors: {},
     busy: new Set(),
   };
-  const SALES_CODES_KEPT = 12;
+  const SALES_CODES_KEPT = 36;
   const SALES_RETRY_MS = 15_000; // a failed or empty sales read is not asked again at once
   const salesAttempts = new Map(); // code -> last attempt
   const salesPending = new Map(); // code -> forced?: sales reads asked for while another item's read was in flight
@@ -237,9 +237,11 @@ export async function startLens(runtime = chrome.runtime) {
   };
   const equipment = createEquipment({
     settings: () => state.settings,
-    requestSales: (code) => {
-      salesWanted = code;
-      requestSales(code);
+    // The grid's item first, then every other item on the page: each row is valued by the sales of its own stats.
+    requestSales: (code, others = []) => {
+      salesWanted = code ?? salesWanted;
+      if (code) requestSales(code);
+      for (const other of others) if (other !== code) requestSales(other);
     },
     rescan: () => sched.schedule(),
   });

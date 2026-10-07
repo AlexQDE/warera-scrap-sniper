@@ -1,9 +1,9 @@
 // The equipment market: one verdict line on every offer row (scrap profit
-// against the observed bids, the value the piece sells for, a tag), the
-// picker filter, and the Market section of the bar (scrap floors, the
-// selected item's recent fills). Reading and rendering only; the maths live
-// in quality.mjs (depth quotes), dom.mjs (verdict), resale.mjs (fills) and
-// observed.mjs (what a roll clears at).
+// against the observed bids, what a piece with these stats sells for, a
+// tag), the picker filter, and the Market section of the bar (scrap floors,
+// the selected item's recent sales). Reading and rendering only; the maths
+// live in quality.mjs (depth quotes), dom.mjs (verdict), resale.mjs (the
+// window) and similar.mjs (the stat-matched value).
 import * as dom from "./dom.mjs";
 import { SCRAP_LADDER } from "./ladder.mjs";
 import { quote, freshness, TTL, positive } from "./quality.mjs";
@@ -12,9 +12,13 @@ import { setHtml, timeLabel } from "./ui.mjs";
 import { salesStats } from "./sales.mjs";
 import { readStats, codeFor, summarizeOffers, statRanks } from "./offers.mjs";
 import { comparableFills, percentileRank, liquidity } from "./resale.mjs";
-import { rollValue, MIN_ROLL_SAMPLE } from "./observed.mjs";
-import { keyStat } from "./stats.mjs";
-import { WEAPONS } from "./items.mjs";
+import {
+  similarValue,
+  rowSkills,
+  listedPeers,
+  spanWords,
+  WINDOW_HOURS,
+} from "./similar.mjs";
 
 export const TAGS = {
   hit: "SNIPE",
@@ -27,35 +31,36 @@ export const TAGS = {
   error: "NO QUOTE",
 };
 const FULL_SCAN_EVERY = 30_000;
-const BASIS_WORDS = {
-  roll: "same-roll fills",
-  band: "fills in the roll's band",
-  item: "fills, any roll",
-};
-
-/** The roll a row prints, keyed the way fills carry it: the slot's stat, or a weapon's attack (its crit is not read). */
-export function rowSkills(code, stats) {
-  if (!code || stats?.stat == null) return null;
-  const stat = WEAPONS.includes(code) ? "attack" : keyStat(code);
-  return stat ? { [stat]: stats.stat } : null;
-}
 
 /**
- * What the piece sells for: the median of recent fills of the same roll, of
- * its band, of the item (five each, 72 h), else the game's average price
- * for the code. null when neither is known.
+ * What a piece with these stats sells for: the median of the last 7 days'
+ * sales of the same stats (then similar stats; then the item, any stats,
+ * which never earns a tag), else the game's average price for the item.
+ * null when neither is known.
  */
 export function valueOf({ code, stats, sales, avg, avgAt, now }) {
+  const skills = rowSkills(code, stats?.stats);
   if (sales?.fills) {
-    const fills = comparableFills(sales.fills, { code, now, state: null });
-    const v = rollValue(code, rowSkills(code, stats), fills);
+    const fills = comparableFills(sales.fills, {
+      code,
+      hours: WINDOW_HOURS,
+      now,
+      state: null,
+    });
+    const v = similarValue(code, skills, fills);
     if (v.value != null)
       return {
         amount: v.value,
         source: "fills",
         basis: v.level,
+        matched: v.matched,
         n: v.n,
-        label: `${v.n} ${BASIS_WORDS[v.level]}`,
+        label: v.label,
+        span: v.span,
+        low: v.low,
+        high: v.high,
+        sellsHours: v.sellsHours,
+        skills,
       };
   }
   const a = positive(avg);
@@ -65,8 +70,14 @@ export function valueOf({ code, stats, sales, avg, avgAt, now }) {
       amount: a,
       source: "avg",
       basis: "avg",
+      matched: false,
       n: 0,
-      label: `game avg${f === "fresh" ? "" : " (stale)"}`,
+      label: `game avg, any stats${f === "fresh" ? "" : " (stale)"}`,
+      span: {},
+      low: null,
+      high: null,
+      sellsHours: null,
+      skills,
     };
   }
   return null;
@@ -167,7 +178,7 @@ export function createEquipment({
   }
   /** One offer's identity across re-renders of the same list: item, price and its own numbers (a duplicate listing gets its ordinal). */
   const rowKey = (r) =>
-    `${r.code ?? r.alt ?? ""}|${r.priceText ?? ""}|${r.stats.stat ?? ""}|${r.stats.durability ?? ""}`;
+    `${r.code ?? r.alt ?? ""}|${r.priceText ?? ""}|${r.stats.stats.join("/")}|${r.stats.durability ?? ""}`;
   function onAnnotationClick(e) {
     // Only our own controls catch a click: the Details button and the Details text (selectable). The rest of the
     // annotation is the row's, in this handler as in the stylesheet (pointer-events).
@@ -183,7 +194,18 @@ export function createEquipment({
       openDetails.delete(openDetails.values().next().value);
     rescan();
   }
-  function detailsHtml(r, { fresh, book, value, rank, salesState }) {
+  /** "atk 101 · crit 16%": the row's own stats in words. */
+  const statWords = (r) =>
+    r.value?.skills
+      ? spanWords(
+          Object.fromEntries(
+            Object.entries(r.value.skills).map(([k, v]) => [k, [v, v]]),
+          ),
+        )
+      : r.stats.stats.length
+        ? `stat ${r.stats.stats.join(" / ")}`
+        : "stats unreadable";
+  function detailsHtml(r, { fresh, book, value, rank, salesState, peers }) {
     const lines = [];
     if (r.rarity)
       lines.push(
@@ -195,31 +217,34 @@ export function createEquipment({
         `Offer <b>${fmt(r.price)} g</b> · scrap covers ${r.v.coverPct.toFixed(0)}% of it · ${r.v.ratio.toFixed(2)}× its scrap floor`,
       );
     else if (r.price == null) lines.push("Price unreadable on this row");
+    lines.push(
+      `This piece: ${escapeHtml(statWords(r))}${r.stats.durability != null ? ` · ${r.stats.durability}% durability` : ""}${r.statRank?.status === "ok" ? ` · ${r.statRank.percentile.toFixed(0)}th percentile among ${r.statRank.n} listed` : ""}`,
+    );
     if (value) {
       const gap = r.price != null ? value.amount - r.price : null;
       lines.push(
-        `Value <b>${fmt(value.amount)} g</b> · ${escapeHtml(value.label)}${gap != null ? ` · value − price = <b>${signed(gap)} g</b> (${signed((gap / r.price) * 100, 1)}%)` : ""}`,
+        `Sells for <b>${fmt(value.amount)} g</b> · ${escapeHtml(value.label)}${value.low != null ? ` · ${fmt(value.low)}–${fmt(value.high)}` : ""}${value.sellsHours != null ? ` · listed to sold in ${value.sellsHours < 1 ? `${Math.round(value.sellsHours * 60)} min` : `${value.sellsHours.toFixed(1)} h`} (median)` : ""}${gap != null ? ` · against this price <b>${signed(gap)} g</b> (${signed((gap / r.price) * 100, 1)}%)` : ""}`,
       );
       if (value.source === "fills" && r.sales) {
         const fills = comparableFills(r.sales.fills, {
           code: r.code,
+          hours: WINDOW_HOURS,
           now: now(),
           state: null,
         });
-        const liq = liquidity(fills, { now: now() });
+        const liq = liquidity(fills, { now: now(), hours: WINDOW_HOURS });
         lines.push(
-          `${fills.length} fills of ${escapeHtml(dom.itemLabel(r.code))} in 72 h${r.sales.complete ? "" : " (sample capped)"} · pace ${liq.perDay.toFixed(1)}/day${liq.medianGapHours != null ? ` · median gap ${liq.medianGapHours.toFixed(1)} h` : ""} · last ${escapeHtml(ago(liq.lastAt, now()))}${rank?.status === "ok" ? ` · this price sits at the ${rank.percentile.toFixed(0)}th percentile of those fills` : ""}`,
+          `${fills.length} sales of ${escapeHtml(dom.itemLabel(r.code))} in 7 d, any stats${r.sales.complete ? "" : " (sample capped)"} · ${liq.perDay.toFixed(1)}/day · last ${escapeHtml(ago(liq.lastAt, now()))}${rank?.status === "ok" ? ` · this price sits at the ${rank.percentile.toFixed(0)}th percentile of the matched sales` : ""}${!value.matched ? " · no tag: too few sales with these stats" : ""}`,
         );
       } else if (value.source === "avg")
         lines.push(
-          `The game's average is a mean of recent sales of ${escapeHtml(dom.itemLabel(r.code))}, any roll; select the item in the grid for same-roll fills`,
+          `The game's average is a mean of recent sales of ${escapeHtml(dom.itemLabel(r.code))}, any stats; no tag rests on it · ${escapeHtml(salesState)}`,
         );
-    } else lines.push(`Value: ${escapeHtml(salesState)}`);
-    if (r.stats.readable)
+    } else lines.push(`Sells for: ${escapeHtml(salesState)}`);
+    if (peers?.n)
       lines.push(
-        `Durability ${r.stats.durability}% · stat ${r.stats.stat}${r.statRank?.status === "ok" ? ` · ${r.statRank.percentile.toFixed(0)}th percentile among ${r.statRank.n} listed peers` : ""}`,
+        `Listed now with these stats: ${peers.n} other${peers.n === 1 ? "" : "s"} from <b>${fmt(peers.cheapest)} g</b>${r.price != null && peers.cheapest > r.price ? ` · this one is ${signed(((peers.cheapest - r.price) / r.price) * 100, 1)}% under the cheapest of them` : ""}`,
       );
-    else lines.push(`Stats unreadable: ${escapeHtml(r.stats.reason ?? "")}`);
     lines.push(
       `Quote ${book?.at ? escapeHtml(ago(book.at, now())) : "missing"} · ${fresh ? "fresh" : "not fresh: no tag"} · displayed price, the market tax is the buyer's · read-only`,
     );
@@ -245,9 +270,16 @@ export function createEquipment({
         : `<span class="lens-kv"><b class="${r.v.margin >= 0 ? "lens-pos" : "lens-neg"}">${signed(r.v.margin)} g</b><small>scrap · ROI ${signed(r.v.marginPct * 100, 1)}%</small></span>`;
     const gapPct =
       value && r.price > 0 ? ((value.amount - r.price) / r.price) * 100 : null;
+    const basis = value
+      ? value.source === "avg"
+        ? "game avg"
+        : value.matched
+          ? `${value.n} sales ${value.basis === "same" ? "same" : "similar"} stats`
+          : `${value.n} sales any stats`
+      : salesState;
     const worth = value
-      ? `<span class="lens-kv"><b class="${gapPct != null ? (gapPct >= 0 ? "lens-pos" : "lens-neg") : ""}">~${fmt(value.amount)} g</b><small>value · ${escapeHtml(value.label)}</small></span>`
-      : `<span class="lens-kv"><b>–</b><small>value · ${escapeHtml(salesState)}</small></span>`;
+      ? `<span class="lens-kv"><b class="${gapPct != null && value.matched ? (gapPct >= 0 ? "lens-pos" : "lens-neg") : ""}">~${fmt(value.amount)} g</b><small>sells · ${gapPct != null ? `${signed(gapPct, 0)}% · ` : ""}${escapeHtml(basis)}</small></span>`
+      : `<span class="lens-kv"><b>–</b><small>sells · ${escapeHtml(salesState)}</small></span>`;
     return `<span class="lens-tag" data-kind="${kind}">${TAGS[kind]}</span>${scrap}${worth}<button type="button" data-action="details" aria-expanded="${open}" aria-label="${open ? "Hide" : "Show"} details for this offer">${open ? "▾" : "▸"}</button>${open ? detailsHtml(r, ctx) : ""}`;
   }
   /** Scan the rows and annotate them; returns the counts for the bar's pulse. */
@@ -280,7 +312,6 @@ export function createEquipment({
     const code =
       dom.selectedItemCode() ?? dom.filteredItemCode(location.search);
     const s = settings();
-    if (code) requestSales(code);
     const book = state.book;
     const fresh =
       !state.error && freshness(book?.at, s.intervalSec * 1000) === "fresh";
@@ -318,9 +349,11 @@ export function createEquipment({
             now: now(),
           })
         : null;
+      // Only a value resting on sales of these stats can call a listing cheap.
       const flip =
         r.price > 0 &&
         value != null &&
+        value.matched &&
         (value.amount - r.price) / r.price >= s.flipPct / 100;
       return {
         ...r,
@@ -328,6 +361,7 @@ export function createEquipment({
         slot,
         code: rowCode,
         stats,
+        skills: rowSkills(rowCode, stats.stats),
         q,
         v,
         sales,
@@ -335,6 +369,9 @@ export function createEquipment({
         flip,
       };
     });
+    // Every item on the page gets its sales read, the grid's item first.
+    const codes = [...new Set(valuations.map((r) => r.code).filter(Boolean))];
+    if (code || codes.length) requestSales(code, codes);
     const ranks = statRanks(valuations);
     const current = new Set(rows.map((r) => r.row));
     for (const row of previousRows)
@@ -375,7 +412,16 @@ export function createEquipment({
         : salesErrors[r.code] && !r.sales
           ? "sales read failed"
           : r.sales
-            ? `${comparableFills(r.sales.fills, { code: r.code, now: now(), state: null }).length} of ${MIN_ROLL_SAMPLE} fills in 72 h`
+            ? similarValue(
+                r.code,
+                r.skills,
+                comparableFills(r.sales.fills, {
+                  code: r.code,
+                  hours: WINDOW_HOURS,
+                  now: now(),
+                  state: null,
+                }),
+              ).label
             : state.salesReading === r.code
               ? "reading sales…"
               : state.avg
@@ -385,13 +431,29 @@ export function createEquipment({
         r.value?.source === "fills" && r.price != null
           ? percentileRank(
               r.price,
-              comparableFills(r.sales.fills, {
-                code: r.code,
-                now: now(),
-                state: null,
-              }).map((f) => f.price),
+              (r.value.matched
+                ? similarValue(
+                    r.code,
+                    r.skills,
+                    comparableFills(r.sales.fills, {
+                      code: r.code,
+                      hours: WINDOW_HOURS,
+                      now: now(),
+                      state: null,
+                    }),
+                  ).fills
+                : comparableFills(r.sales.fills, {
+                    code: r.code,
+                    hours: WINDOW_HOURS,
+                    now: now(),
+                    state: null,
+                  })
+              ).map((f) => f.price),
             )
           : null;
+      const peers = r.code
+        ? listedPeers(r.code, r.skills, valuations, i)
+        : null;
       let el = r.row.querySelector(":scope > .ss-verdict");
       if (!el) {
         el = document.createElement("div");
@@ -408,9 +470,12 @@ export function createEquipment({
         s.minMarginPct,
         s.flipPct,
         r.sales?.at ?? "",
-        r.value ? `${r.value.amount}|${r.value.basis}|${r.value.n}` : "",
+        r.value
+          ? `${r.value.amount}|${r.value.basis}|${r.value.n}|${r.value.matched}`
+          : "",
         salesState,
         r.statRank ? `${r.statRank.n}|${r.statRank.percentile ?? ""}` : "",
+        peers ? `${peers.n}|${peers.cheapest ?? ""}` : "",
         open,
         key,
         open ? Math.floor(now() / 60000) : "",
@@ -428,6 +493,7 @@ export function createEquipment({
           value: r.value,
           rank,
           salesState,
+          peers,
         }),
       );
     }
@@ -449,6 +515,7 @@ export function createEquipment({
         ...new Set(rows.map((r) => r.row.parentElement)),
       ].filter(Boolean),
       code,
+      codes,
       count: rows.length,
       ...last,
     };
@@ -463,7 +530,7 @@ export function createEquipment({
     ];
     return parts.join(" · ");
   }
-  /** The Market section: scrap floors and the selected item's recent fills. */
+  /** The Market section: scrap floors and the selected item's recent sales. */
   function renderMarket(body, state) {
     const s = settings();
     const book = state.book;
@@ -478,24 +545,25 @@ export function createEquipment({
     const err = code ? state.salesErrors?.[code] : null;
     let salesLine;
     if (!code)
-      salesLine = `<p class="lens-muted">Select an item in the grid for its recent fills; rows are valued at the game's average until then.</p>`;
+      salesLine = `<p class="lens-muted">Select an item in the grid for its recent sales; every row is valued by the sales of its own stats.</p>`;
     else if (err && !sales)
       salesLine = `<p class="lens-notice" role="status">Sales of ${escapeHtml(dom.itemLabel(code))}: ${escapeHtml(err)}</p>`;
     else if (!sales)
-      salesLine = `<p class="lens-muted">Reading the recent fills of ${escapeHtml(dom.itemLabel(code))}…</p>`;
+      salesLine = `<p class="lens-muted">Reading the recent sales of ${escapeHtml(dom.itemLabel(code))}…</p>`;
     else {
       const st = salesStats(sales.fills, {
+        hours: WINDOW_HOURS,
         now: now(),
         floor: quote(
           SCRAP_LADDER[dom.rarityFromItemCode(code) ?? "common"],
           book?.bids,
         ).value,
       });
-      salesLine = `<p class="lens-fills"><b>${escapeHtml(dom.itemLabel(code))}</b> · ${st.count} fills in 72 h${sales.complete ? "" : " (capped)"} · median <b>${fmt(st.median)} g</b> · low ${fmt(st.low)} · high ${fmt(st.high)} · last ${escapeHtml(ago(st.last?.at, now()))}${st.underFloor ? ` · ${st.underFloor} sold under scrap` : ""} · read ${timeLabel(sales.at, now())}${err ? ` · <b>last read failed</b> (${escapeHtml(err)})` : ""}</p>`;
+      salesLine = `<p class="lens-fills"><b>${escapeHtml(dom.itemLabel(code))}</b> · ${st.count} sales in 7 d, any stats${sales.complete ? "" : " (capped)"} · median <b>${fmt(st.median)} g</b> · low ${fmt(st.low)} · high ${fmt(st.high)} · last ${escapeHtml(ago(st.last?.at, now()))}${st.underFloor ? ` · ${st.underFloor} sold under scrap` : ""} · read ${timeLabel(sales.at, now())}${err ? ` · <b>last read failed</b> (${escapeHtml(err)})` : ""}</p>`;
     }
     setHtml(
       body,
-      `${state.error ? `<p class="lens-notice" role="status">${escapeHtml(state.error)}${book ? " · showing the last quote" : ""}</p>` : ""}<div class="lens-floors" data-fresh="${fresh}">${floors}</div>${salesLine}<p class="lens-muted lens-legend">SNIPE: the scraps the piece dismantles into sell for more than its price at the observed bids (minimum ROI ${s.minMarginPct}%). FLIP: its value (same-roll fills, else the game's average) sits ${s.flipPct}% or more above the price. Quotes are snapshots, not reserved liquidity.</p>`,
+      `${state.error ? `<p class="lens-notice" role="status">${escapeHtml(state.error)}${book ? " · showing the last quote" : ""}</p>` : ""}<div class="lens-floors" data-fresh="${fresh}">${floors}</div>${salesLine}<p class="lens-muted lens-legend">SNIPE: the scraps the piece dismantles into sell for more than its price at the observed bids (minimum ROI ${s.minMarginPct}%). FLIP: pieces with these stats sold in the last 7 days for ${s.flipPct}% or more above this price; the game's average never earns it. Quotes are snapshots, not reserved liquidity.</p>`,
     );
   }
   return { render, renderMarket, pulse, clear, metrics };

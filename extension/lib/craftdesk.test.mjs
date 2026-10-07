@@ -139,7 +139,7 @@ describe("the craft board", () => {
     expect(detail.textContent).toContain("gives 32.400 g back at the bid");
     expect(detail.textContent).toContain("really costs 14.420 g");
     expect(detail.textContent).toContain(
-      "epic sniper: 3 fills in 72 h · median 60.000 g · 55.000–65.000 (selected in the grid)",
+      "epic sniper: 3 sales in 7 d · median 60.000 g · 55.000–65.000 (selected in the grid)",
     );
     expect(
       body
@@ -223,7 +223,7 @@ describe("the ledger", () => {
         at: iso(),
         complete: true,
         fills: fills("tank", [160, 161, 161, 162, 163], {
-          attack: 150,
+          attack: 159,
           criticalChance: 32,
         }),
       },
@@ -236,7 +236,7 @@ describe("the ledger", () => {
     // 486 × 0.247778 + 16 × 1.789756 = 149.056 g per craft; the tank clears 161 (five sales of crit 32)
     expect(text()).toContain("149.056");
     expect(text()).toContain("clears 161.000 g");
-    expect(text()).toContain("5 sales of this roll");
+    expect(text()).toContain("5 sales · atk 159 · crit 32% · 7 d");
     expect(text()).toContain("crit chance 32 · attack 159");
     expect(text()).toContain("sold 129.396 g");
     // realized on the sold chest: 129.396 − 149.056 = −19.660; the held value waits for the boots' price

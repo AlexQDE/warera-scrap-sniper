@@ -4,10 +4,18 @@ Read-only decision support inside [WarEra](https://app.warera.io): what an offer
 
 The extension compares offers and estimates. It never buys, crafts, lists, opens a case or travels for you. It uses your own API key and has no runtime dependencies or build step.
 
+## What changed in 2.1.0
+
+- **Every piece is priced by its own stats.** A sniper with 101 attack and 16% crit is not the same goods as one with 130 and 20%, so a row's value is now the median of the last 7 days' sales of the same item whose stats sit next to the piece's: within a tenth of each stat's roll range ("same stats", three sales or more), else within a quarter ("similar stats", five or more). Each stat is measured against its own range, so one crit point weighs as much as several attack points. The span of the matched sales is printed on the row (`5 sales · atk 101–106 · crit 16% · 7 d`) and Details add their price range and the median time from listing to sale.
+- **FLIP rests on those sales only.** A listing earns FLIP when pieces with these stats sold for the threshold or more above its price. The item's any-stats median and the game's average are still shown as a fallback, but neither earns a tag.
+- **Every item on the page gets its sales read**, the grid's item first, 7 days back (ten pages of 100 at most), cached five minutes; nothing needs to be selected any more.
+- **Weapon rows read correctly.** Live rows print the attack, the crit and the durability in that order (`101`, `16%`, `100%`), and armour its one stat and the durability (`12%`, `100%`); the reader took the first percentage as durability, which misread every weapon and called precision gloves unreadable. It now takes the last percentage before the price as durability and every number before it as a stat. Confirmed against two live rows.
+- **Listed peers.** Details name how many other listings of the same stats are on the page and the cheapest of them.
+
 ## What changed in 2.0.0
 
 - **One bar instead of two panels.** On the equipment market the extension now adds a single slim bar above the grid: brand, quote freshness, the live counts (snipes, flips, rows) and three tabs, **Market**, **Craft**, **Ledger**. Nothing is open by default, so the game's grid stays where it was.
-- **Every offer gets a value, without selecting it.** Each row carries one line: the tag, the scrap profit with its ROI, and the piece's value. The value is the median of recent fills of the same roll (then of its band, then of the item) when the item's fills have been read, else the game's own average price for that item (`gameStat.getEquipmentAvgByCode`, the "Current value" the game prints), read for all 36 items in one call every 10 minutes. "resale · select this item" is gone.
+- **Every offer gets a value, without selecting it.** Each row carries one line: the tag, the scrap profit with its ROI, and the piece's value (in 2.1.0: by its own stats, see above), with the game's own average price for that item (`gameStat.getEquipmentAvgByCode`, the "Current value" the game prints, read for all 36 items in one call every 10 minutes) as the fallback. "resale · select this item" is gone.
 - **FLIP.** A second tag next to SNIPE: the value sits at least the FLIP threshold (default 10%) above the price. SNIPE outranks it. PASS replaces ABOVE TARGET.
 - **The craft board.** The Craft tab is one row per tier: the cost of a random craft at the observed scrap and steel asks, its expected value over the six slots' averages at the game's odds, the best slot to choose and the ROI either way. Open a tier for its six slots, the recipe, the chosen-slot cost and what a bad roll really costs once it is scrapped. The 36-cell matrix that read "no fills", the batch, the target ROI, the ceilings, the listing scenarios and the recipe overrides are gone.
 - **One ledger, observed.** The Ledger tab replays your own crafts from the game's feed with your key: every craft of the last 7 days with its roll, its cost at the craft day's average scrap and steel prices, whether it is still yours, sold or scrapped, and what its roll clears at now. The manual craft ledger (typed entries, export, import) is removed; what it stored stays in the browser untouched.
@@ -33,7 +41,7 @@ Do not publish or merge a release before completing the [manual checklist](docs/
 | Tag       | Meaning                                                                                                     |
 | --------- | ----------------------------------------------------------------------------------------------------------- |
 | SNIPE     | The scraps the piece dismantles into, sold at the observed bids, beat its price by at least the minimum ROI |
-| FLIP      | Its value (same-roll fills, else the game's average) sits at least the FLIP threshold above its price       |
+| FLIP      | Pieces with these stats sold in the last 7 days for at least the FLIP threshold above its price             |
 | NEAR MISS | A scrap loss within an explicitly negative minimum ROI; never a profitable label                            |
 | PASS      | Neither                                                                                                     |
 | NO QUOTE  | No scrap quote, unreadable rarity or price, or too little observed bid depth                                |
@@ -42,9 +50,9 @@ Do not publish or merge a release before completing the [manual checklist](docs/
 
 Scrap profit is `quoted scrap proceeds − displayed purchase price`; proceeds walk descending bid levels for the whole dismantle quantity (6 / 18 / 54 / 162 / 486 / 1458 scraps by rarity) and are never the top bid multiplied past the observed depth. The market tax is the buyer's and the seller receives the listing, so displayed prices get no adjustment.
 
-**Value.** With the item's fills read (select it in the grid; five pages of 100 fills at most, 72 h, cached three minutes) the value is the median of fills of the same roll, of its fifth-of-range band when the roll has fewer than five, of the item when the band has fewer. The level used is printed on the row. Without them the value is the game's average for the item, any roll. A weapon's roll is keyed by its attack on the row; its crit is not read.
+**Sells for.** Every item on the page has its sales read (ten pages of 100 at most, 7 days, cached five minutes). A row's value is the median of the sales whose stats sit within a tenth of each stat's roll range of the piece's (three or more), else within a quarter (five or more); the matched sales' stat span is printed on the row. With neither, the item's any-stats median (five or more) or the game's average is shown, and no tag rests on it. A weapon is matched on its attack and its crit, an armour piece on its one stat.
 
-**Details** (the ▸ button, a real button: keyboard, `aria-expanded`) hold the dismantle walk, the value evidence (fills, pace, the price's percentile among them), the stat rank among listed peers and the quote age. The rest of the line is the row's: clicks on it fall through to the game as before.
+**Details** (the ▸ button, a real button: keyboard, `aria-expanded`) hold the dismantle walk, the piece's stats, the sales evidence (the matched sales' price range, the median time from listing to sale, the item's pace, the price's percentile among the matched sales), the other listings of the same stats on the page and the cheapest of them, the stat rank among listed peers and the quote age. The rest of the line is the row's: clicks on it fall through to the game as before.
 
 ## Craft
 
@@ -52,7 +60,7 @@ The Craft tab prices one craft per tier from live quotes: the tier's scraps and 
 
 ## Ledger
 
-The Ledger tab reads your own account off the page (the inventory and skills links), or the player id set in Advanced settings, and replays its feed: crafts, item-market rows and dismantles of the last 7 days. _Realized_ is what the pieces that are gone brought against their cost; _Held at market_ is what the pieces you still hold clear at against their inputs; _Crafted_ counts them. Epic and up are summed, lower tiers are listed. Cost is the recipe at the craft day's average scrap and steel prices (`itemTrading.getItemTrading`), with the random-craft steel fee unless "How you craft" says chosen slot. Fates are joined by item id; the held pieces are priced like the rows above, by their roll. Today (UTC) or 7 days.
+The Ledger tab reads your own account off the page (the inventory and skills links), or the player id set in Advanced settings, and replays its feed: crafts, item-market rows and dismantles of the last 7 days. _Realized_ is what the pieces that are gone brought against their cost; _Held at market_ is what the pieces you still hold clear at against their inputs; _Crafted_ counts them. Epic and up are summed, lower tiers are listed. Cost is the recipe at the craft day's average scrap and steel prices (`itemTrading.getItemTrading`), with the random-craft steel fee unless "How you craft" says chosen slot. Fates are joined by item id; the held pieces are priced like the rows above, by the sales of their own stats. Today (UTC) or 7 days.
 
 ## Cases and travel
 
@@ -60,7 +68,7 @@ Unchanged from 1.4.1. SELL / OPEN EV / UNCERTAIN follow the drop policy in Advan
 
 ## Refresh, privacy and safety
 
-The scrap book refreshes every 30 seconds by default (10–600 configurable). Case and resource books refresh after 60 seconds, an item's fills after 3 minutes, the game's average prices after 10 minutes, your feed after 3 minutes and only while the Ledger tab is open. Hidden tabs request nothing and render nothing until they are shown again. API caches and active requests are shared by the background worker across tabs. Manual refresh does not bypass server cooldowns.
+The scrap book refreshes every 30 seconds by default (10–600 configurable). Case and resource books refresh after 60 seconds, an item's sales after 5 minutes (7 days, ten pages of 100 at most, every item on the page), the game's average prices after 10 minutes, your feed after 3 minutes and only while the Ledger tab is open. Hidden tabs request nothing and render nothing until they are shown again. API caches and active requests are shared by the background worker across tabs. Manual refresh does not bypass server cooldowns.
 
 The key is stored locally in extension storage restricted to trusted extension contexts. Content scripts receive public preferences and data, not the key. API requests send it only to `api2.warera.io`, omit cookies/credentials and refuse redirects. There is no analytics or third-party backend. Local storage also holds preferences and bounded market, fills, averages and feed caches; it is not an encrypted secret vault.
 
@@ -90,7 +98,7 @@ Both run against `fixtures/market.html`, a synthetic stand-in for the equipment 
 
 WarEra Plus je novo ime postojeće ekstenzije (ranije WarEra Lens i Scrap Sniper); repozitorijum, podešavanja i sačuvani ključ ostaju isti. Ažuriraj postojeći `extension` folder, klikni Reload u `chrome://extensions`, pa osveži igru.
 
-Na tržištu opreme stoji jedna traka sa tri kartice: **Market** (cene otpada po retkosti i prodaje izabranog predmeta), **Craft** (šta košta i koliko vredi izrada po tieru, nasumično ili sa izabranim slotom) i **Ledger** (tvoje izrade pročitane iz feeda igre: trošak, šta se desilo sa komadom i koliko taj roll danas vredi). Svaka ponuda nosi jedan red: oznaku (SNIPE kad otpad vredi više od cene, FLIP kad vrednost prelazi cenu za zadati procenat), profit od rastavljanja i vrednost komada (prodaje istog rolla ako su učitane, inače prosečna cena iz igre). Porez plaća kupac, prodavac dobija listiranu cenu.
+Na tržištu opreme stoji jedna traka sa tri kartice: **Market** (cene otpada po retkosti i prodaje izabranog predmeta), **Craft** (šta košta i koliko vredi izrada po tieru, nasumično ili sa izabranim slotom) i **Ledger** (tvoje izrade pročitane iz feeda igre: trošak, šta se desilo sa komadom i koliko taj roll danas vredi). Svaka ponuda nosi jedan red: oznaku (SNIPE kad otpad vredi više od cene, FLIP kad su se komadi sa istim statovima u poslednjih 7 dana prodavali za zadati procenat skuplje), profit od rastavljanja i po čemu se takav komad prodaje (medijana prodaja istih statova, u redu piše i raspon statova tih prodaja; prosek iz igre je samo rezerva i nikad ne daje oznaku). Prodaje se čitaju za sve predmete na strani, ništa ne mora da se bira. Porez plaća kupac, prodavac dobija listiranu cenu.
 
 Pre korišćenja proveri aktuelna pravila igre i ponašanje na svom ekranu prema [kontrolnoj listi](docs/RELEASE-CHECKLIST.md). Ekstenzija ne izvršava transakcije niti klikće kontrole igre.
 
