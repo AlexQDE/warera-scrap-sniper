@@ -3,7 +3,8 @@ import {
   fetchBooks,
   fetchSales,
   fetchEquipmentAvg,
-  fetchOwnActivity,
+  fetchOwnFeed,
+  FEED_PAGES,
   fetchInputAverages,
   fetchOwner,
   isId,
@@ -18,6 +19,13 @@ const CASE_BOOKS = [
   ...new Set([...CASE_CODES, ...WOODEN_CODES, "scraps", "oil"]),
 ];
 const ITEM_CODES = new Set(ALL_GEAR_CODES);
+/** The feed store: the player's own transactions kept this long and this many a feed, polled on its TTL. */
+export const FEED_DAYS = 30;
+export const FEED_ROWS = 3000;
+export const FEED_VERSION = 1;
+/** The newest transaction ids a poll may stop at; a walk that meets none of them within its pages is reported incomplete. */
+const FEED_KNOWN = 300;
+const AVERAGES_TTL = 600_000;
 const errorResult = (e) => ({
   error: e.code ?? "internal",
   message: e.message ?? "Request failed",
@@ -69,12 +77,7 @@ export function createController({
     const token = `${generation}:${kind}:${code ?? ""}`;
     return once(token, async () => {
       await ready;
-      const cacheKey =
-        kind === "sales"
-          ? `sales:${code}`
-          : kind === "crafts"
-            ? `crafts:${code}`
-            : kind;
+      const cacheKey = kind === "sales" ? `sales:${code}` : kind;
       const got = await storage.get([
         "settings",
         "rejectedAuthRevision",
@@ -130,14 +133,6 @@ export function createController({
             })),
             code,
             hours: 168,
-          };
-        else if (kind === "crafts")
-          // The player's own feed (code is the player id), the input averages that cost it, and the name on it.
-          result = {
-            ...(await fetchOwnActivity(fetchImpl, key, code, { now: now() })),
-            ...(await fetchInputAverages(fetchImpl, key)),
-            ...(await fetchOwner(fetchImpl, key, code)),
-            userId: code,
           };
         else {
           const fetched = await fetchEquipmentAvg(
@@ -250,6 +245,7 @@ export function createController({
         generation++;
         cooldowns.clear();
         const all = await storage.get(null);
+        // The feed store (feed:<userId>) is the player's own record, keyed by the id the page shows: it survives a key change.
         await storage.remove(
           Object.keys(all).filter(
             (k) =>
@@ -279,6 +275,14 @@ export function createController({
           k.startsWith("sales:") ||
           k.startsWith("crafts:"),
       );
+      const staleFeeds = Object.keys(all).filter(
+        (k) =>
+          k.startsWith("feed:") &&
+          (all[k]?.feedVersion !== FEED_VERSION ||
+            !Number.isFinite(Date.parse(all[k]?.at)) ||
+            now() - Date.parse(all[k].at) > FEED_DAYS * 86400_000),
+      );
+      if (staleFeeds.length) await storage.remove(staleFeeds);
       const ordered = keys
         .filter((k) => k.startsWith("sales:"))
         .sort(
@@ -301,6 +305,169 @@ export function createController({
           apiKey: keyOf(all.settings),
         },
       });
+    });
+  }
+
+  /**
+   * The player's own feed, kept: a backfill of FEED_DAYS on the first read,
+   * then a poll that walks each feed newest first until it meets a
+   * transaction it already holds. Rows are merged by transaction id, kept
+   * FEED_DAYS and FEED_ROWS a feed; the daily input averages that cost the
+   * crafts ride along, refreshed every AVERAGES_TTL, and the username once.
+   * The store is the player's record: it is not dropped on a key change.
+   */
+  async function readFeed(userId, force) {
+    const token = `${generation}:feed:${userId}`;
+    return once(token, async () => {
+      await ready;
+      const cacheKey = `feed:${userId}`;
+      const got = await storage.get([
+        "settings",
+        "rejectedAuthRevision",
+        cacheKey,
+      ]);
+      const key = keyOf(got.settings);
+      if (!key)
+        return { error: "no-key", message: "Add your API key in settings" };
+      const authRevision = Number(got.settings?.authRevision) || 0;
+      if (got.rejectedAuthRevision === authRevision)
+        return {
+          error: "key-rejected",
+          message: "API key rejected. Check and save your key in settings.",
+        };
+      const version = generation;
+      const store =
+        got[cacheKey]?.feedVersion === FEED_VERSION &&
+        got[cacheKey]?.userId === userId
+          ? got[cacheKey]
+          : null;
+      if (!force && store && freshness(store.at, TTL.feed, now()) === "fresh")
+        return { feed: store };
+      if (hold > now())
+        return {
+          feed: store,
+          error: "rate-limited",
+          message: `Rate limited; retry in ${Math.ceil((hold - now()) / 1000)}s`,
+        };
+      const backoff = cooldowns.get(token);
+      if (backoff?.until > now())
+        return {
+          feed: store,
+          error: backoff.error,
+          message: `${backoff.message}; retry in ${Math.ceil((backoff.until - now()) / 1000)}s`,
+        };
+      try {
+        const horizon = now() - FEED_DAYS * 86400_000;
+        const known = store
+          ? Object.fromEntries(
+              ["crafts", "sales", "dismantles"].map((f) => [
+                f,
+                (store.rows?.[f] ?? []).slice(0, FEED_KNOWN).map((r) => r.txId),
+              ]),
+            )
+          : {};
+        const fetched = await fetchOwnFeed(fetchImpl, key, userId, {
+          cutoff: store ? horizon : now() - 7 * 86400_000,
+          known,
+          pages: store ? FEED_PAGES.poll : FEED_PAGES.backfill,
+          now: now(),
+        });
+        const rows = {};
+        const covered = { ...(store?.covered ?? {}) };
+        for (const f of ["crafts", "sales", "dismantles"]) {
+          const seen = new Set();
+          const merged = [...fetched[f], ...(store?.rows?.[f] ?? [])]
+            .filter((r) => {
+              if (!r?.txId || seen.has(r.txId)) return false;
+              seen.add(r.txId);
+              return (
+                Number.isFinite(Date.parse(r.at)) && Date.parse(r.at) >= horizon
+              );
+            })
+            .sort((x, y) => Date.parse(y.at) - Date.parse(x.at))
+            .slice(0, FEED_ROWS);
+          rows[f] = merged;
+          // Since when the feed is on record: the backfill's cutoff when it reached it, else its oldest row (a hole
+          // is reported); a poll keeps the coverage; rows pruned past the window or the cap move it forward.
+          if (!store)
+            covered[f] =
+              fetched.stopped[f] === "cap"
+                ? (merged.at(-1)?.at ?? iso())
+                : new Date(now() - 7 * 86400_000).toISOString();
+          const horizonIso = new Date(horizon).toISOString();
+          if ((covered[f] ?? "") < horizonIso) covered[f] = horizonIso;
+          if (merged.length >= FEED_ROWS) {
+            const oldestKept = merged.at(-1)?.at;
+            if (oldestKept && oldestKept > (covered[f] ?? ""))
+              covered[f] = oldestKept;
+          }
+        }
+        const averagesStale =
+          !store?.averagesAt ||
+          now() - Date.parse(store.averagesAt) > AVERAGES_TTL;
+        const averages = averagesStale
+          ? await fetchInputAverages(fetchImpl, key)
+          : { averages: store.averages };
+        const owner =
+          store?.username != null
+            ? { username: store.username }
+            : await fetchOwner(fetchImpl, key, userId);
+        const fresh = {
+          userId,
+          username: owner.username ?? null,
+          rows,
+          covered,
+          holes: Object.fromEntries(
+            ["crafts", "sales", "dismantles"].map((f) => [
+              f,
+              fetched.stopped[f] === "cap",
+            ]),
+          ),
+          averages: averages.averages,
+          averagesAt: averagesStale ? iso() : store.averagesAt,
+          at: iso(),
+          attemptedAt: iso(),
+          feedVersion: FEED_VERSION,
+          cacheVersion: CACHE_VERSION,
+        };
+        const saved = await serial(async () => {
+          const { settings } = await storage.get(["settings"]);
+          if (generation !== version || keyOf(settings) !== key) return false;
+          await storage.set({ [cacheKey]: fresh });
+          return true;
+        });
+        if (!saved)
+          return {
+            error: "superseded",
+            message: "Settings changed; refresh required",
+          };
+        cooldowns.delete(token);
+        return { feed: fresh };
+      } catch (e) {
+        if (version !== generation)
+          return {
+            error: "superseded",
+            message: "Settings changed; refresh required",
+          };
+        if (e.code === "key-rejected")
+          await serial(async () => {
+            const { settings } = await storage.get(["settings"]);
+            if (version !== generation || keyOf(settings) !== key) return;
+            generation++;
+            const all = await storage.get(null);
+            await storage.remove(
+              Object.keys(all).filter(
+                (k) =>
+                  ["book", "cases", "avg"].includes(k) ||
+                  k.startsWith("sales:") ||
+                  k.startsWith("crafts:"),
+              ),
+            );
+            await storage.set({ rejectedAuthRevision: authRevision });
+          });
+        await fail(e, token);
+        return { feed: store, ...errorResult(e) };
+      }
     });
   }
 
@@ -359,16 +526,15 @@ export function createController({
           }
         });
       }
-      if (["book", "cases", "avg", "sales", "crafts"].includes(msg?.type)) {
+      if (msg?.type === "feed") {
+        if (!isId(msg.userId))
+          return { error: "bad-user", message: "Unknown player id" };
+        return readFeed(msg.userId, !!msg.force);
+      }
+      if (["book", "cases", "avg", "sales"].includes(msg?.type)) {
         if (msg.type === "sales" && !ITEM_CODES.has(msg.itemCode))
           return { error: "bad-item", message: "Unknown equipment item" };
-        if (msg.type === "crafts" && !isId(msg.userId))
-          return { error: "bad-user", message: "Unknown player id" };
-        return read(
-          msg.type,
-          !!msg.force,
-          msg.type === "crafts" ? msg.userId : msg.itemCode,
-        );
+        return read(msg.type, !!msg.force, msg.itemCode);
       }
       return {
         error: "unknown-message",

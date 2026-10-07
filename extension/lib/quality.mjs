@@ -4,7 +4,7 @@ export const TTL = Object.freeze({
   cases: 60_000,
   sales: 300_000,
   avg: 600_000,
-  crafts: 180_000,
+  feed: 60_000,
 });
 export const CACHE_VERSION = 2;
 

@@ -266,70 +266,90 @@ function skillsOf(item) {
 }
 
 /** How far before the oldest craft a sale or dismantle is still kept: a fate recorded in the same second as its craft must not be cut. */
-const FATE_GRACE_MS = 60_000;
+/** The newest known transaction ids per feed: the incremental walk stops at the first one it meets. */
+/** @typedef {{ crafts?: Iterable<string>, sales?: Iterable<string>, dismantles?: Iterable<string> }} KnownIds */
+/** The feeds the ledger is built from, by the API's transaction type. */
+export const FEED_TYPES = Object.freeze({
+  crafts: "craftItem",
+  sales: "itemMarket",
+  dismantles: "dismantleItem",
+});
+/** Pages of 100 each feed may walk on a backfill, and on a poll. */
+export const FEED_PAGES = Object.freeze({
+  backfill: { crafts: 5, sales: 25, dismantles: 10 },
+  poll: { crafts: 5, sales: 10, dismantles: 5 },
+});
 
 /**
- * The player's own crafts, item-market rows and dismantles, reduced to what
- * the replay needs; a craft row's `item` is the OUTPUT piece (state 100,
- * with its roll), its `quantity` the scraps it consumed (probed 2026-10-05,
- * docs/GAME-FACTS.md §3 and §10).
- *
- * The crafts are walked first, newest first, back `days` days and at most
- * `maxPages` pages of 100. A sale or a dismantle can only close a craft that
- * happened before it, so the item-market and dismantle feeds are then walked
- * newest first only back to one minute before the OLDEST craft kept (not to
- * the window): an active trader's market feed is far denser than the craft
- * feed (about 100 rows per 3.5 hours, measured 2026-10-07), and walking it
- * for the whole window under a page cap would leave the older crafts without
- * their sale. Those two walks have their own caps, `salesPages` and
- * `dismantlePages`. With no craft in the window neither feed is requested.
- * `complete` says per type whether the walk reached its cutoff or the end of
- * the feed (true), or was stopped by its page cap (false).
+ * The player's own crafts, item-market rows (both sides) and dismantles,
+ * each feed walked newest first on its own until it meets a known
+ * transaction id, a row older than `cutoff`, the end of the feed, or its
+ * page cap. Rows are reduced to what the ledger needs and carry the
+ * transaction id (`txId`) so a store can merge polls without doubles. A
+ * craft row's `item` is the OUTPUT piece (state 100, with its roll), its
+ * `quantity` the scraps it consumed; a market row's `item` is the piece
+ * that changed hands, `money` its price, `offerCreatedAt` when it was
+ * listed; a dismantle row's `quantity` is the scraps that came back
+ * (docs/GAME-FACTS.md §3, §10). `stopped` says why each walk ended:
+ * "known", "cutoff", "end" or "cap" (only "cap" leaves the window uncovered).
+ * @param {typeof fetch} fetchImpl @param {string} key @param {string} userId
+ * @param {{ cutoff: number, known?: KnownIds, pages?: { crafts: number, sales: number, dismantles: number }, now?: number, timeoutMs?: number }} options
  */
-export async function fetchOwnActivity(
+export async function fetchOwnFeed(
   fetchImpl,
   key,
   userId,
   {
-    days = 7,
-    maxPages = 5,
-    salesPages = 25,
-    dismantlePages = 10,
+    cutoff,
+    known = {},
+    pages = FEED_PAGES.backfill,
     now = Date.now(),
     timeoutMs = TIMEOUT_MS,
-  } = {},
+  },
 ) {
   const k = cleanKey(key);
   const id = String(userId ?? "");
   if (!isId(id)) throw new ApiError("Invalid player id", "schema");
-  const walk = async (type, cutoff, pageCap) => {
+  if (!Number.isFinite(cutoff)) throw new ApiError("Invalid cutoff", "schema");
+  /** @param {keyof typeof FEED_TYPES} feed */
+  const walk = async (feed) => {
+    const type = FEED_TYPES[feed];
+    const stopAt = new Set(known[feed] ?? []);
     const rows = [];
     const cursors = new Set();
     const ids = new Set();
     let cursor;
-    let pages = 0;
-    let complete = false;
-    while (pages < pageCap) {
+    let walked = 0;
+    let stopped = "cap";
+    const cap = Math.max(1, Number(pages[feed]) || 1);
+    while (walked < cap) {
       const { data } = await call(fetchImpl, k, ownUrl(type, id, cursor), {
         timeoutMs,
       });
-      pages++;
+      walked++;
       if (!Array.isArray(data?.items))
         throw new ApiError("Unexpected transactions schema", "schema");
+      let done = false;
       for (const it of data.items) {
         const at = Date.parse(it?.createdAt);
         if (!Number.isFinite(at) || at > now + 5000) continue;
+        if (typeof it._id === "string" && stopAt.has(it._id)) {
+          stopped = "known";
+          done = true;
+          break;
+        }
         if (at < cutoff) {
-          complete = true;
+          stopped = "cutoff";
+          done = true;
           break;
         }
         if (it._id && ids.has(it._id)) continue;
         if (it._id) ids.add(it._id);
         rows.push(it);
       }
-      if (complete) break;
+      if (done) break;
       if (!data.nextCursor || data.items.length === 0) {
-        complete = true;
+        stopped = "end";
         break;
       }
       if (typeof data.nextCursor !== "string" || cursors.has(data.nextCursor))
@@ -337,13 +357,17 @@ export async function fetchOwnActivity(
       cursor = data.nextCursor;
       cursors.add(cursor);
     }
-    return { rows, pages, complete };
+    return { rows, pages: walked, stopped, complete: stopped !== "cap" };
   };
-  const c = await walk("craftItem", now - days * 86400e3, maxPages);
+  const c = await walk("crafts");
+  const s = await walk("sales");
+  const d = await walk("dismantles");
+  const txId = (it) => (typeof it._id === "string" ? it._id : null);
   const crafts = c.rows.flatMap((it) =>
-    isId(it.item?._id) && typeof it.item?.code === "string"
+    isId(it.item?._id) && typeof it.item?.code === "string" && txId(it)
       ? [
           {
+            txId: txId(it),
             id: it.item._id,
             code: it.item.code,
             skills: skillsOf(it.item),
@@ -353,24 +377,15 @@ export async function fetchOwnActivity(
         ]
       : [],
   );
-  let s = { rows: [], pages: 0, complete: true };
-  let d = { rows: [], pages: 0, complete: true };
-  if (crafts.length) {
-    const oldest = crafts.reduce(
-      (min, x) => Math.min(min, Date.parse(x.at)),
-      Infinity,
-    );
-    const fateCutoff = oldest - FATE_GRACE_MS;
-    s = await walk("itemMarket", fateCutoff, salesPages);
-    d = await walk("dismantleItem", fateCutoff, dismantlePages);
-  }
   const sales = s.rows.flatMap((it) =>
-    positive(it.money) == null
+    positive(it.money) == null || !txId(it)
       ? []
       : [
           {
+            txId: txId(it),
             itemId: isId(it.item?._id) ? it.item._id : null,
             code: it.item?.code ?? it.itemCode ?? null,
+            skills: skillsOf(it.item),
             at: it.createdAt,
             money: Number(it.money),
             seller: isId(it.sellerId) ? it.sellerId : null,
@@ -381,11 +396,13 @@ export async function fetchOwnActivity(
         ],
   );
   const dismantles = d.rows.flatMap((it) =>
-    isId(it.item?._id)
+    isId(it.item?._id) && txId(it)
       ? [
           {
+            txId: txId(it),
             itemId: it.item._id,
             code: it.item?.code ?? null,
+            skills: skillsOf(it.item),
             at: it.createdAt,
             scraps: Number(it.quantity) || 0,
           },
@@ -397,8 +414,8 @@ export async function fetchOwnActivity(
     sales,
     dismantles,
     complete: { crafts: c.complete, sales: s.complete, dismantles: d.complete },
+    stopped: { crafts: c.stopped, sales: s.stopped, dismantles: d.stopped },
     pages: c.pages + s.pages + d.pages,
-    days,
   };
 }
 

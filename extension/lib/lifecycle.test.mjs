@@ -189,26 +189,31 @@ describe("SPA lifecycle and DOM work", () => {
     document.body.innerHTML =
       '<main><div id="tax"><span>Market tax 5%</span></div><div><div id="item-code-selector-jet" style="z-index:1;border-color:rgb(57,15,16)"></div><div id="item-code-selector-boots5" style="border-color:rgb(43,43,18)"></div></div><div id="offers"></div></main>';
   };
-  /** A feed with one held legendary boots craft, so the Ledger asks for the boots' fills. */
-  const craftsFor = (userId) => ({
-    crafts: {
+  /** A feed store with one held legendary boots craft, so the Ledger asks for the boots' fills. */
+  const feedFor = (userId) => ({
+    feed: {
       userId,
       username: "Tester",
       at: new Date().toISOString(),
-      days: 7,
-      complete: { crafts: true, sales: true, dismantles: true },
-      crafts: [
-        {
-          id: "held-boots-1",
-          code: "boots5",
-          skills: { dodge: 38 },
-          at: new Date(Date.now() - 3600e3).toISOString(),
-          scraps: 486,
-        },
-      ],
-      sales: [],
-      dismantles: [],
+      feedVersion: 1,
+      covered: {},
+      holes: { crafts: false, sales: false, dismantles: false },
+      rows: {
+        crafts: [
+          {
+            txId: "tx-held-boots-1",
+            id: "held-boots-1",
+            code: "boots5",
+            skills: { dodge: 38 },
+            at: new Date(Date.now() - 3600e3).toISOString(),
+            scraps: 486,
+          },
+        ],
+        sales: [],
+        dismantles: [],
+      },
       averages: {},
+      averagesAt: new Date().toISOString(),
     },
   });
   const marketRuntime = (settings, salesImpl) => {
@@ -236,7 +241,7 @@ describe("SPA lifecycle and DOM work", () => {
                 fills: [],
               },
             };
-      if (msg.type === "crafts") return craftsFor(msg.userId);
+      if (msg.type === "feed") return feedFor(msg.userId);
       return base(msg);
     });
     return runtime;
@@ -268,8 +273,8 @@ describe("SPA lifecycle and DOM work", () => {
       runtime.sendMessage.mock.calls.filter(([m]) => m.type === "avg"),
     ).toHaveLength(1); // the rows and the board are valued at the game's averages
     expect(
-      runtime.sendMessage.mock.calls.filter(([m]) => m.type === "crafts"),
-    ).toHaveLength(0); // the feed is read only with the Ledger open
+      runtime.sendMessage.mock.calls.filter(([m]) => m.type === "feed"),
+    ).toHaveLength(0); // no own-profile link on the page and no id set: nothing to read
     for (let i = 0; i < 50; i++)
       document
         .getElementById("offers")
@@ -337,7 +342,7 @@ describe("SPA lifecycle and DOM work", () => {
     app = await startLens(runtime);
     await settle(3000);
     expect(
-      runtime.sendMessage.mock.calls.filter(([m]) => m.type === "crafts"),
+      runtime.sendMessage.mock.calls.filter(([m]) => m.type === "feed"),
     ).toHaveLength(1);
     expect(bodyText()).toContain("Tester");
     expect(salesCalls(runtime, "jet")).toBe(1);

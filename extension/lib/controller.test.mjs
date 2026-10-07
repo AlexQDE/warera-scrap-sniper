@@ -256,32 +256,37 @@ describe("background controller", () => {
         .error,
     ).toBe("bad-item");
   });
-  it("reads the player's own feed as 'crafts' keyed by the player id, caches it with the account, and refuses a bad id", async () => {
+  it("keeps the player's own feed as a store: a 7-day backfill, then polls that stop at a known row, kept across key changes", async () => {
     const ME = "697b55e4bcecf3b37667e0d1";
-    const craftRow = {
-      _id: "tx1",
+    const oid = (n) => n.toString(16).padStart(24, "0");
+    const craftRow = (n, hoursAgo) => ({
+      _id: oid(n),
       itemCode: "scraps",
       quantity: 486,
       sellerId: ME,
       buyerId: ME,
       transactionType: "craftItem",
       item: {
-        _id: "6ac36a2b68df4b72cecefc0d",
+        _id: oid(1000 + n),
         code: "boots5",
         skills: { dodge: 38 },
         state: 100,
       },
-      createdAt: new Date(NOW - 3600e3).toISOString(),
-    };
+      createdAt: new Date(NOW - hoursAgo * 3600e3).toISOString(),
+    });
+    let crafts = [craftRow(1, 1), craftRow(2, 2)];
+    const calls = [];
     const f = vi.fn(async (url) => {
       const u = new URL(url);
       const input = JSON.parse(u.searchParams.get("input"));
       const proc = u.pathname.split("/").pop();
-      if (proc === "transaction.getPaginatedTransactions")
+      if (proc === "transaction.getPaginatedTransactions") {
+        calls.push(input.transactionType);
         return response({
-          items: input.transactionType === "craftItem" ? [craftRow] : [],
+          items: input.transactionType === "craftItem" ? crafts : [],
           nextCursor: null,
         });
+      }
       if (proc === "itemTrading.getItemTrading")
         return response({
           itemCode: input.itemCode,
@@ -296,45 +301,116 @@ describe("background controller", () => {
         return response({ _id: ME, username: "Johnny_Sins" });
       return response();
     });
-    const { controller, storage } = setup(f);
+    const { controller, storage, advance } = setup(f);
     expect(
-      (await controller.handle({ type: "crafts", userId: "nope" })).error,
+      (await controller.handle({ type: "feed", userId: "nope" })).error,
     ).toBe("bad-user");
     expect(
-      (await controller.handle({ type: "crafts", userId: "../settings" }))
-        .error,
+      (await controller.handle({ type: "feed", userId: "../settings" })).error,
     ).toBe("bad-user");
-    const r = await controller.handle({ type: "crafts", userId: ME });
+    const r = await controller.handle({ type: "feed", userId: ME });
     expect(r.error).toBeUndefined();
-    expect(r.crafts.userId).toBe(ME);
-    expect(r.crafts.username).toBe("Johnny_Sins");
-    expect(r.crafts.crafts).toEqual([
-      {
-        id: "6ac36a2b68df4b72cecefc0d",
-        code: "boots5",
-        skills: { dodge: 38 },
-        at: craftRow.createdAt,
-        scraps: 486,
+    expect(r.feed).toMatchObject({
+      userId: ME,
+      username: "Johnny_Sins",
+      feedVersion: 1,
+      holes: { crafts: false, sales: false, dismantles: false },
+      averages: {
+        scraps: { "2026-09-16": 0.25 },
+        steel: { "2026-09-16": 1.8 },
       },
+    });
+    expect(r.feed.rows.crafts.map((c) => c.txId)).toEqual([oid(1), oid(2)]);
+    expect(r.feed.rows.crafts[0]).toMatchObject({
+      id: oid(1001),
+      code: "boots5",
+      skills: { dodge: 38 },
+      scraps: 486,
+    });
+    expect(r.feed.covered.crafts).toBe(
+      new Date(NOW - 7 * 86400e3).toISOString(),
+    );
+    expect(storage.data[`feed:${ME}`].feedVersion).toBe(1);
+    expect(calls).toEqual(["craftItem", "itemMarket", "dismantleItem"]);
+    // fresh for a minute: reused without a call
+    const before = f.mock.calls.length;
+    await controller.handle({ type: "feed", userId: ME });
+    expect(f.mock.calls.length).toBe(before);
+    // a minute later a new craft is on top of the feed: the poll stops at the known row and keeps both
+    advance(61_000);
+    crafts = [craftRow(3, 0.5), ...crafts];
+    const polled = await controller.handle({ type: "feed", userId: ME });
+    expect(polled.feed.rows.crafts.map((c) => c.txId)).toEqual([
+      oid(3),
+      oid(1),
+      oid(2),
     ]);
-    expect(r.crafts.averages).toEqual({
-      scraps: { "2026-09-16": 0.25 },
-      steel: { "2026-09-16": 1.8 },
-    });
-    expect(r.crafts.complete).toEqual({
-      crafts: true,
-      sales: true,
-      dismantles: true,
-    });
-    expect(storage.data[`crafts:${ME}`].cacheVersion).toBe(CACHE_VERSION);
-    const calls = f.mock.calls.length;
-    await controller.handle({ type: "crafts", userId: ME });
-    expect(f.mock.calls.length).toBe(calls); // a fresh cache is reused
-    // the feed is the account's: a new key drops it with the other account data
+    expect(polled.feed.covered.crafts).toBe(r.feed.covered.crafts);
+    expect(
+      f.mock.calls.filter(([u]) => u.includes("getItemTrading")).length,
+    ).toBe(2); // averages not asked again within ten minutes
+    expect(f.mock.calls.filter(([u]) => u.includes("getUserLite")).length).toBe(
+      1,
+    );
+    // the store is the player's record: a new key keeps it, while the account caches go
     await controller.handle(
       { type: "saveSettings", settings: { apiKey: "another-key" } },
       { trusted: true },
     );
-    expect(storage.data[`crafts:${ME}`]).toBeUndefined();
+    expect(storage.data[`feed:${ME}`].rows.crafts).toHaveLength(3);
+    await controller.cleanup();
+    expect(storage.data[`feed:${ME}`]).toBeDefined();
+    // a store older than the window is dropped by cleanup
+    storage.data[`feed:${ME}`].at = new Date(NOW - 31 * 86400e3).toISOString();
+    await controller.cleanup();
+    expect(storage.data[`feed:${ME}`]).toBeUndefined();
+  });
+  it("reports a backfill that hit its page cap as a hole, with the coverage at its oldest row", async () => {
+    const ME = "697b55e4bcecf3b37667e0d1";
+    const oid = (n) => n.toString(16).padStart(24, "0");
+    const rows = Array.from({ length: 2600 }, (_, i) => ({
+      _id: oid(i + 1),
+      money: 4,
+      itemCode: "gun",
+      quantity: 1,
+      sellerId: ME,
+      buyerId: oid(99),
+      transactionType: "itemMarket",
+      item: {
+        _id: oid(5000 + i),
+        code: "gun",
+        skills: { attack: 54, criticalChance: 8 },
+        state: 100,
+      },
+      createdAt: new Date(NOW - i * 240e3).toISOString(), // one every four minutes: 2,520 rows in 7 days, past the 2,500-row cap
+    }));
+    const f = vi.fn(async (url) => {
+      const u = new URL(url);
+      const input = JSON.parse(u.searchParams.get("input"));
+      const proc = u.pathname.split("/").pop();
+      if (proc === "transaction.getPaginatedTransactions") {
+        if (input.transactionType !== "itemMarket")
+          return response({ items: [], nextCursor: null });
+        const page = input.cursor ? Number(input.cursor.slice(1)) : 0;
+        return response({
+          items: rows.slice(page * 100, page * 100 + 100),
+          nextCursor: `p${page + 1}`,
+        });
+      }
+      if (proc === "itemTrading.getItemTrading")
+        return response({ itemCode: input.itemCode, values: [] });
+      if (proc === "user.getUserLite")
+        return response({ _id: ME, username: "x" });
+      return response();
+    });
+    const { controller } = setup(f);
+    const r = await controller.handle({ type: "feed", userId: ME });
+    expect(r.feed.rows.sales).toHaveLength(2500);
+    expect(r.feed.holes).toEqual({
+      crafts: false,
+      sales: true,
+      dismantles: false,
+    });
+    expect(r.feed.covered.sales).toBe(rows[2499].createdAt);
   });
 });

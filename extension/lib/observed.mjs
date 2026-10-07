@@ -1,46 +1,52 @@
 // @ts-check
-// The player's own crafts, replayed from the game's transaction feed: what
-// each craft cost, what became of it, and what its roll clears at now. Pure
-// functions over rows the worker already validated (api.fetchOwnActivity).
-//
-// The method was checked on 2026-10-05, for one account, against the
-// community ledger site: cost reproduced to the cent, clears within 2% on
-// every held piece (docs/GAME-FACTS.md §10). That site has since gone
-// offline (Firebase "Site Not Found" on 2026-10-07); the extension's own
-// rules, the three below, are the reference now.
-//   cost    the recipe at the craft day's average scrap and steel prices
-//           (itemTrading.getItemTrading), with the random-craft steel fee
-//           unless the player says they choose the slot
-//   fate    held, sold (an item-market row with the same item id and the
-//           player as seller) or scrapped (a dismantle row with that id)
-//   clears  the median of recent sales of the same roll value; of its
-//           fifth-of-range band when the roll itself has too few; of the
-//           item when the band has too few
-import { RARITIES } from "./items.mjs";
+// The player's own pieces, replayed from the game's transaction feed: what
+// each one cost to get (crafted at the craft day's average input prices, or
+// bought at its price), what became of it (sold by the player, scrapped, or
+// still held), and the day's result. Pure functions over the rows the
+// worker's feed store holds (api.fetchOwnFeed). The method was checked on
+// 2026-10-05 against the community ledger site, which has since gone
+// offline; these rules are the reference now (docs/GAME-FACTS.md §10).
+//   cost     a craft: the recipe at the craft day's average scrap and steel
+//            prices, with the random-craft steel fee unless the player says
+//            they choose the slot; a buy: the money paid
+//   fate     held, sold (a later market row with the piece's item id and
+//            the player as seller) or scrapped (a later dismantle with it)
+//   result   by the day a piece was sold or scrapped, proceeds against cost
 import { craftRecipe } from "./ladder.mjs";
 import { describeCode } from "./craftdata.mjs";
-import { keyStat, bandOf } from "./stats.mjs";
+import { keyStat } from "./stats.mjs";
 import { nonNegative as money } from "./quality.mjs";
 
-/** @typedef {{ id: string, code: string, skills: Record<string, number> | null, at: string, scraps: number }} CraftRow */
-/** @typedef {{ itemId: string | null, code: string | null, at: string, money: number, seller: string | null, buyer: string | null }} SaleRow */
-/** @typedef {{ itemId: string | null, code: string | null, at: string, scraps: number }} DismantleRow */
+/** @typedef {{ txId: string, id: string, code: string, skills: Record<string, number> | null, at: string, scraps: number }} CraftRow */
+/** @typedef {{ txId: string, itemId: string | null, code: string | null, skills?: Record<string, number> | null, at: string, money: number, seller: string | null, buyer: string | null, listedAt?: string | null }} SaleRow */
+/** @typedef {{ txId: string, itemId: string | null, code: string | null, skills?: Record<string, number> | null, at: string, scraps: number }} DismantleRow */
 /** @typedef {Record<string, Record<string, number>>} Averages code -> UTC day -> average price */
-/** @typedef {{ price: number, skills?: Record<string, number> | null }} PricedFill */
+/**
+ * @typedef {{
+ *   id: string, txId: string, code: string, rarity: string | null, tier: number | null, slot: string | null,
+ *   skills: Record<string, number> | null, stat: string | null,
+ *   source: "crafted" | "bought" | "unknown", at: string | null,
+ *   cost: number | null, costBasis: string, scraps: number | null, steel: number | null, steelMode: "random" | "chosen",
+ *   scrapPrice: number | null, steelPrice: number | null, priceDay: string | null,
+ *   fate: "held" | "sold" | "scrapped", proceeds: number | null, proceedsBasis: string | null,
+ *   goneAt: string | null, listedAt: string | null, sellsHours: number | null
+ * }} Piece
+ */
 
-/** Fills of the same roll (or band, or item) needed before a clearing price is quoted. */
-export const MIN_ROLL_SAMPLE = 5;
-/** The headline counts epic and up, as the ledger site does; lower tiers are listed, not summed. */
-export const COUNTED_FROM = RARITIES.indexOf("epic");
-
-/** The UTC day of an ISO time, the day the feed and the averages are keyed by. @param {unknown} iso */
+/** The UTC day of an ISO time, the day the feed's averages are keyed by. @param {unknown} iso */
 export const dayOf = (iso) => String(iso ?? "").slice(0, 10);
+/** The player's local calendar day of an ISO time ("2026-10-07"). @param {unknown} iso */
+export const localDayOf = (iso) => {
+  const t = Date.parse(String(iso ?? ""));
+  if (!Number.isFinite(t)) return "";
+  const d = new Date(t);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
 
 /**
  * The average price of `code` on `day`, else the latest day on record
- * before it (the feed's averages lag the current day by nothing, but a
- * craft older than the table falls back), with the day used. null when the
- * table has nothing on or before the day.
+ * before it (a piece older than the table falls back), with the day used.
+ * null when the table has nothing on or before the day.
  * @param {Averages | null | undefined} averages @param {string} code @param {string} day
  */
 export function averageOn(averages, code, day) {
@@ -54,19 +60,19 @@ export function averageOn(averages, code, day) {
   return last ? { value: table[last], day: last } : { value: null, day: null };
 }
 
-/** @param {ReadonlyArray<number>} xs */
-const median = (xs) => {
-  if (!xs.length) return null;
-  const s = [...xs].sort((a, b) => a - b);
-  const n = s.length;
-  return n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2;
-};
+/** @param {string} a @param {string} b */
+const byTime = (a, b) => Date.parse(a) - Date.parse(b);
 
 /**
- * Every craft with its cost basis and its fate.
- * @param {{ crafts: ReadonlyArray<CraftRow> | null | undefined, sales?: ReadonlyArray<SaleRow>, dismantles?: ReadonlyArray<DismantleRow>, me: string | null, averages?: Averages | null, steelMode?: "random" | "chosen" }} input
+ * Every piece the player got (crafted, or bought on the market) with its
+ * cost and its fate, plus the pieces the player sold or scrapped whose
+ * acquisition is older than the store holds (source "unknown", no cost:
+ * the proceeds still count). A fate attaches to the latest acquisition of
+ * that item id before it that has no fate yet.
+ * @param {{ crafts?: ReadonlyArray<CraftRow> | null, sales?: ReadonlyArray<SaleRow> | null, dismantles?: ReadonlyArray<DismantleRow> | null, me: string | null, averages?: Averages | null, steelMode?: "random" | "chosen" }} input
+ * @returns {Piece[]}
  */
-export function replayCrafts({
+export function replayPieces({
   crafts,
   sales = [],
   dismantles = [],
@@ -74,16 +80,22 @@ export function replayCrafts({
   averages = {},
   steelMode = "random",
 }) {
-  const soldById = new Map();
-  for (const s of sales)
-    if (s.itemId && me && s.seller === me) soldById.set(s.itemId, s);
-  const scrappedById = new Map();
-  for (const d of dismantles) if (d.itemId) scrappedById.set(d.itemId, d);
-  return (crafts ?? []).map((c) => {
-    const item = describeCode(c.code);
-    const rarity = item?.rarity ?? null;
-    const recipe = rarity
-      ? craftRecipe(rarity, { chosen: steelMode === "chosen" })
+  /** @type {Piece[]} */
+  const pieces = [];
+  /** @param {string} code */
+  const describe = (code) => {
+    const item = describeCode(code);
+    return {
+      rarity: item?.rarity ?? null,
+      tier: item?.tier ?? null,
+      slot: item?.slot ?? null,
+      stat: keyStat(code),
+    };
+  };
+  for (const c of crafts ?? []) {
+    const d = describe(c.code);
+    const recipe = d.rarity
+      ? craftRecipe(d.rarity, { chosen: steelMode === "chosen" })
       : null;
     const day = dayOf(c.at);
     const scrap = averageOn(averages, "scraps", day);
@@ -95,155 +107,226 @@ export function replayCrafts({
         ? Math.round((scraps * scrap.value + steelUnits * steel.value) * 1e6) /
           1e6
         : null;
-    const sold = soldById.get(c.id) ?? null;
-    const scrapped = sold ? null : (scrappedById.get(c.id) ?? null);
-    // Scraps that came back are worth the scrap average of the day they came back.
-    const back = scrapped
-      ? averageOn(averages, "scraps", dayOf(scrapped.at))
-      : null;
-    const scrapsValue =
-      scrapped && back?.value != null ? scrapped.scraps * back.value : null;
-    return {
+    pieces.push({
       id: c.id,
+      txId: c.txId,
       code: c.code,
-      rarity,
-      tier: item?.tier ?? null,
-      slot: item?.slot ?? null,
+      ...d,
       skills: c.skills ?? null,
-      stat: keyStat(c.code),
+      source: "crafted",
       at: c.at,
-      day,
+      cost,
+      costBasis:
+        cost == null
+          ? "no average price for that day"
+          : `${scraps} scraps × ${scrap.value} + ${steelUnits} steel × ${steel.value}, the day's averages`,
       scraps,
       steel: steelUnits,
       steelMode,
       scrapPrice: scrap.value,
       steelPrice: steel.value,
       priceDay: scrap.day,
-      cost,
-      fate: sold ? "sold" : scrapped ? "scrapped" : "held",
-      proceeds: sold ? sold.money : scrapsValue,
-      proceedsBasis: sold
-        ? "sold on the market"
-        : scrapped
-          ? scrapsValue == null
-            ? "scrapped; no scrap average for that day"
-            : `scrapped: ${scrapped.scraps} scraps back at the day's average`
-          : null,
-      goneAt: sold?.at ?? scrapped?.at ?? null,
-    };
-  });
-}
-
-/**
- * What a roll clears at: the median of recent sales of the same roll value
- * (the key stat), else of its fifth-of-range band, else of the item; each
- * level needs MIN_ROLL_SAMPLE fills. Fills without a stat (an older cache)
- * count at the item level only.
- * @param {string} code @param {Record<string, number> | null | undefined} skills @param {ReadonlyArray<PricedFill> | null | undefined} fills
- */
-export function rollValue(code, skills, fills) {
-  const stat = keyStat(code);
-  const v = stat && skills ? Number(skills[stat]) : NaN;
-  const roll = Number.isInteger(v) ? v : null;
-  const priced = (fills ?? []).filter((f) => money(f?.price) != null);
-  if (stat && roll != null) {
-    const exact = priced.filter((f) => f.skills?.[stat] === roll);
-    if (exact.length >= MIN_ROLL_SAMPLE)
-      return {
-        value: median(exact.map((f) => f.price)),
-        level: /** @type {const} */ ("roll"),
-        n: exact.length,
-        stat,
-        roll,
-        band: null,
-      };
-    const band = bandOf(code, stat, roll);
-    if (band) {
-      const inBand = priced.filter((f) => {
-        const x = f.skills?.[stat];
-        return typeof x === "number" && x >= band.lo && x <= band.hi;
+      fate: "held",
+      proceeds: null,
+      proceedsBasis: null,
+      goneAt: null,
+      listedAt: null,
+      sellsHours: null,
+    });
+  }
+  for (const s of sales ?? [])
+    if (s.itemId && s.code && me && s.buyer === me && s.seller !== me)
+      pieces.push({
+        id: s.itemId,
+        txId: s.txId,
+        code: s.code,
+        ...describe(s.code),
+        skills: s.skills ?? null,
+        source: "bought",
+        at: s.at,
+        cost: s.money,
+        costBasis: "bought on the market",
+        scraps: null,
+        steel: null,
+        steelMode,
+        scrapPrice: null,
+        steelPrice: null,
+        priceDay: null,
+        fate: "held",
+        proceeds: null,
+        proceedsBasis: null,
+        goneAt: null,
+        listedAt: null,
+        sellsHours: null,
       });
-      if (inBand.length >= MIN_ROLL_SAMPLE)
-        return {
-          value: median(inBand.map((f) => f.price)),
-          level: /** @type {const} */ ("band"),
-          n: inBand.length,
-          stat,
-          roll,
-          band,
-        };
+  pieces.sort((a, b) => byTime(a.at ?? "", b.at ?? ""));
+  /** @type {Map<string, Piece[]>} */
+  const byItem = new Map();
+  for (const p of pieces) {
+    const list = byItem.get(p.id) ?? [];
+    list.push(p);
+    byItem.set(p.id, list);
+  }
+  /** @type {Array<{ kind: "sold" | "scrapped", itemId: string, code: string | null, skills: Record<string, number> | null, at: string, txId: string, money: number | null, scraps: number | null, listedAt: string | null }>} */
+  const fates = [];
+  for (const s of sales ?? [])
+    if (s.itemId && me && s.seller === me)
+      fates.push({
+        kind: "sold",
+        itemId: s.itemId,
+        code: s.code,
+        skills: s.skills ?? null,
+        at: s.at,
+        txId: s.txId,
+        money: s.money,
+        scraps: null,
+        listedAt: s.listedAt ?? null,
+      });
+  for (const d of dismantles ?? [])
+    if (d.itemId)
+      fates.push({
+        kind: "scrapped",
+        itemId: d.itemId,
+        code: d.code,
+        skills: d.skills ?? null,
+        at: d.at,
+        txId: d.txId,
+        money: null,
+        scraps: d.scraps,
+        listedAt: null,
+      });
+  fates.sort((a, b) => byTime(a.at, b.at));
+  for (const f of fates) {
+    const owned = (byItem.get(f.itemId) ?? [])
+      .filter((p) => p.fate === "held" && byTime(p.at ?? "", f.at) <= 0)
+      .at(-1);
+    // Scraps that came back are worth the scrap average of the day they came back.
+    const back =
+      f.kind === "scrapped" ? averageOn(averages, "scraps", dayOf(f.at)) : null;
+    const scrapsValue =
+      f.kind === "scrapped" && back?.value != null && f.scraps != null
+        ? f.scraps * back.value
+        : null;
+    const proceeds = f.kind === "sold" ? f.money : scrapsValue;
+    const proceedsBasis =
+      f.kind === "sold"
+        ? "sold on the market"
+        : scrapsValue == null
+          ? "scrapped; no scrap average for that day"
+          : `scrapped: ${f.scraps} scraps back at the day's average`;
+    const wait =
+      f.kind === "sold" && f.listedAt
+        ? (Date.parse(f.at) - Date.parse(f.listedAt)) / 3600e3
+        : null;
+    if (owned) {
+      owned.fate = f.kind;
+      owned.proceeds = proceeds;
+      owned.proceedsBasis = proceedsBasis;
+      owned.goneAt = f.at;
+      owned.listedAt = f.listedAt;
+      owned.sellsHours = wait != null && wait >= 0 ? wait : null;
+    } else if (f.code) {
+      const piece = /** @type {Piece} */ ({
+        id: f.itemId,
+        txId: f.txId,
+        code: f.code,
+        ...describe(f.code),
+        skills: f.skills,
+        source: "unknown",
+        at: null,
+        cost: null,
+        costBasis: "got before the feed on record",
+        scraps: null,
+        steel: null,
+        steelMode,
+        scrapPrice: null,
+        steelPrice: null,
+        priceDay: null,
+        fate: f.kind,
+        proceeds,
+        proceedsBasis,
+        goneAt: f.at,
+        listedAt: f.listedAt,
+        sellsHours: wait != null && wait >= 0 ? wait : null,
+      });
+      pieces.push(piece);
+      byItem.set(f.itemId, [...(byItem.get(f.itemId) ?? []), piece]);
     }
   }
-  if (priced.length >= MIN_ROLL_SAMPLE)
-    return {
-      value: median(priced.map((f) => f.price)),
-      level: /** @type {const} */ ("item"),
-      n: priced.length,
-      stat,
-      roll,
-      band: null,
-    };
-  return {
-    value: null,
-    level: null,
-    n: priced.length,
-    stat,
-    roll,
-    band: null,
-  };
+  return pieces;
 }
 
+/** @param {ReadonlyArray<number | null | undefined>} xs */
+const sum = (xs) => xs.reduce((/** @type {number} */ s, x) => s + (x ?? 0), 0);
+
 /**
- * A window of replayed crafts summed the way the ledger site's headline is:
- * epic and up counted, held pieces at what they clear at against their cost,
- * gone pieces at what they brought. Every sum says how much of it is known.
- * @param {ReadonlyArray<ReturnType<typeof replayCrafts>[number]>} entries
- * @param {{ from: string, to: string, valueOf: (entry: ReturnType<typeof replayCrafts>[number]) => { value: number | null } | null }} input
+ * The window's result, by the day things happened: what was sold or
+ * scrapped in it against its cost, what was crafted and bought in it, and
+ * what is held now (any day) at what it sells for. Every sum says how much
+ * of it is known.
+ * @param {ReadonlyArray<Piece>} pieces
+ * @param {{ from: string, to: string, dayOf?: (iso: string | null) => string, valueOf: (piece: Piece) => { value: number | null } | null }} input
  */
-export function craftsSummary(entries, { from, to, valueOf }) {
-  const inWindow = entries.filter((e) => e.day >= from && e.day <= to);
-  const counted = inWindow.filter(
-    (e) => RARITIES.indexOf(String(e.rarity)) >= COUNTED_FROM,
+export function ledgerSummary(
+  pieces,
+  { from, to, dayOf: day = localDayOf, valueOf },
+) {
+  const inWindow = (/** @type {string | null} */ iso) => {
+    const d = iso ? day(iso) : "";
+    return d >= from && d <= to;
+  };
+  const gone = pieces.filter((p) => p.fate !== "held" && inWindow(p.goneAt));
+  const goneKnown = gone.filter((p) => p.cost != null && p.proceeds != null);
+  const crafted = pieces.filter(
+    (p) => p.source === "crafted" && inWindow(p.at),
   );
-  const held = counted.filter((e) => e.fate === "held");
-  const gone = counted.filter((e) => e.fate !== "held");
-  const sum = (/** @type {ReadonlyArray<number | null>} */ xs) =>
-    xs.reduce((s, x) => (s ?? 0) + (x ?? 0), 0) ?? 0;
-  const heldValues = held.map((e) => valueOf(e)?.value ?? null);
+  const bought = pieces.filter((p) => p.source === "bought" && inWindow(p.at));
+  const held = pieces.filter((p) => p.fate === "held");
+  const heldValues = held.map((p) => valueOf(p)?.value ?? null);
   const covered = heldValues.filter((v) => v != null).length;
-  const heldCostKnown = held.filter((e) => e.cost != null).length;
-  const goneKnown = gone.filter(
-    (e) => e.cost != null && e.proceeds != null,
-  ).length;
-  const realized = sum(
-    gone.map((e) =>
-      e.cost != null && e.proceeds != null ? e.proceeds - e.cost : null,
-    ),
-  );
-  const goneCost = sum(
-    gone.map((e) => (e.cost != null && e.proceeds != null ? e.cost : null)),
-  );
+  const heldCostKnown = held.filter((p) => p.cost != null).length;
   return {
-    crafted: inWindow.length,
-    counted: counted.length,
-    below: inWindow.length - counted.length,
-    held: held.length,
-    sold: gone.filter((e) => e.fate === "sold").length,
-    scrapped: gone.filter((e) => e.fate === "scrapped").length,
-    cost: sum(counted.map((e) => e.cost)),
-    costKnown: counted.every((e) => e.cost != null),
-    heldCost: sum(held.map((e) => e.cost)),
-    heldCostKnown,
-    atMarket: sum(heldValues),
-    covered,
-    // the held pieces' worth against their cost, only when every held piece is priced and costed
-    unrealized:
-      held.length && covered === held.length && heldCostKnown === held.length
-        ? sum(heldValues) - sum(held.map((e) => e.cost))
-        : null,
-    realized,
-    realizedPct: goneCost > 0 ? realized / goneCost : null,
-    goneKnown,
-    proceeds: sum(gone.map((e) => e.proceeds)),
+    gone: {
+      n: gone.length,
+      sold: gone.filter((p) => p.fate === "sold").length,
+      scrapped: gone.filter((p) => p.fate === "scrapped").length,
+      proceeds: sum(gone.map((p) => p.proceeds)),
+      realized: sum(goneKnown.map((p) => (p.proceeds ?? 0) - (p.cost ?? 0))),
+      known: goneKnown.length,
+      unknownCost: gone.filter((p) => p.cost == null).length,
+      cost: sum(goneKnown.map((p) => p.cost)),
+    },
+    crafted: {
+      n: crafted.length,
+      cost: sum(crafted.map((p) => p.cost)),
+      costKnown: crafted.filter((p) => p.cost != null).length,
+      sold: crafted.filter((p) => p.fate === "sold").length,
+      soldProceeds: sum(
+        crafted.filter((p) => p.fate === "sold").map((p) => p.proceeds),
+      ),
+      scrapped: crafted.filter((p) => p.fate === "scrapped").length,
+      held: crafted.filter((p) => p.fate === "held").length,
+    },
+    bought: {
+      n: bought.length,
+      cost: sum(bought.map((p) => p.cost)),
+      sold: bought.filter((p) => p.fate === "sold").length,
+      soldProceeds: sum(
+        bought.filter((p) => p.fate === "sold").map((p) => p.proceeds),
+      ),
+      held: bought.filter((p) => p.fate === "held").length,
+    },
+    held: {
+      n: held.length,
+      cost: sum(held.map((p) => p.cost)),
+      costKnown: heldCostKnown,
+      value: sum(heldValues),
+      covered,
+      // worth against cost, only when every held piece is priced and costed
+      unrealized:
+        held.length && covered === held.length && heldCostKnown === held.length
+          ? sum(heldValues) - sum(held.map((p) => p.cost))
+          : null,
+    },
   };
 }

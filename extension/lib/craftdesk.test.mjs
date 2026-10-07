@@ -162,17 +162,27 @@ describe("the craft board", () => {
 });
 
 describe("the ledger", () => {
-  it("replays the player's own crafts: cost at the day's averages, held pieces at what their roll clears, fates by item id", () => {
-    const ME = "697b55e4bcecf3b37667e0d1";
-    state.craftsUserId = ME;
-    state.crafts = {
-      userId: ME,
-      username: "Johnny_Sins",
-      at: iso(),
-      days: 7,
-      complete: { crafts: true, sales: true, dismantles: true },
+  const ME = "697b55e4bcecf3b37667e0d1";
+  const OTHER = "69b4b8113af735a990a8070e";
+  const store = (over = {}) => ({
+    userId: ME,
+    username: "Johnny_Sins",
+    at: iso(),
+    covered: {
+      crafts: iso(7 * 86400e3),
+      sales: iso(3 * 86400e3),
+      dismantles: iso(7 * 86400e3),
+    },
+    holes: { crafts: false, sales: false, dismantles: false },
+    averages: {
+      scraps: { "2026-10-03": 0.247778, "2026-10-02": 0.25 },
+      steel: { "2026-10-03": 1.789756, "2026-10-02": 1.8 },
+    },
+    averagesAt: iso(),
+    rows: {
       crafts: [
         {
+          txId: "t1",
           id: "a3cb5c",
           code: "tank",
           skills: { attack: 159, criticalChance: 32 },
@@ -180,6 +190,7 @@ describe("the ledger", () => {
           scraps: 486,
         },
         {
+          txId: "t2",
           id: "b06b3c",
           code: "boots5",
           skills: { dodge: 38 },
@@ -187,36 +198,67 @@ describe("the ledger", () => {
           scraps: 486,
         },
         {
+          txId: "t3",
           id: "d664c5",
           code: "chest5",
           skills: { armor: 46 },
           at: iso(3600e3 - 5000),
           scraps: 486,
         },
-        {
-          id: "31f44d",
-          code: "chest1",
-          skills: { armor: 3 },
-          at: iso(7200e3),
-          scraps: 6,
-        },
       ],
       sales: [
         {
+          txId: "s1",
           itemId: "d664c5",
           code: "chest5",
+          skills: { armor: 46 },
           at: iso(1800e3),
           money: 129.396,
           seller: ME,
-          buyer: "x",
+          buyer: OTHER,
+          listedAt: iso(3000e3),
+        },
+        {
+          txId: "s2",
+          itemId: "g1",
+          code: "gun",
+          skills: { attack: 54, criticalChance: 8 },
+          at: iso(5000e3),
+          money: 4.413,
+          seller: OTHER,
+          buyer: ME,
+          listedAt: null,
+        },
+        {
+          txId: "s3",
+          itemId: "g1",
+          code: "gun",
+          skills: { attack: 54, criticalChance: 8 },
+          at: iso(900e3),
+          money: 6.1,
+          seller: ME,
+          buyer: OTHER,
+          listedAt: iso(4000e3),
+        },
+        {
+          txId: "s4",
+          itemId: "old1",
+          code: "helmet4",
+          skills: { criticalDamages: 80 },
+          at: iso(600e3),
+          money: 40,
+          seller: ME,
+          buyer: OTHER,
+          listedAt: null,
         },
       ],
       dismantles: [],
-      averages: {
-        scraps: { "2026-10-03": 0.247778 },
-        steel: { "2026-10-03": 1.789756 },
-      },
-    };
+    },
+    ...over,
+  });
+  it("replays the feed store: crafts at the day's averages, purchases at their price, fates by item id, the day's result", () => {
+    state.craftsUserId = ME;
+    state.feed = store();
     state.salesByCode = {
       tank: {
         code: "tank",
@@ -230,21 +272,32 @@ describe("the ledger", () => {
     };
     render("ledger");
     expect(text()).toContain("Johnny_Sins");
-    expect(text()).toContain("7 days of your feed");
-    expect(requestSales).toHaveBeenCalledWith("boots5"); // the held piece without sales read yet
+    expect(text()).toContain("feed on record since");
+    expect(requestSales).toHaveBeenCalledWith("boots5"); // held, its sales not read yet
     expect(requestSales).not.toHaveBeenCalledWith("chest5"); // sold: nothing to price
-    // 486 × 0.247778 + 16 × 1.789756 = 149.056 g per craft; the tank clears 161 (five sales of crit 32)
-    expect(text()).toContain("149.056");
-    expect(text()).toContain("clears 161.000 g");
+    // the day's result: the chest 129.396 − 149.056, the gun 6.1 − 4.413; the helmet's cost is unknown and not counted
+    expect(text()).toContain("−17.973 g");
+    expect(text()).toContain(
+      "3 sold, 0 scrapped · 175.496 g in · 1 without a cost on record, not counted",
+    );
+    expect(text()).toContain(
+      "447.169 g of inputs · 1 sold for 129.396 g · 2 held · 0 scrapped",
+    );
+    expect(text()).toContain("for 4.413 g · 1 sold for 6.100 g · 0 held");
+    expect(text()).toContain("2 pieces, 1 priced by their stats");
+    expect(text()).toContain("sells ~161.000 g");
     expect(text()).toContain("5 sales · atk 159 · crit 32% · 7 d");
-    expect(text()).toContain("crit chance 32 · attack 159");
     expect(text()).toContain("sold 129.396 g");
-    // realized on the sold chest: 129.396 − 149.056 = −19.660; the held value waits for the boots' price
-    expect(text()).toContain("−19.660 g");
-    expect(text()).toContain("1 of 2 priced");
-    expect(text()).toContain("1 below epic listed, not summed");
-    expect(body.querySelectorAll(".lens-crafts tbody tr")).toHaveLength(4);
-    // with the boots priced, the held pieces are 161 + 187.25 = 348.25 against 298.112 of inputs: +50.138
+    expect(text()).toContain("after 20 min listed");
+    expect(text()).toContain("before the feed on record");
+    expect(body.querySelectorAll(".lens-crafts tbody tr")).toHaveLength(5);
+    expect(
+      body.querySelector('.lens-crafts tr[data-source="bought"]').textContent,
+    ).toContain("bought 4.413 g");
+    // the bar's pulse carries today's result; the star says a sale without a cost is left out
+    expect(desk.pulse(state)).toContain("−17.973 g");
+    expect(desk.pulse(state)).toContain("*");
+    // with the boots priced, the held pieces are 161 + 187.25 against 298.112 of inputs
     state.salesByCode.boots5 = {
       code: "boots5",
       at: iso(),
@@ -254,8 +307,8 @@ describe("the ledger", () => {
       }),
     };
     render("ledger");
-    expect(text()).toContain("+50.138 g");
-    expect(text()).toContain("348.250 g against 298.112 g of inputs");
+    expect(text()).toContain("~348.250 g");
+    expect(text()).toContain("+50.138 g if sold at that");
     click('[data-action="desk-window"][data-window="7d"]');
     expect(
       body
@@ -263,62 +316,44 @@ describe("the ledger", () => {
         .getAttribute("aria-pressed"),
     ).toBe("true");
     expect(text()).toContain("Crafted · 7 days");
-    expect(text()).toContain("2026-10-03 "); // the day travels with the time in the 7-day view
-    // a refresh that failed keeps the last good read on screen, labelled as such
-    state.craftsError = "the API answered 503";
+    expect(text()).toContain("2026-10-0"); // the day travels with the time in the 7-day view
+    state.feedError = "the API answered 503";
     render("ledger");
     expect(text()).toContain(
       "last read failed (the API answered 503): the last good read is shown",
     );
-    expect(text()).toContain("clears 161.000 g");
-    state.craftsError = null;
-    render("ledger");
-    expect(text()).not.toContain("last read failed");
-    // chosen-slot steel doubles the fee: 486 × 0.247778 + 32 × 1.789756 = 177.692
+    expect(text()).toContain("sells ~161.000 g");
+    state.feedError = null;
     settings = preferences({ ...settings, craftSteelMode: "chosen" });
     render("ledger");
-    expect(text()).toContain("177.692");
     expect(text()).toContain("chosen-slot steel, twice the fee");
   });
-  it("says when the account could not be read off the page, and never shows another account's feed", () => {
+  it("says when the account could not be read off the page, never shows another account's feed, and names a hole", () => {
     state.craftsUserId = null;
     render("ledger");
     expect(text()).toContain("account not found on this page");
-    state.craftsUserId = "697b55e4bcecf3b37667e0d1";
-    state.crafts = {
-      userId: "6993b905cd957d3e93bc35a6",
-      at: iso(),
-      crafts: [],
-      sales: [],
-      dismantles: [],
-      averages: {},
-    };
+    expect(desk.pulse(state)).toBe("");
+    state.craftsUserId = ME;
+    state.feed = store({ userId: "6993b905cd957d3e93bc35a6" });
     render("ledger");
     expect(text()).toContain("reading…");
     expect(body.querySelector(".lens-crafts")).toBeNull();
-    state.craftsError = "the API answered 503";
+    expect(desk.pulse(state)).toBe("");
+    state.feedError = "the API answered 503";
     render("ledger");
     expect(text()).toContain(
-      "Your crafts could not be read: the API answered 503",
+      "Your transactions could not be read: the API answered 503",
     );
-  });
-  it("says when the feed holds no crafts in the window and when it was not fully covered", () => {
-    const ME = "697b55e4bcecf3b37667e0d1";
-    state.craftsUserId = ME;
-    state.crafts = {
-      userId: ME,
+    state.feedError = null;
+    state.feed = store({
       username: null,
-      at: iso(),
-      days: 7,
-      complete: { crafts: true, sales: false, dismantles: true },
-      crafts: [],
-      sales: [],
-      dismantles: [],
-      averages: {},
-    };
+      rows: { crafts: [], sales: [], dismantles: [] },
+      holes: { crafts: false, sales: true, dismantles: false },
+    });
     render("ledger");
     expect(text()).toContain("player …67e0d1");
-    expect(text()).toContain("No crafts of yours today (UTC) in the feed");
-    expect(text()).toContain("the feed was not fully covered");
+    expect(text()).toContain("Nothing of yours today");
+    expect(text()).toContain("The sales feed was not fully covered");
+    expect(desk.pulse(state)).toBe("");
   });
 });

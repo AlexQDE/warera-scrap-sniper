@@ -27,8 +27,8 @@ export async function startLens(runtime = chrome.runtime) {
     salesErrors: {},
     salesReading: null,
     taxOnPage: null,
-    crafts: null, // the player's own feed, replayed by the ledger
-    craftsUserId: null, // the id it was read for: the setting, else the page's own-profile links
+    feed: null, // the player's own feed store, replayed by the ledger
+    craftsUserId: null, // the id it is read for: the setting, else the page's own-profile links
     selectedCode: null, // the item selected in the market grid
     errors: {},
     busy: new Set(),
@@ -95,7 +95,7 @@ export async function startLens(runtime = chrome.runtime) {
         state.sales = null;
         state.salesByCode = {};
         state.salesErrors = {};
-        state.crafts = null;
+        state.feed = null;
         salesAttempts.clear();
         salesPending.clear();
         state.errors = {};
@@ -158,7 +158,7 @@ export async function startLens(runtime = chrome.runtime) {
       type: kind,
       force,
       ...(code
-        ? kind === "crafts"
+        ? kind === "feed"
           ? { userId: code }
           : { itemCode: code }
         : {}),
@@ -185,7 +185,7 @@ export async function startLens(runtime = chrome.runtime) {
         state.sales = null;
         state.salesByCode = {};
         state.salesErrors = {};
-        state.crafts = null;
+        state.feed = null;
       } else {
         if (r[kind]) state[kind] = r[kind];
         if (kind === "sales" && r.sales?.code) {
@@ -263,8 +263,7 @@ export async function startLens(runtime = chrome.runtime) {
       if (context.equipment || open === "craft") void read("avg", true);
       if (open === "craft") void read("cases", true);
       if (salesWanted) void read("sales", true, salesWanted);
-      if (open === "ledger" && state.craftsUserId)
-        void read("crafts", true, state.craftsUserId);
+      if (state.craftsUserId) void read("feed", true, state.craftsUserId);
       sched.schedule();
     } else if (name === "settings" || name === "reload") action(name);
     else if (desk.onClick(e)) sched.schedule();
@@ -342,10 +341,11 @@ export async function startLens(runtime = chrome.runtime) {
         state.taxOnPage = dom.taxRateFromText(dom.taxNotice()?.textContent);
         // Whose crafts: the id set in settings, else the one the page's own-profile links carry. Another account's feed is never shown.
         state.craftsUserId = state.settings.userId ?? dom.ownUserId();
-        if (state.crafts && state.crafts.userId !== state.craftsUserId)
-          state.crafts = null;
-        if (open === "ledger" && state.craftsUserId && !state.setup)
-          void read("crafts", false, state.craftsUserId);
+        if (state.feed && state.feed.userId !== state.craftsUserId)
+          state.feed = null;
+        // The feed is polled whenever the bar is on screen, whatever tab is open: a sale shows in the head at once.
+        if (state.craftsUserId && !state.setup)
+          void read("feed", false, state.craftsUserId);
       }
       const { bar, head, body } = mountBar(anchor, onBarClick);
       const book = state.book;
@@ -368,10 +368,15 @@ export async function startLens(runtime = chrome.runtime) {
               : fresh
                 ? "fresh"
                 : "stale",
-          busy: state.busy.has("book") || state.busy.has("crafts"),
+          busy: state.busy.has("book") || state.busy.has("feed"),
           panel: section,
           tabs,
-          pulse: context.equipment ? equipment.pulse() : "",
+          pulse: [
+            context.equipment ? equipment.pulse() : "",
+            context.craft ? desk.pulse(state) : "",
+          ]
+            .filter(Boolean)
+            .join(" · "),
           setup: !!state.setup,
         }),
       );
@@ -393,8 +398,8 @@ export async function startLens(runtime = chrome.runtime) {
             body,
             {
               ...state,
-              craftsError: state.errors.crafts ?? null,
-              craftsBusy: state.busy.has("crafts"),
+              feedError: state.errors.feed ?? null,
+              feedBusy: state.busy.has("feed"),
             },
             section,
           );
@@ -501,8 +506,8 @@ export async function startLens(runtime = chrome.runtime) {
     // Every row is valued at the game's average until its item's fills are read; the craft board is built from them.
     if (context.equipment || craftOpen || (context.cases && wantsAverages()))
       jobs.push(read("avg"));
-    if (context.craft && open === "ledger" && state.craftsUserId)
-      jobs.push(read("crafts", false, state.craftsUserId));
+    if (context.craft && state.craftsUserId)
+      jobs.push(read("feed", false, state.craftsUserId));
     await Promise.all(jobs);
   }
   async function tick() {
