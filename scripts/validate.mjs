@@ -15,7 +15,8 @@ assert.equal(
   "Package and manifest versions must match",
 );
 assert.equal(manifest.manifest_version, 3);
-assert.deepEqual(manifest.permissions, ["storage"]);
+// unlimitedStorage: the player's whole transaction history is kept in extension storage (no install warning).
+assert.deepEqual(manifest.permissions, ["storage", "unlimitedStorage"]);
 assert.deepEqual(manifest.host_permissions, ["https://api2.warera.io/*"]);
 const publicFiles = new Set(
   manifest.web_accessible_resources.flatMap((group) => group.resources),

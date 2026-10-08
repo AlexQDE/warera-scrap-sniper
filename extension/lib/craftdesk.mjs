@@ -1,36 +1,23 @@
 // The Craft and Ledger sections of the bar. Craft: one row per tier, what a
 // craft costs at the observed asks and what it is worth at the game's
-// average item prices (craftboard.mjs). Ledger: the player's own pieces
-// replayed from the worker's feed store (observed.mjs): crafted or bought,
-// sold, scrapped or held, the day's result. Rendering only.
+// average item prices (craftboard.mjs). Ledger: the worker's view of the
+// player's whole history (observed.mjs): the result by activity (crafting,
+// cases, market buys, loot) and window, the recent pieces. Rendering only.
 import { fmt, signed, escapeHtml as esc } from "./format.mjs";
 import { setHtml, timeLabel } from "./ui.mjs";
 import { freshness, TTL } from "./quality.mjs";
 import { tierBoard, bestTier } from "./craftboard.mjs";
 import { itemLabel, rarityFromItemCode } from "./dom.mjs";
 import { comparableFills } from "./resale.mjs";
-import { replayPieces, ledgerSummary, localDayOf } from "./observed.mjs";
-import { similarValue, WINDOW_HOURS } from "./similar.mjs";
+import { localDayOf } from "./observed.mjs";
+import { spanWords } from "./similar.mjs";
+import { WINDOW_HOURS } from "./similar.mjs";
 
 const pct = (v, d = 0) => (v == null ? "–" : `${signed(v * 100, d)}%`);
-const STAT_WORDS = {
-  attack: "attack",
-  criticalChance: "crit chance",
-  criticalDamages: "crit damage",
-  armor: "armor",
-  precision: "precision",
-  dodge: "dodge",
-};
-const LEDGER_ROWS = 60;
 
-export function createCraftDesk({
-  settings,
-  requestSales = () => {},
-  now = Date.now,
-}) {
+export function createCraftDesk({ settings, now = Date.now }) {
   let tier = null; // the tier whose slots are opened on the craft board
-  let craftWindow = "today"; // the window of the player's own crafts shown: today (UTC) or 7 days
-  const replayMemo = { key: "", entries: [] };
+  let craftWindow = "today"; // the Ledger's window: today, week, month or all (local days)
 
   function reset() {
     tier = null;
@@ -50,7 +37,9 @@ export function createCraftDesk({
       return true;
     }
     if (a === "desk-window") {
-      craftWindow = t.dataset.window === "7d" ? "7d" : "today";
+      craftWindow = ["today", "week", "month", "all"].includes(t.dataset.window)
+        ? t.dataset.window
+        : "today";
       return true;
     }
     return false;
@@ -135,155 +124,152 @@ export function createCraftDesk({
     return `${prices}${headline}<table class="lens-board"><thead><tr><th>Tier</th><th class="lens-num">Cost</th><th class="lens-num">Random EV</th><th class="lens-num">ROI</th><th>Best slot</th><th class="lens-num">ROI</th></tr></thead><tbody>${body}</tbody></table><p class="lens-muted lens-legend">Cost = the tier's scraps and the steel fee walked through the observed asks (random craft; a chosen slot doubles the steel). Value = the game's "Current value" per item, a mean of recent sales of any roll; the market tax is the buyer's, so a listing is what you keep. Expected values, not promises.</p>`;
   }
 
-  /** The pieces of the feed store, replayed once per store read and steel mode. */
-  function piecesOf(state, s) {
-    const f = state.feed;
-    const key = `${f.at}|${f.userId}|${s.craftSteelMode}`;
-    if (replayMemo.key !== key) {
-      replayMemo.key = key;
-      replayMemo.entries = replayPieces({
-        crafts: f.rows?.crafts ?? [],
-        sales: f.rows?.sales ?? [],
-        dismantles: f.rows?.dismantles ?? [],
-        me: f.userId,
-        averages: f.averages,
-        steelMode: s.craftSteelMode,
-      });
-    }
-    return replayMemo.entries;
-  }
   const cls = (v) => (v == null ? "" : v >= 0 ? "lens-pos" : "lens-neg");
   const hoursWord = (h) =>
     h == null ? "" : h < 1 ? `${Math.round(h * 60)} min` : `${h.toFixed(1)} h`;
-  /** Today's result for the bar's head, from the store the tab holds. */
+  const statsWords = (skills) =>
+    skills && Object.keys(skills).length
+      ? spanWords(
+          Object.fromEntries(
+            Object.entries(skills).map(([k, v]) => [k, [v, v]]),
+          ),
+        )
+      : "stats unknown";
+  /** Today's money for the bar's head: what was sold or scrapped today against its cost. */
   function pulse(state) {
-    const f = state.feed;
-    if (!f || !state.craftsUserId || f.userId !== state.craftsUserId) return "";
-    const today = localDayOf(new Date(now()).toISOString());
-    const sum = ledgerSummary(piecesOf(state, settings()), {
-      from: today,
-      to: today,
-      valueOf: () => null,
-    });
-    if (!sum.gone.n && !sum.crafted.n && !sum.bought.n) return "";
-    return `today <b class="${sum.gone.known ? cls(sum.gone.realized) : ""}">${sum.gone.known ? `${signed(sum.gone.realized)} g` : "–"}</b>${sum.gone.unknownCost ? "*" : ""}`;
+    const v = state.ledger;
+    if (!v || !state.craftsUserId || v.meta?.userId !== state.craftsUserId)
+      return "";
+    const m = v.windows.today.money;
+    const t = v.windows.today;
+    const est = t.crafted.estimated + t.opened.estimated + t.bought.estimated;
+    if (!m.n && !t.crafted.n && !t.opened.n && !t.bought.n) return "";
+    return `today <b class="${cls(m.realized)}">${signed(m.realized)} g</b>${m.unknownCost ? "*" : ""} · est <b class="${cls(est)}">${signed(est)} g</b>`;
   }
+  const WINDOWS = [
+    ["today", "Today"],
+    ["week", "7 days"],
+    ["month", "30 days"],
+    ["all", "All"],
+  ];
+  const SOURCES = [
+    ["crafted", "Crafting", "craft"],
+    ["opened", "Cases", "opening"],
+    ["bought", "Market buys", "buy"],
+    ["looted", "Battle loot", "drop"],
+  ];
 
-  function ledgerHtml(state, s) {
+  function ledgerHtml(state) {
     const id = state.craftsUserId ?? null;
-    const f = state.feed;
+    const v = state.ledger;
+    const h = state.history;
     const head = (sub, body) =>
       `<div class="lens-own"><p class="lens-own-head">${sub}</p>${body}</div>`;
     if (!id)
       return head(
         "account not found on this page",
-        `<p class="lens-muted">The page did not show your own inventory or skills link, so your transactions cannot be read. Set your player id in the extension's settings (the 24 characters in your profile URL).</p>`,
+        `<p class="lens-muted">The page did not show your own inventory or skills link, so your history cannot be read. Set your player id in the extension's settings (the 24 characters in your profile URL).</p>`,
       );
-    if (!f || f.userId !== id)
+    if (!v || v.meta?.userId !== id)
       return head(
-        state.feedError ? "read failed" : "reading…",
-        `<p class="lens-muted">${state.feedError ? `Your transactions could not be read: ${esc(state.feedError)}. Refresh retries.` : "Reading your crafts, purchases, sales and dismantles from the game's feed (the first read walks 7 days back)."}</p>`,
+        state.historyError ? "read failed" : "reading…",
+        `<p class="lens-muted">${state.historyError ? `Your history could not be read: ${esc(state.historyError)}. It retries on its own.` : h ? `Reading your history from the start of your profile: ${h.count} transactions so far.` : "Reading your history from the start of your profile."}</p>`,
       );
-    const pieces = piecesOf(state, s);
-    const today = localDayOf(new Date(now()).toISOString());
-    const from =
-      craftWindow === "7d"
-        ? localDayOf(new Date(now() - 6 * 86400e3).toISOString())
-        : today;
-    const valueOf = (p) =>
-      similarValue(
-        p.code,
-        p.skills,
-        comparableFills(state.salesByCode?.[p.code]?.fills ?? [], {
-          code: p.code,
-          hours: WINDOW_HOURS,
-          now: now(),
-          state: null,
-        }),
-      );
-    const sum = ledgerSummary(pieces, { from, to: today, valueOf });
-    const inWindow = (iso) => {
-      const d = iso ? localDayOf(iso) : "";
-      return d >= from && d <= today;
-    };
-    const shown = pieces
-      .filter((p) => inWindow(p.goneAt) || inWindow(p.at))
+    const w = v.windows[craftWindow] ?? v.windows.today;
+    const meta = v.meta;
+    const filling = !meta.done
+      ? ` · <b>filling from the start of your profile</b>: ${meta.count} transactions so far, back to ${esc(localDayOf(meta.oldestAt))}`
+      : ` · since ${esc(localDayOf(meta.oldestAt))}, ${meta.count} transactions`;
+    const who = meta.username
+      ? esc(meta.username)
+      : `player …${esc(String(id).slice(-6))}`;
+    const m = w.money;
+    const sources = SOURCES.map(([key, name, unit]) => {
+      const o = w[key];
+      if (!o?.n) return "";
+      return `<tr><th scope="row">${name}</th><td class="lens-num">${o.n}</td><td class="lens-num">${fmt(o.cost)}${o.costUnknown ? `<small> ${o.costUnknown} ?</small>` : ""}</td><td class="lens-num">${fmt(o.proceeds)}<small> ${o.sold} sold · ${o.scrapped} scrapped</small></td><td class="lens-num">${o.held ? `${fmt(o.heldValue)}<small> ${o.held} held, ${o.heldPriced} priced</small>` : "–"}</td><td class="lens-num ${cls(o.realized)}">${signed(o.realized)}</td><td class="lens-num ${cls(o.estimated)}"><b>${signed(o.estimated)}</b>${o.estimatedKnown ? `<small> ${signed(o.estimated / o.estimatedKnown)} a ${unit}</small>` : ""}</td></tr>`;
+    }).join("");
+    const caseRows = Object.entries(w.cases)
+      .map(
+        ([code, o]) =>
+          `<span class="lens-chip"><b>${esc(code === "case1" ? "Case" : code === "case2" ? "Elite Case" : code)}</b> ${o.n} · cost ${fmt(o.cost)} · <span class="${cls(o.estimated)}">${signed(o.estimated)} g</span></span>`,
+      )
+      .join("");
+    const tierRows = Object.entries(w.tiers)
       .sort(
-        (x, y) =>
-          Date.parse(y.goneAt ?? y.at ?? "") -
-          Date.parse(x.goneAt ?? x.at ?? ""),
-      );
-    // The sales that price the held pieces, asked for on every render; a fresh read returns at once.
-    const want = [
-      ...new Set(pieces.filter((p) => p.fate === "held").map((p) => p.code)),
-    ].slice(0, 8);
-    for (const code of want) requestSales(code);
-    const windowWord = craftWindow === "7d" ? "7 days" : "today";
-    const g = sum.gone;
-    const tiles = `<div class="lens-tiles"><div><small>Result · ${windowWord}</small><b class="${g.known ? cls(g.realized) : ""}">${g.known ? `${signed(g.realized)} g` : "–"}</b><span>${g.n ? `${g.sold} sold, ${g.scrapped} scrapped · ${fmt(g.proceeds)} g in${g.unknownCost ? ` · ${g.unknownCost} without a cost on record, not counted` : ""}` : "nothing sold or scrapped"}</span></div><div><small>Crafted · ${windowWord}</small><b>${sum.crafted.n}</b><span>${sum.crafted.n ? `${fmt(sum.crafted.cost)} g of inputs${sum.crafted.costKnown < sum.crafted.n ? ` (${sum.crafted.n - sum.crafted.costKnown} uncosted)` : ""} · ${sum.crafted.sold} sold for ${fmt(sum.crafted.soldProceeds)} g · ${sum.crafted.held} held · ${sum.crafted.scrapped} scrapped` : "no crafts"}</span></div><div><small>Bought · ${windowWord}</small><b>${sum.bought.n}</b><span>${sum.bought.n ? `for ${fmt(sum.bought.cost)} g · ${sum.bought.sold} sold for ${fmt(sum.bought.soldProceeds)} g · ${sum.bought.held} held` : "no purchases"}</span></div><div><small>Held now</small><b class="${cls(sum.held.unrealized)}">${sum.held.covered ? `~${fmt(sum.held.value)} g` : "–"}</b><span>${sum.held.n ? `${sum.held.n} piece${sum.held.n === 1 ? "" : "s"}, ${sum.held.covered} priced by their stats · ${fmt(sum.held.cost)} g in${sum.held.unrealized != null ? ` · ${signed(sum.held.unrealized)} g if sold at that` : ""}` : "nothing held"}</span></div></div>`;
-    const rows = shown.slice(0, LEDGER_ROWS).map((p) => {
-      const v = p.fate === "held" ? valueOf(p) : null;
-      const stat =
-        p.skills && Object.keys(p.skills).length
-          ? Object.entries(p.skills)
-              .map(([k, val]) => `${STAT_WORDS[k] ?? k} ${val}`)
-              .join(" · ")
-          : "stats unknown";
+        (a, b) =>
+          ["common", "uncommon", "rare", "epic", "legendary", "mythic"].indexOf(
+            a[0],
+          ) -
+          ["common", "uncommon", "rare", "epic", "legendary", "mythic"].indexOf(
+            b[0],
+          ),
+      )
+      .map(
+        ([tier, o]) =>
+          `<span class="lens-chip"><b>${esc(tier)}</b> ${o.n} · cost ${fmt(o.cost)} · <span class="${cls(o.estimated)}">${signed(o.estimated)} g</span></span>`,
+      )
+      .join("");
+    const windowWord = WINDOWS.find(([k]) => k === craftWindow)?.[1] ?? "Today";
+    const total = ["crafted", "opened", "bought", "looted"].reduce(
+      (sum, k) => sum + (w[k]?.estimated ?? 0),
+      0,
+    );
+    const tiles = `<div class="lens-tiles"><div><small>Money · ${windowWord}</small><b class="${cls(m.realized)}">${signed(m.realized)} g</b><span>${m.n ? `${m.sold} sold, ${m.scrapped} scrapped · ${fmt(m.proceeds)} g in${m.unknownCost ? ` · ${m.unknownCost} without a cost on record` : ""}` : "nothing sold or scrapped"}</span></div><div><small>Got · ${windowWord}</small><b>${["crafted", "opened", "bought", "looted"].reduce((n, k) => n + (w[k]?.n ?? 0), 0)}</b><span>${w.crafted.n ?? 0} crafted · ${w.opened.n ?? 0} from cases · ${w.bought.n ?? 0} bought · ${w.looted.n ?? 0} looted</span></div><div><small>Result incl. held · ${windowWord}</small><b class="${cls(total)}">${signed(total)} g</b><span>gone at what they brought, held at what pieces of those stats sell for</span></div></div>`;
+    const rows = (v.rows ?? []).map((p) => {
       const got =
         p.source === "crafted"
-          ? `crafted <small>${p.cost == null ? "no day average" : `${fmt(p.cost)} g`}</small>`
-          : p.source === "bought"
-            ? `bought <small>${fmt(p.cost)} g</small>`
-            : `<small>before the feed on record</small>`;
+          ? `crafted <small>${p.cost == null ? "no price" : `${fmt(p.cost)} g${p.approx ? "≈" : ""}`}</small>`
+          : p.source === "opened"
+            ? `${esc(p.via === "case2" ? "elite case" : "case")} <small>${p.cost == null ? "no price" : `${fmt(p.cost)} g${p.approx ? "≈" : ""}`}</small>`
+            : p.source === "bought"
+              ? `bought <small>${fmt(p.cost)} g</small>`
+              : p.source === "looted"
+                ? `loot`
+                : `<small>before your history</small>`;
       const nowCell =
         p.fate === "sold"
           ? `sold ${fmt(p.proceeds)} g <small>${p.sellsHours != null ? `after ${hoursWord(p.sellsHours)} listed` : ""}</small>`
           : p.fate === "scrapped"
-            ? `scrapped${p.proceeds != null ? ` <small>${fmt(p.proceeds)} g in scraps</small>` : ""}`
-            : v?.value != null
-              ? `sells ~${fmt(v.value)} g <small>${esc(v.label)}</small>`
-              : `<small>${state.salesErrors?.[p.code] ? "sales read failed" : state.salesByCode?.[p.code] ? esc(v?.label ?? "too few sales with these stats") : "reading sales…"}</small>`;
-      const pnl =
-        p.cost == null
-          ? null
-          : p.fate === "held"
-            ? v?.value == null
-              ? null
-              : v.value - p.cost
-            : p.proceeds == null
-              ? null
-              : p.proceeds - p.cost;
-      const when = new Date(p.goneAt ?? p.at ?? now());
+            ? `scrapped <small>${fmt(p.proceeds)} g in scraps</small>`
+            : p.value?.value != null
+              ? `sells ~${fmt(p.value.value)} g <small>${esc(p.value.label)}</small>`
+              : `<small>held, value not read yet</small>`;
+      const back = p.fate === "held" ? (p.value?.value ?? null) : p.proceeds;
+      const pnl = back != null && p.cost != null ? back - p.cost : null;
+      const when = new Date(p.goneAt ?? p.at ?? Date.now());
       const time = `${String(when.getHours()).padStart(2, "0")}:${String(when.getMinutes()).padStart(2, "0")}`;
-      return `<tr data-fate="${p.fate}" data-source="${p.source}"><td>${craftWindow === "7d" ? `${esc(localDayOf(when.toISOString()))} ` : ""}${time}</td><td>${esc(itemLabel(p.code))}<br><small>${esc(stat)}</small></td><td>${got}</td><td>${nowCell}</td><td class="lens-num ${cls(pnl)}">${pnl == null ? "–" : signed(pnl)}</td></tr>`;
+      return `<tr data-fate="${p.fate}" data-source="${p.source}"><td>${craftWindow === "today" ? "" : `${esc(localDayOf(when.toISOString()))} `}${time}</td><td>${esc(itemLabel(p.code))}<br><small>${esc(statsWords(p.skills))}</small></td><td>${got}</td><td>${nowCell}</td><td class="lens-num ${cls(pnl)}">${pnl == null ? "–" : signed(pnl)}</td></tr>`;
     });
-    const since = Object.values(f.covered ?? {})
-      .filter(Boolean)
-      .sort()
-      .at(-1);
-    const holes = Object.entries(f.holes ?? {})
-      .filter(([, h]) => h)
-      .map(([k]) => k);
-    const who = f.username
-      ? esc(f.username)
-      : `player …${esc(String(id).slice(-6))}`;
     return head(
-      `<b>${who}</b> · feed on record since ${since ? esc(localDayOf(since)) : "–"} · updated ${timeLabel(f.at, now())}${state.feedBusy ? " · refreshing" : ""}${state.feedError ? ` · <b>last read failed</b> (${esc(state.feedError)}): the last good read is shown` : ""}`,
-      `<div class="lens-windows"><button type="button" data-action="desk-window" data-window="today" aria-pressed="${craftWindow !== "7d"}">Today</button><button type="button" data-action="desk-window" data-window="7d" aria-pressed="${craftWindow === "7d"}">7 days</button></div>${tiles}${rows.length ? `<table class="lens-crafts"><thead><tr><th>When</th><th>Piece</th><th>Got</th><th>Now</th><th class="lens-num">±</th></tr></thead><tbody>${rows.join("")}</tbody></table>${shown.length > LEDGER_ROWS ? `<p class="lens-muted">${shown.length - LEDGER_ROWS} more not listed.</p>` : ""}` : `<p class="lens-muted">Nothing of yours ${craftWindow === "7d" ? "in the last 7 days" : "today"}: no craft, purchase, sale or dismantle in the feed.</p>`}<p class="lens-muted lens-legend">Read from the game's transaction feed with your key, polled every minute while this page is open. A craft costs the recipe at the craft day's average scrap and steel prices (${s.craftSteelMode === "chosen" ? "chosen-slot steel, twice the fee" : "random-craft steel fee"}; change it in settings); a purchase costs what you paid; a sale is joined to the piece by its item id; "sells" is the median of the last 7 days' sales of the same stats. Days are your local days.${holes.length ? ` The ${holes.join(", ")} feed was not fully covered: older rows may be missing.` : ""}</p>`,
+      `<b>${who}</b>${filling} · updated ${timeLabel(meta.at ?? v.at, now())}${state.historyBusy ? " · reading" : ""}${state.historyError ? ` · <b>last read failed</b> (${esc(state.historyError)})` : ""}`,
+      `<div class="lens-windows">${WINDOWS.map(([k, label]) => `<button type="button" data-action="desk-window" data-window="${k}" aria-pressed="${craftWindow === k}">${label}</button>`).join("")}</div>${tiles}${sources ? `<table class="lens-crafts lens-sources"><thead><tr><th>${windowWord}</th><th class="lens-num">Pieces</th><th class="lens-num">Cost</th><th class="lens-num">Sold / scrapped</th><th class="lens-num">Held</th><th class="lens-num">Realized</th><th class="lens-num">Incl. held</th></tr></thead><tbody>${sources}</tbody></table>` : ""}${caseRows ? `<div class="lens-chips"><small>Cases</small> ${caseRows}</div>` : ""}${tierRows ? `<div class="lens-chips"><small>Crafts by tier</small> ${tierRows}</div>` : ""}${w.wooden.n ? `<p class="lens-muted">${w.wooden.n} wooden cases gave resources worth ${fmt(w.wooden.value)} g.</p>` : ""}${rows.length ? `<table class="lens-crafts"><thead><tr><th>When</th><th>Piece</th><th>Got</th><th>Now</th><th class="lens-num">±</th></tr></thead><tbody>${rows.join("")}</tbody></table>${v.rowsTotal > rows.length ? `<p class="lens-muted">${v.rowsTotal - rows.length} more in this window.</p>` : ""}` : `<p class="lens-muted">Nothing of yours in this window.</p>`}<p class="lens-muted lens-legend">Your whole history is read once with your key, kept in this browser and extended every minute (every 15 s while the game's craft or case window is open). A craft costs its recipe at that day's scrap and steel prices (${s_steelWords(state)}); a case what it would have sold for that day; a purchase what you paid; loot nothing. A piece counts at its sale, its scraps at that day's price, or, while you hold it, what pieces of those stats sold for in the last 7 days (else the game's average).${v.approxBefore ? ` The game keeps 30 days of daily prices: costs before ${esc(v.approxBefore)} use the nearest day on record or your own trades (≈).` : ""} Days are your local days.</p>`,
     );
   }
+  const s_steelWords = (state) =>
+    state.settings?.craftSteelMode === "chosen"
+      ? "chosen-slot steel, twice the fee"
+      : "random-craft steel fee";
 
   /** Render `section` ("craft" or "ledger") into the bar's body. */
   function render(body, state, section) {
     const s = settings();
-    const html =
-      section === "ledger" ? ledgerHtml(state, s) : craftHtml(state, s);
+    const html = section === "ledger" ? ledgerHtml(state) : craftHtml(state, s);
     setHtml(
       body,
       `<div class="lens-desk" data-section="${section}">${html}</div>`,
     );
   }
-  return { render, clear, reset, onClick, pulse };
+  return {
+    render,
+    clear,
+    reset,
+    onClick,
+    pulse,
+    get window() {
+      return craftWindow;
+    },
+  };
 }
 
 function median(xs) {

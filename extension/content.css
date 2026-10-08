@@ -516,3 +516,33 @@
     transition: none !important;
   }
 }
+
+/* The panel inside the game's case and craft dialogs */
+.ss-dialog[data-lens] {
+  display: block;
+  grid-column: 1 / -1;
+  width: 100%;
+  background: var(--lens-bg);
+  border: 1px solid var(--lens-line);
+  border-radius: 8px;
+  padding: 6px 9px;
+  margin: 6px 0;
+  text-align: left;
+  font-size: 12px;
+}
+.ss-dialog[data-lens] p {
+  margin: 4px 0;
+}
+.ss-dialog[data-lens] small {
+  display: inline;
+}
+.ss-dialog[data-lens] .lens-head {
+  min-height: 0;
+}
+[data-lens] .lens-sources th[scope="row"] {
+  text-align: left;
+  font-weight: 600;
+}
+[data-lens] .lens-chips > small {
+  margin-right: 4px;
+}

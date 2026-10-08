@@ -256,35 +256,23 @@ describe("background controller", () => {
         .error,
     ).toBe("bad-item");
   });
-  it("keeps the player's own feed as a store: a 7-day backfill, then polls that stop at a known row, kept across key changes", async () => {
-    const ME = "697b55e4bcecf3b37667e0d1";
-    const oid = (n) => n.toString(16).padStart(24, "0");
-    const craftRow = (n, hoursAgo) => ({
-      _id: oid(n),
-      itemCode: "scraps",
-      quantity: 486,
-      sellerId: ME,
-      buyerId: ME,
-      transactionType: "craftItem",
-      item: {
-        _id: oid(1000 + n),
-        code: "boots5",
-        skills: { dodge: 38 },
-        state: 100,
-      },
-      createdAt: new Date(NOW - hoursAgo * 3600e3).toISOString(),
-    });
-    let crafts = [craftRow(1, 1), craftRow(2, 2)];
+  const ME = "697b55e4bcecf3b37667e0d1";
+  const OTHER = "69b4b8113af735a990a8070e";
+  const oid = (n) => n.toString(16).padStart(24, "0");
+  /** A fake history API: `rows` newest first, pages of 100, cursor "p<n>"; plus prices and the player's card. */
+  function historyApi(rowsRef) {
     const calls = [];
     const f = vi.fn(async (url) => {
       const u = new URL(url);
       const input = JSON.parse(u.searchParams.get("input"));
       const proc = u.pathname.split("/").pop();
       if (proc === "transaction.getPaginatedTransactions") {
-        calls.push(input.transactionType);
+        const page = input.cursor ? Number(input.cursor.slice(1)) : 0;
+        calls.push(page);
+        const rows = rowsRef.rows;
         return response({
-          items: input.transactionType === "craftItem" ? crafts : [],
-          nextCursor: null,
+          items: rows.slice(page * 100, page * 100 + 100),
+          nextCursor: rows.length > (page + 1) * 100 ? `p${page + 1}` : null,
         });
       }
       if (proc === "itemTrading.getItemTrading")
@@ -293,7 +281,8 @@ describe("background controller", () => {
           values: [
             {
               valueAt: "2026-09-16",
-              avgValue: input.itemCode === "scraps" ? 0.25 : 1.8,
+              avgValue:
+                { scraps: 0.25, steel: 1.8, case1: 3.8 }[input.itemCode] ?? 1,
             },
           ],
         });
@@ -301,116 +290,148 @@ describe("background controller", () => {
         return response({ _id: ME, username: "Johnny_Sins" });
       return response();
     });
-    const { controller, storage, advance } = setup(f);
+    return { f, calls };
+  }
+  const openRow = (n, minutesAgo) => ({
+    _id: oid(n),
+    itemCode: "case1",
+    quantity: 1,
+    sellerId: ME,
+    buyerId: ME,
+    transactionType: "openCase",
+    item: {
+      _id: oid(100000 + n),
+      code: "knife",
+      skills: { attack: 30, criticalChance: 3 },
+      state: 100,
+    },
+    createdAt: new Date(NOW - minutesAgo * 60e3).toISOString(),
+  });
+  it("fills the player's history from the start of the profile in steps, by month, and keeps it across key changes and cleanup", async () => {
+    // 1,050 openings, one every 90 minutes: 11 pages reaching back about 65 days, across three months
+    const ref = {
+      rows: Array.from({ length: 1050 }, (_, i) => openRow(i + 1, i * 90)),
+    };
+    const { f, calls } = historyApi(ref);
+    const { controller, storage } = setup(f, { "feed:old": { at: "x" } });
     expect(
-      (await controller.handle({ type: "feed", userId: "nope" })).error,
+      (await controller.handle({ type: "history", userId: "nope" })).error,
     ).toBe("bad-user");
-    expect(
-      (await controller.handle({ type: "feed", userId: "../settings" })).error,
-    ).toBe("bad-user");
-    const r = await controller.handle({ type: "feed", userId: ME });
-    expect(r.error).toBeUndefined();
-    expect(r.feed).toMatchObject({
+    const first = await controller.handle({ type: "history", userId: ME });
+    expect(first.error).toBeUndefined();
+    expect(first.history).toMatchObject({
       userId: ME,
       username: "Johnny_Sins",
-      feedVersion: 1,
-      holes: { crafts: false, sales: false, dismantles: false },
-      averages: {
-        scraps: { "2026-09-16": 0.25 },
-        steel: { "2026-09-16": 1.8 },
-      },
+      done: false,
+      pages: 8,
+      count: 800,
     });
-    expect(r.feed.rows.crafts.map((c) => c.txId)).toEqual([oid(1), oid(2)]);
-    expect(r.feed.rows.crafts[0]).toMatchObject({
-      id: oid(1001),
-      code: "boots5",
-      skills: { dodge: 38 },
-      scraps: 486,
+    expect(calls).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+    const months = Object.keys(storage.data).filter((k) =>
+      k.startsWith(`hist:${ME}:2026`),
+    );
+    expect(months.length).toBeGreaterThanOrEqual(2);
+    // the next step goes on from where the last stopped, without a poll (not due yet)
+    const second = await controller.handle({ type: "history", userId: ME });
+    expect(second.history).toMatchObject({
+      done: true,
+      pages: 11,
+      count: 1050,
     });
-    expect(r.feed.covered.crafts).toBe(
-      new Date(NOW - 7 * 86400e3).toISOString(),
-    );
-    expect(storage.data[`feed:${ME}`].feedVersion).toBe(1);
-    expect(calls).toEqual(["craftItem", "itemMarket", "dismantleItem"]);
-    // fresh for a minute: reused without a call
-    const before = f.mock.calls.length;
-    await controller.handle({ type: "feed", userId: ME });
-    expect(f.mock.calls.length).toBe(before);
-    // a minute later a new craft is on top of the feed: the poll stops at the known row and keeps both
-    advance(61_000);
-    crafts = [craftRow(3, 0.5), ...crafts];
-    const polled = await controller.handle({ type: "feed", userId: ME });
-    expect(polled.feed.rows.crafts.map((c) => c.txId)).toEqual([
-      oid(3),
-      oid(1),
-      oid(2),
-    ]);
-    expect(polled.feed.covered.crafts).toBe(r.feed.covered.crafts);
-    expect(
-      f.mock.calls.filter(([u]) => u.includes("getItemTrading")).length,
-    ).toBe(2); // averages not asked again within ten minutes
-    expect(f.mock.calls.filter(([u]) => u.includes("getUserLite")).length).toBe(
-      1,
-    );
-    // the store is the player's record: a new key keeps it, while the account caches go
+    expect(calls.slice(8)).toEqual([8, 9, 10]);
+    expect(second.history.oldestAt).toBe(ref.rows.at(-1).createdAt);
+    // nothing is due now: no call
+    await controller.handle({ type: "history", userId: ME });
+    expect(calls).toHaveLength(11);
+    // a key change keeps the history; cleanup keeps it and drops the 2.2 feed store
     await controller.handle(
       { type: "saveSettings", settings: { apiKey: "another-key" } },
       { trusted: true },
     );
-    expect(storage.data[`feed:${ME}`].rows.crafts).toHaveLength(3);
     await controller.cleanup();
-    expect(storage.data[`feed:${ME}`]).toBeDefined();
-    // a store older than the window is dropped by cleanup
-    storage.data[`feed:${ME}`].at = new Date(NOW - 31 * 86400e3).toISOString();
-    await controller.cleanup();
-    expect(storage.data[`feed:${ME}`]).toBeUndefined();
+    expect(storage.data[`hist:${ME}:meta`].count).toBe(1050);
+    expect(storage.data["feed:old"]).toBeUndefined();
   });
-  it("reports a backfill that hit its page cap as a hole, with the coverage at its oldest row", async () => {
-    const ME = "697b55e4bcecf3b37667e0d1";
-    const oid = (n) => n.toString(16).padStart(24, "0");
-    const rows = Array.from({ length: 2600 }, (_, i) => ({
-      _id: oid(i + 1),
-      money: 4,
-      itemCode: "gun",
+  it("polls from the top and stops at the first row it holds, every minute, every 15 seconds while a dialog is open", async () => {
+    const ref = {
+      rows: Array.from({ length: 150 }, (_, i) => openRow(i + 1, i * 10)),
+    };
+    const { f, calls } = historyApi(ref);
+    const { controller, advance } = setup(f);
+    await controller.handle({ type: "history", userId: ME });
+    expect(calls).toEqual([0, 1]);
+    // two new openings on top
+    ref.rows = [openRow(9002, -0.2), openRow(9001, -0.1), ...ref.rows]; // 12 s and 6 s after the first read
+    advance(16_000);
+    await controller.handle({ type: "history", userId: ME });
+    expect(calls).toHaveLength(2); // a minute has not passed
+    const fast = await controller.handle({
+      type: "history",
+      userId: ME,
+      fast: true,
+    });
+    expect(calls).toEqual([0, 1, 0]);
+    expect(fast.history.count).toBe(152);
+    advance(61_000);
+    const again = await controller.handle({ type: "history", userId: ME });
+    expect(again.history.count).toBe(152); // the top page holds nothing new
+    expect(calls).toEqual([0, 1, 0, 0]);
+    const forced = await controller.handle({
+      type: "history",
+      userId: ME,
+      force: true,
+    });
+    expect(forced.history.count).toBe(152);
+    expect(calls).toHaveLength(5);
+  });
+  it("views the history in the worker: results by activity and window, the last opening, the codes to price", async () => {
+    const sale = {
+      _id: oid(5),
+      money: 2,
+      itemCode: "knife",
       quantity: 1,
       sellerId: ME,
-      buyerId: oid(99),
+      buyerId: OTHER,
       transactionType: "itemMarket",
       item: {
-        _id: oid(5000 + i),
-        code: "gun",
-        skills: { attack: 54, criticalChance: 8 },
+        _id: oid(100001),
+        code: "knife",
+        skills: { attack: 30, criticalChance: 3 },
         state: 100,
       },
-      createdAt: new Date(NOW - i * 240e3).toISOString(), // one every four minutes: 2,520 rows in 7 days, past the 2,500-row cap
-    }));
-    const f = vi.fn(async (url) => {
-      const u = new URL(url);
-      const input = JSON.parse(u.searchParams.get("input"));
-      const proc = u.pathname.split("/").pop();
-      if (proc === "transaction.getPaginatedTransactions") {
-        if (input.transactionType !== "itemMarket")
-          return response({ items: [], nextCursor: null });
-        const page = input.cursor ? Number(input.cursor.slice(1)) : 0;
-        return response({
-          items: rows.slice(page * 100, page * 100 + 100),
-          nextCursor: `p${page + 1}`,
-        });
-      }
-      if (proc === "itemTrading.getItemTrading")
-        return response({ itemCode: input.itemCode, values: [] });
-      if (proc === "user.getUserLite")
-        return response({ _id: ME, username: "x" });
-      return response();
+      createdAt: new Date(NOW - 30e3).toISOString(),
+    };
+    const ref = { rows: [sale, openRow(2, 1), openRow(1, 2)] };
+    const { f } = historyApi(ref);
+    const { controller, storage } = setup(f);
+    await controller.handle({ type: "history", userId: ME });
+    // the knives' sales were read by a page: the held one is valued at the sales of its stats
+    storage.data["sales:knife"] = {
+      code: "knife",
+      at: new Date(NOW).toISOString(),
+      complete: true,
+      cacheVersion: CACHE_VERSION,
+      fills: [1.5, 1.5, 1.5].map((price, i) => ({
+        price,
+        at: new Date(NOW - (i + 1) * 3600e3).toISOString(),
+        code: "knife",
+        skills: { attack: 30, criticalChance: 3 },
+      })),
+    };
+    const v = (await controller.handle({ type: "ledger", userId: ME })).ledger;
+    expect(v.meta).toMatchObject({ userId: ME, done: true, count: 3 });
+    const all = v.windows.all;
+    expect(all.opened).toMatchObject({ n: 2, sold: 1, held: 1, heldPriced: 1 });
+    // each case cost 3.8 (the day on record, approximate): one sold for 2, one held at 1.5
+    expect(all.opened.estimated).toBeCloseTo(2 - 3.8 + 1.5 - 3.8, 6);
+    expect(all.cases.case1.n).toBe(2);
+    expect(v.lastOpened).toMatchObject({
+      via: "case1",
+      code: "knife",
+      fate: "held",
     });
-    const { controller } = setup(f);
-    const r = await controller.handle({ type: "feed", userId: ME });
-    expect(r.feed.rows.sales).toHaveLength(2500);
-    expect(r.feed.holes).toEqual({
-      crafts: false,
-      sales: true,
-      dismantles: false,
-    });
-    expect(r.feed.covered.sales).toBe(rows[2499].createdAt);
+    expect(v.lastOpened.value).toMatchObject({ value: 1.5 });
+    expect(v.salesWanted).toEqual(["knife"]);
+    expect(v.rows.length).toBeGreaterThan(0);
   });
 });

@@ -4,6 +4,7 @@ import { TTL, freshness, quote } from "./quality.mjs";
 import { snapshotSummary } from "./cases.mjs";
 import { createEquipment } from "./equipment.mjs";
 import { createCraftDesk } from "./craftdesk.mjs";
+import { createDialogs } from "./dialogs.mjs";
 import { casesStripHtml, tripLineHtml } from "./casesview.mjs";
 import { mountBar, headHtml, BAR_ID } from "./panel.mjs";
 import { panel, setHtml, notice, clock } from "./ui.mjs";
@@ -27,7 +28,8 @@ export async function startLens(runtime = chrome.runtime) {
     salesErrors: {},
     salesReading: null,
     taxOnPage: null,
-    feed: null, // the player's own feed store, replayed by the ledger
+    history: null, // where the worker's history of the player stands (count, since when, filled to the start or not)
+    ledger: null, // the worker's view of that history: results by activity and window, recent pieces, last craft and opening
     craftsUserId: null, // the id it is read for: the setting, else the page's own-profile links
     selectedCode: null, // the item selected in the market grid
     errors: {},
@@ -95,7 +97,6 @@ export async function startLens(runtime = chrome.runtime) {
         state.sales = null;
         state.salesByCode = {};
         state.salesErrors = {};
-        state.feed = null;
         salesAttempts.clear();
         salesPending.clear();
         state.errors = {};
@@ -157,11 +158,7 @@ export async function startLens(runtime = chrome.runtime) {
     const r = await send({
       type: kind,
       force,
-      ...(code
-        ? kind === "feed"
-          ? { userId: code }
-          : { itemCode: code }
-        : {}),
+      ...(code ? { itemCode: code } : {}),
     });
     state.busy.delete(kind);
     if (kind === "sales" && state.salesReading === code)
@@ -185,7 +182,6 @@ export async function startLens(runtime = chrome.runtime) {
         state.sales = null;
         state.salesByCode = {};
         state.salesErrors = {};
-        state.feed = null;
       } else {
         if (r[kind]) state[kind] = r[kind];
         if (kind === "sales" && r.sales?.code) {
@@ -222,7 +218,7 @@ export async function startLens(runtime = chrome.runtime) {
   }
   /** Run the sales reads kept while one was in flight, one at a time; the rest wait for the next completion. */
   function drainSales() {
-    if (!context.equipment && !context.craft) {
+    if (!context.equipment && !context.craft && !context.dialog) {
       salesPending.clear();
       return;
     }
@@ -233,7 +229,8 @@ export async function startLens(runtime = chrome.runtime) {
     }
   }
   const requestSales = (code) => {
-    if (context.equipment || context.craft) void read("sales", false, code);
+    if (context.equipment || context.craft || context.dialog)
+      void read("sales", false, code);
   };
   const equipment = createEquipment({
     settings: () => state.settings,
@@ -245,9 +242,67 @@ export async function startLens(runtime = chrome.runtime) {
     },
     rescan: () => sched.schedule(),
   });
-  const desk = createCraftDesk({
-    settings: () => state.settings,
-    requestSales,
+  const desk = createCraftDesk({ settings: () => state.settings });
+  // ---- the player's history: filled from the start of the profile, polled, viewed ----
+  let historyBusy = false;
+  let historyAgain = false;
+  let fastUntil = 0;
+  const ledgerAsked = { rev: -1, window: "", at: 0 };
+  /** One history step in the worker (it decides whether a poll or a backfill page is due), then the view when it changed. */
+  async function syncHistory(force = false) {
+    const userId = state.craftsUserId;
+    if (!userId || state.setup || disposed || document.hidden) return;
+    if (historyBusy) {
+      if (force) historyAgain = true;
+      return;
+    }
+    historyBusy = true;
+    state.busy.add("history");
+    const r = await send({
+      type: "history",
+      userId,
+      force,
+      fast: Date.now() < fastUntil || !!context.dialog,
+    });
+    state.busy.delete("history");
+    if (r?.history && r.history.userId === state.craftsUserId)
+      state.history = r.history;
+    if (r)
+      state.errors.history =
+        r.error && r.error !== "superseded" ? r.message : null;
+    const window = desk.window;
+    const wanted =
+      state.settings.panel === "ledger" || !!context.dialog || context.craft;
+    if (
+      wanted &&
+      state.history &&
+      (state.history.rev !== ledgerAsked.rev ||
+        window !== ledgerAsked.window ||
+        Date.now() - ledgerAsked.at > 30_000)
+    ) {
+      const v = await send({ type: "ledger", userId, window });
+      if (v?.ledger && v.ledger.meta?.userId === state.craftsUserId) {
+        state.ledger = v.ledger;
+        ledgerAsked.rev = v.ledger.meta.rev;
+        ledgerAsked.window = window;
+        ledgerAsked.at = Date.now();
+        for (const code of v.ledger.salesWanted ?? []) requestSales(code);
+      }
+    }
+    historyBusy = false;
+    sched.schedule();
+    if (historyAgain) {
+      historyAgain = false;
+      void syncHistory(true);
+    }
+  }
+  /** A click on the game's own craft or open button: the result is read a moment later, twice, and polled fast for a while. */
+  const dialogs = createDialogs({
+    onAction: () => {
+      fastUntil = Date.now() + 120_000;
+      setTimeout(() => void syncHistory(true), 2500);
+      setTimeout(() => void syncHistory(true), 7000);
+    },
   });
   /** The bar's own controls: the tabs, refresh, and the desk's buttons. */
   function onBarClick(e) {
@@ -263,10 +318,14 @@ export async function startLens(runtime = chrome.runtime) {
       if (context.equipment || open === "craft") void read("avg", true);
       if (open === "craft") void read("cases", true);
       if (salesWanted) void read("sales", true, salesWanted);
-      if (state.craftsUserId) void read("feed", true, state.craftsUserId);
+      if (state.craftsUserId) void syncHistory(true);
       sched.schedule();
     } else if (name === "settings" || name === "reload") action(name);
-    else if (desk.onClick(e)) sched.schedule();
+    else if (desk.onClick(e)) {
+      ledgerAsked.at = 0;
+      sched.schedule();
+      void syncHistory();
+    }
   }
   const observer = new MutationObserver((muts) => {
     if (document.hidden || disposed) return;
@@ -310,10 +369,21 @@ export async function startLens(runtime = chrome.runtime) {
     if (disposed || document.hidden) return;
     const start = performance.now();
     lastScan = Date.now();
+    // Whose history: the id set in settings, else the one the page's own-profile links carry. Another account's is never shown.
+    const userId = state.settings.craft
+      ? (state.settings.userId ?? dom.ownUserId())
+      : null;
+    if (userId !== state.craftsUserId) {
+      state.craftsUserId = userId;
+      state.history = null;
+      state.ledger = null;
+      ledgerAsked.rev = -1;
+    }
     const onEquipments = ON_EQUIPMENTS.test(location.pathname);
     context = {
       equipment: state.settings.equipment && onEquipments,
       craft: state.settings.craft && onEquipments,
+      dialog: null,
     };
     const nextRoots = [];
     const anchor =
@@ -339,13 +409,6 @@ export async function startLens(runtime = chrome.runtime) {
       if (dialog) nextRoots.push(dialog);
       if (context.craft) {
         state.taxOnPage = dom.taxRateFromText(dom.taxNotice()?.textContent);
-        // Whose crafts: the id set in settings, else the one the page's own-profile links carry. Another account's feed is never shown.
-        state.craftsUserId = state.settings.userId ?? dom.ownUserId();
-        if (state.feed && state.feed.userId !== state.craftsUserId)
-          state.feed = null;
-        // The feed is polled whenever the bar is on screen, whatever tab is open: a sale shows in the head at once.
-        if (state.craftsUserId && !state.setup)
-          void read("feed", false, state.craftsUserId);
       }
       const { bar, head, body } = mountBar(anchor, onBarClick);
       const book = state.book;
@@ -368,7 +431,7 @@ export async function startLens(runtime = chrome.runtime) {
               : fresh
                 ? "fresh"
                 : "stale",
-          busy: state.busy.has("book") || state.busy.has("feed"),
+          busy: state.busy.has("book") || state.busy.has("history"),
           panel: section,
           tabs,
           pulse: [
@@ -398,8 +461,8 @@ export async function startLens(runtime = chrome.runtime) {
             body,
             {
               ...state,
-              feedError: state.errors.feed ?? null,
-              feedBusy: state.busy.has("feed"),
+              historyError: state.errors.history ?? null,
+              historyBusy: state.busy.has("history"),
             },
             section,
           );
@@ -484,6 +547,13 @@ export async function startLens(runtime = chrome.runtime) {
       }
       nextRoots.push(context.travel.item.parentElement);
     } else for (const el of document.querySelectorAll(".ss-trip")) el.remove();
+    // The game's case and craft dialogs, wherever they open.
+    const shown =
+      state.settings.craft && !state.setup
+        ? dialogs.render({ ...state, now: Date.now() })
+        : (dialogs.clear(), null);
+    context.dialog = shown?.kind ?? null;
+    if (shown?.root) nextRoots.push(shown.root);
     observe(nextRoots);
     freshSignature = signature();
     metrics.scans++;
@@ -499,15 +569,14 @@ export async function startLens(runtime = chrome.runtime) {
     if (state.setup || disposed || document.hidden) return;
     const jobs = [];
     const open = state.settings.panel;
-    const craftOpen = context.craft && open === "craft";
+    const craftOpen = (context.craft && open === "craft") || !!context.dialog;
     if (context.equipment || craftOpen || (context.craft && open === "market"))
       jobs.push(read("book"));
     if (context.cases || context.travel || craftOpen) jobs.push(read("cases"));
     // Every row is valued at the game's average until its item's fills are read; the craft board is built from them.
     if (context.equipment || craftOpen || (context.cases && wantsAverages()))
       jobs.push(read("avg"));
-    if (context.craft && state.craftsUserId)
-      jobs.push(read("feed", false, state.craftsUserId));
+    if (state.craftsUserId) jobs.push(syncHistory());
     await Promise.all(jobs);
   }
   async function tick() {
@@ -544,6 +613,7 @@ export async function startLens(runtime = chrome.runtime) {
     sched.cancel();
     observer.disconnect();
     removeBar();
+    dialogs.dispose();
     document.getElementById("scrap-sniper-cases")?.remove();
     for (const el of document.querySelectorAll(".ss-trip")) el.remove();
     document.removeEventListener("visibilitychange", visible);

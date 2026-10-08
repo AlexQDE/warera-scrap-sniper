@@ -1,328 +1,399 @@
 import { describe, it, expect } from "vitest";
 import {
-  averageOn,
-  replayPieces,
-  ledgerSummary,
+  makePricer,
+  replayHistory,
+  outcome,
+  windowView,
   dayOf,
   localDayOf,
 } from "./observed.mjs";
 
-// Rows as the feed prints them for one account (ids shortened).
-const ME = "697b55e4bcecf3b37667e0d1";
-const OTHER = "69b4b8113af735a990a8070e";
-const crafts = [
-  {
-    txId: "t1",
-    id: "a3cb5c",
-    code: "tank",
-    skills: { attack: 159, criticalChance: 32 },
-    at: "2026-10-05T09:08:03.000Z",
-    scraps: 486,
-  },
-  {
-    txId: "t2",
-    id: "b06b3c",
-    code: "boots5",
-    skills: { dodge: 38 },
-    at: "2026-10-05T09:08:01.000Z",
-    scraps: 486,
-  },
-  {
-    txId: "t3",
-    id: "d664c5",
-    code: "chest5",
-    skills: { armor: 46 },
-    at: "2026-10-05T09:07:58.000Z",
-    scraps: 486,
-  },
-  {
-    txId: "t4",
-    id: "31f44d",
-    code: "chest1",
-    skills: { armor: 3 },
-    at: "2026-10-05T05:35:57.000Z",
-    scraps: 6,
-  },
-];
-// The day's averages from itemTrading.getItemTrading: scraps 0.247778, steel 1.789756 on 2026-10-05.
+// Compact rows as the history store keeps them (api.reduceRow), ids shortened.
+const A = (h) =>
+  new Date(Date.parse("2026-10-05T12:00:00Z") + h * 3600e3).toISOString();
 const averages = {
-  scraps: { "2026-10-04": 0.24964, "2026-10-05": 0.247778 },
-  steel: { "2026-10-04": 1.78, "2026-10-05": 1.789756 },
+  scraps: { "2026-10-04": 0.25, "2026-10-05": 0.2 },
+  steel: { "2026-10-05": 1.5 },
+  case1: { "2026-10-05": 3.8 },
+  woodenCase: { "2026-10-05": 6 },
+  iron: { "2026-10-05": 0.1 },
 };
-const sales = [
-  // the chest sold by me
+const rows = [
+  // a legendary tank crafted, held
   {
-    txId: "s1",
-    itemId: "d664c5",
-    code: "chest5",
-    skills: { armor: 46 },
-    at: "2026-10-05T10:00:00.000Z",
-    money: 129.396,
-    seller: ME,
-    buyer: OTHER,
-    listedAt: "2026-10-05T09:30:00.000Z",
+    x: "t1",
+    y: "craftItem",
+    a: A(0),
+    c: "scraps",
+    q: 486,
+    i: "tank1",
+    ic: "tank",
+    k: { attack: 159, criticalChance: 32 },
   },
-  // a gun bought by me, then sold by me the next day
+  // a legendary chest crafted, then sold by me
   {
-    txId: "s2",
-    itemId: "g00001",
-    code: "gun",
-    skills: { attack: 54, criticalChance: 8 },
-    at: "2026-10-05T11:00:00.000Z",
-    money: 4.413,
-    seller: OTHER,
-    buyer: ME,
-    listedAt: "2026-10-05T10:00:00.000Z",
+    x: "t2",
+    y: "craftItem",
+    a: A(0.1),
+    c: "scraps",
+    q: 486,
+    i: "chest1",
+    ic: "chest5",
+    k: { armor: 46 },
   },
   {
-    txId: "s3",
-    itemId: "g00001",
-    code: "gun",
-    skills: { attack: 54, criticalChance: 8 },
-    at: "2026-10-06T08:00:00.000Z",
-    money: 6.1,
-    seller: ME,
-    buyer: OTHER,
-    listedAt: "2026-10-05T12:00:00.000Z",
+    x: "s1",
+    y: "itemMarket",
+    a: A(1),
+    c: "chest5",
+    q: 1,
+    m: 129.4,
+    d: -1,
+    i: "chest1",
+    ic: "chest5",
+    k: { armor: 46 },
+    l: A(0.5),
   },
-  // a sale by me of a piece the store never saw acquired
+  // a case opened: a knife, then scrapped
   {
-    txId: "s4",
-    itemId: "old123",
-    code: "helmet4",
-    skills: { criticalDamages: 80 },
-    at: "2026-10-06T09:00:00.000Z",
-    money: 40,
-    seller: ME,
-    buyer: OTHER,
-    listedAt: null,
+    x: "o1",
+    y: "openCase",
+    a: A(2),
+    c: "case1",
+    q: 1,
+    i: "knife1",
+    ic: "knife",
+    k: { attack: 37, criticalChance: 4 },
   },
+  {
+    x: "d1",
+    y: "dismantleItem",
+    a: A(3),
+    c: "scraps",
+    q: 6,
+    i: "knife1",
+    ic: "knife",
+    k: { attack: 37, criticalChance: 4 },
+  },
+  // a case opened: gloves, held
+  {
+    x: "o2",
+    y: "openCase",
+    a: A(2.1),
+    c: "case1",
+    q: 1,
+    i: "glv1",
+    ic: "gloves1",
+    k: { precision: 5 },
+  },
+  // a wooden case: resources, no piece
+  { x: "o3", y: "openCase", a: A(2.2), c: "iron", q: 50 },
+  // a gun bought, then sold by me
+  {
+    x: "b1",
+    y: "itemMarket",
+    a: A(4),
+    c: "gun",
+    q: 1,
+    m: 4,
+    d: 1,
+    i: "gun1",
+    ic: "gun",
+    k: { attack: 54, criticalChance: 8 },
+  },
+  {
+    x: "b2",
+    y: "itemMarket",
+    a: A(5),
+    c: "gun",
+    q: 1,
+    m: 6,
+    d: -1,
+    i: "gun1",
+    ic: "gun",
+    k: { attack: 54, criticalChance: 8 },
+    l: A(4.5),
+  },
+  // battle loot, held
+  {
+    x: "l1",
+    y: "battleLoot",
+    a: A(6),
+    c: "helmet2",
+    q: 1,
+    i: "hlm1",
+    ic: "helmet2",
+    k: { criticalDamages: 18 },
+  },
+  // a sale of a piece got before the history
+  {
+    x: "s9",
+    y: "itemMarket",
+    a: A(7),
+    c: "boots3",
+    q: 1,
+    m: 20,
+    d: -1,
+    i: "old1",
+    ic: "boots3",
+    k: { dodge: 12 },
+  },
+  // resource trades: cases bought, iron sold
+  { x: "r1", y: "trading", a: A(1), c: "case1", q: 3, m: 11.4, d: 1 },
+  { x: "r2", y: "trading", a: A(1), c: "iron", q: 1000, m: 93, d: -1 },
 ];
-const dismantles = [
-  {
-    txId: "d1",
-    itemId: "31f44d",
-    code: "chest1",
-    skills: { armor: 3 },
-    at: "2026-10-05T06:00:00.000Z",
-    scraps: 6,
-  },
-];
-const utc = (iso) => dayOf(iso);
 
-describe("averageOn", () => {
-  it("takes the day's average, else the latest earlier day, else nothing", () => {
-    expect(averageOn(averages, "scraps", "2026-10-05")).toEqual({
-      value: 0.247778,
-      day: "2026-10-05",
-    });
-    expect(averageOn(averages, "steel", "2026-10-06")).toEqual({
-      value: 1.789756,
-      day: "2026-10-05",
-    });
-    expect(averageOn(averages, "scraps", "2026-10-01")).toEqual({
-      value: null,
-      day: null,
-    });
-    expect(averageOn(null, "scraps", "2026-10-05")).toEqual({
-      value: null,
-      day: null,
-    });
-  });
-  it("names days in UTC for the averages and in local time for the ledger", () => {
+describe("days and prices", () => {
+  it("names days in UTC for the averages and local for the ledger", () => {
     expect(dayOf("2026-10-05T23:30:00.000Z")).toBe("2026-10-05");
     expect(localDayOf("2026-10-05T12:00:00.000Z")).toMatch(/^2026-10-0[56]$/);
     expect(localDayOf("nope")).toBe("");
   });
+  it("prices a day at the game's average, else the player's own trades that day, else the nearest day on record, flagged", () => {
+    const price = makePricer(averages, [
+      {
+        x: "r",
+        y: "trading",
+        a: "2026-09-01T10:00:00.000Z",
+        c: "steel",
+        q: 10,
+        m: 18,
+        d: 1,
+      },
+    ]);
+    expect(price("scraps", "2026-10-05")).toEqual({
+      value: 0.2,
+      approx: false,
+    });
+    expect(price("steel", "2026-09-01")).toEqual({ value: 1.8, approx: false }); // the player's own trade
+    expect(price("scraps", "2026-09-20")).toEqual({
+      value: 0.25,
+      approx: true,
+    }); // before the table: its first day
+    expect(price("scraps", "2026-10-09")).toEqual({ value: 0.2, approx: true }); // after: the latest earlier day
+    expect(price("nothing", "2026-10-05")).toEqual({
+      value: null,
+      approx: false,
+    });
+  });
 });
 
-describe("replayPieces", () => {
-  const pieces = replayPieces({ crafts, sales, dismantles, me: ME, averages });
-  const by = (id) => pieces.find((p) => p.id === id);
-  it("costs a craft at the recipe and the craft day's averages with the random steel fee", () => {
-    const tank = by("a3cb5c");
-    // 486 × 0.247778 + 16 × 1.789756 = 149.056
-    expect(tank).toMatchObject({
+describe("replayHistory", () => {
+  const h = replayHistory(rows, { averages });
+  const by = (id) => h.pieces.find((p) => p.id === id);
+  it("costs a craft at the recipe and the day's prices, random steel unless chosen", () => {
+    expect(by("tank1")).toMatchObject({
       source: "crafted",
       rarity: "legendary",
-      slot: "weapon",
-      stat: "criticalChance",
-      scraps: 486,
-      steel: 16,
       fate: "held",
-      priceDay: "2026-10-05",
+      approx: false,
     });
-    expect(tank.cost).toBeCloseTo(486 * 0.247778 + 16 * 1.789756, 6);
-    expect(tank.costBasis).toContain("the day's averages");
-    const chosen = replayPieces({
-      crafts,
-      sales: [],
-      dismantles: [],
-      me: ME,
-      averages,
-      steelMode: "chosen",
-    });
-    expect(chosen.find((p) => p.id === "a3cb5c").cost).toBeCloseTo(
-      486 * 0.247778 + 32 * 1.789756,
+    expect(by("tank1").cost).toBeCloseTo(486 * 0.2 + 16 * 1.5, 6);
+    const chosen = replayHistory(rows, { averages, steelMode: "chosen" });
+    expect(chosen.pieces.find((p) => p.id === "tank1").cost).toBeCloseTo(
+      486 * 0.2 + 32 * 1.5,
       6,
     );
-  });
-  it("joins a craft's sale by item id with the listing wait, and a dismantle at the day's scrap average", () => {
-    expect(by("d664c5")).toMatchObject({
+    expect(by("chest1")).toMatchObject({
       fate: "sold",
-      proceeds: 129.396,
-      goneAt: "2026-10-05T10:00:00.000Z",
+      proceeds: 129.4,
       sellsHours: 0.5,
-      proceedsBasis: "sold on the market",
     });
-    expect(by("31f44d")).toMatchObject({
+  });
+  it("takes a case opening as an acquisition at the case's price that day, and its dismantle at that day's scrap price", () => {
+    expect(by("knife1")).toMatchObject({
+      source: "opened",
+      via: "case1",
+      cost: 3.8,
       fate: "scrapped",
-      proceeds: 6 * 0.247778,
-      goneAt: "2026-10-05T06:00:00.000Z",
     });
-    expect(by("31f44d").proceedsBasis).toContain("6 scraps back");
+    expect(by("knife1").proceeds).toBeCloseTo(6 * 0.2, 6);
+    expect(by("glv1")).toMatchObject({ source: "opened", fate: "held" });
+    expect(h.wooden).toEqual([
+      { at: A(2.2), code: "iron", q: 50, value: 5, cost: 6, approx: false },
+    ]);
   });
-  it("takes a buy as an acquisition at its price, and a later sale of the same item as its fate", () => {
-    const gun = by("g00001");
-    expect(gun).toMatchObject({
+  it("takes a buy at its price and loot at nothing; a sale with no acquisition on record has no cost", () => {
+    expect(by("gun1")).toMatchObject({
       source: "bought",
-      cost: 4.413,
-      costBasis: "bought on the market",
-      at: "2026-10-05T11:00:00.000Z",
+      cost: 4,
       fate: "sold",
-      proceeds: 6.1,
-      goneAt: "2026-10-06T08:00:00.000Z",
-      sellsHours: 20,
-      rarity: "uncommon",
+      proceeds: 6,
+      sellsHours: 0.5,
     });
-  });
-  it("keeps a sale of a piece the store never saw acquired, with no cost, so its proceeds still count", () => {
-    expect(by("old123")).toMatchObject({
+    expect(by("hlm1")).toMatchObject({
+      source: "looted",
+      cost: 0,
+      fate: "held",
+    });
+    expect(by("old1")).toMatchObject({
       source: "unknown",
       at: null,
       cost: null,
       fate: "sold",
-      proceeds: 40,
-      code: "helmet4",
-      costBasis: "got before the feed on record",
+      proceeds: 20,
     });
-    expect(pieces).toHaveLength(6);
+    expect(h.pieces).toHaveLength(7);
+    expect(h.trades).toEqual({
+      case1: { qty: 3, spent: 11.4, sold: 0, earned: 0 },
+      iron: { qty: 0, spent: 0, sold: 1000, earned: 93 },
+    });
   });
   it("attaches a fate to the latest acquisition before it, so a piece bought twice is two pieces", () => {
-    const twice = replayPieces({
-      crafts: [],
-      sales: [
+    const twice = replayHistory(
+      [
         {
-          txId: "b1",
-          itemId: "x",
-          code: "gun",
-          skills: null,
-          at: "2026-10-05T10:00:00.000Z",
-          money: 4,
-          seller: OTHER,
-          buyer: ME,
+          x: "1",
+          y: "itemMarket",
+          a: A(0),
+          c: "gun",
+          m: 4,
+          d: 1,
+          i: "x",
+          ic: "gun",
         },
         {
-          txId: "x1",
-          itemId: "x",
-          code: "gun",
-          skills: null,
-          at: "2026-10-05T11:00:00.000Z",
-          money: 5,
-          seller: ME,
-          buyer: OTHER,
+          x: "2",
+          y: "itemMarket",
+          a: A(1),
+          c: "gun",
+          m: 5,
+          d: -1,
+          i: "x",
+          ic: "gun",
         },
         {
-          txId: "b2",
-          itemId: "x",
-          code: "gun",
-          skills: null,
-          at: "2026-10-05T12:00:00.000Z",
-          money: 4.5,
-          seller: OTHER,
-          buyer: ME,
+          x: "3",
+          y: "itemMarket",
+          a: A(2),
+          c: "gun",
+          m: 4.5,
+          d: 1,
+          i: "x",
+          ic: "gun",
         },
       ],
-      dismantles: [],
-      me: ME,
-      averages: {},
-    });
-    expect(twice.map((p) => [p.cost, p.fate, p.proceeds])).toEqual([
+      {},
+    );
+    expect(twice.pieces.map((p) => [p.cost, p.fate, p.proceeds])).toEqual([
       [4, "sold", 5],
       [4.5, "held", null],
     ]);
   });
 });
 
-describe("ledgerSummary", () => {
-  const pieces = replayPieces({ crafts, sales, dismantles, me: ME, averages });
-  const valueOf = (p) => (p.id === "a3cb5c" ? { value: 161 } : { value: null });
-  it("sums the day by what was sold or scrapped in it, what was crafted and bought, and what is held", () => {
-    const d5 = ledgerSummary(pieces, {
+describe("tying a sale to its piece when the sale gave it a new id", () => {
+  const craft = (n, at, k) => ({
+    x: `c${n}`,
+    y: "craftItem",
+    a: at,
+    c: "scraps",
+    q: 162,
+    i: `p${n}`,
+    ic: "boots4",
+    k,
+    la: at,
+  });
+  it("ties by the same code and stats got at the time the sale row says, the closest of identical pieces", () => {
+    const h = replayHistory(
+      [
+        craft(1, A(0), { dodge: 22 }),
+        craft(2, new Date(Date.parse(A(0)) + 600).toISOString(), { dodge: 22 }),
+        craft(3, A(0.01), { dodge: 25 }),
+        // sold under a new id; the seller got the piece 0.6 s after the first craft: the second one
+        {
+          x: "s1",
+          y: "itemMarket",
+          a: A(1),
+          c: "boots4",
+          m: 30,
+          d: -1,
+          i: "new1",
+          ic: "boots4",
+          k: { dodge: 22 },
+          la: new Date(Date.parse(A(0)) + 610).toISOString(),
+        },
+        // a relisted piece: its acquired-at moved to when it came back from the market; same code and stats got before
+        {
+          x: "s2",
+          y: "itemMarket",
+          a: A(2),
+          c: "boots4",
+          m: 31,
+          d: -1,
+          i: "new2",
+          ic: "boots4",
+          k: { dodge: 25 },
+          la: A(1.5),
+        },
+      ],
+      { averages },
+    );
+    const by = (id) => h.pieces.find((p) => p.id === id);
+    expect(by("p2")).toMatchObject({ fate: "sold", proceeds: 30 });
+    expect(by("p1")).toMatchObject({ fate: "held" });
+    expect(by("p3")).toMatchObject({ fate: "sold", proceeds: 31 });
+    expect(h.pieces.filter((p) => p.source === "unknown")).toHaveLength(0);
+  });
+});
+
+describe("outcome and windowView", () => {
+  const h = replayHistory(rows, { averages });
+  const valueOf = (p) => ({ tank1: 161, glv1: 1, hlm1: 2 })[p.id] ?? null;
+  it("sums what a set of pieces cost, brought and is worth held", () => {
+    const o = outcome(
+      h.pieces.filter((p) => p.source === "opened"),
+      valueOf,
+    );
+    expect(o).toMatchObject({
+      n: 2,
+      sold: 0,
+      scrapped: 1,
+      held: 1,
+      heldPriced: 1,
+      realizedKnown: 1,
+      estimatedKnown: 2,
+    });
+    expect(o.cost).toBeCloseTo(7.6, 6);
+    expect(o.realized).toBeCloseTo(1.2 - 3.8, 6);
+    expect(o.estimated).toBeCloseTo(1.2 - 3.8 + (1 - 3.8), 6);
+  });
+  it("splits a window by activity, per case and per crafted tier, and counts the window's money", () => {
+    const day = (iso) => dayOf(iso);
+    const v = windowView(h, {
       from: "2026-10-05",
       to: "2026-10-05",
-      dayOf: utc,
+      dayOf: day,
       valueOf,
     });
-    expect(d5.gone).toMatchObject({
-      n: 2,
-      sold: 1,
-      scrapped: 1,
-      known: 2,
-      unknownCost: 0,
-    });
-    expect(d5.gone.proceeds).toBeCloseTo(129.396 + 6 * 0.247778, 6);
-    // the chest: 129.396 − 149.056; the common chest: 1.487 back − (6 × 0.247778 + 1 × 1.789756)
-    expect(d5.gone.realized).toBeCloseTo(
-      129.396 -
-        (486 * 0.247778 + 16 * 1.789756) +
-        6 * 0.247778 -
-        (6 * 0.247778 + 1.789756),
-      5,
+    expect(v.crafted).toMatchObject({ n: 2, sold: 1, held: 1 });
+    expect(v.crafted.estimated).toBeCloseTo(
+      129.4 + 161 - 2 * (486 * 0.2 + 16 * 1.5),
+      6,
     );
-    expect(d5.crafted).toMatchObject({
+    expect(v.opened.n).toBe(2);
+    expect(v.bought).toMatchObject({ n: 1, sold: 1 });
+    expect(v.bought.realized).toBeCloseTo(2, 6);
+    expect(v.looted).toMatchObject({ n: 1, cost: 0, held: 1 });
+    expect(Object.keys(v.cases)).toEqual(["case1"]);
+    expect(v.tiers.legendary.n).toBe(2);
+    expect(v.wooden).toEqual({ n: 1, value: 5, cost: 6 });
+    // the window's money: chest, knife, gun, and the old boots (no cost on record)
+    expect(v.money).toMatchObject({
       n: 4,
-      costKnown: 4,
-      sold: 1,
+      sold: 3,
       scrapped: 1,
-      held: 2,
-      soldProceeds: 129.396,
+      known: 3,
+      unknownCost: 1,
     });
-    expect(d5.bought).toMatchObject({
-      n: 1,
-      cost: 4.413,
-      sold: 1,
-      soldProceeds: 6.1,
-      held: 0,
-    });
-    expect(d5.held).toMatchObject({
-      n: 2,
-      costKnown: 2,
-      covered: 1,
-      value: 161,
-      unrealized: null,
-    });
-    const d6 = ledgerSummary(pieces, {
+    expect(v.money.proceeds).toBeCloseTo(129.4 + 1.2 + 6 + 20, 6);
+    const empty = windowView(h, {
       from: "2026-10-06",
       to: "2026-10-06",
-      dayOf: utc,
+      dayOf: day,
       valueOf,
     });
-    expect(d6.gone).toMatchObject({ n: 2, sold: 2, known: 1, unknownCost: 1 });
-    expect(d6.gone.proceeds).toBeCloseTo(46.1, 6);
-    expect(d6.gone.realized).toBeCloseTo(6.1 - 4.413, 6); // the helmet's cost is unknown: its proceeds count, its result does not
-    expect(d6.crafted.n).toBe(0);
-    const week = ledgerSummary(pieces, {
-      from: "2026-10-01",
-      to: "2026-10-07",
-      dayOf: utc,
-      valueOf: () => ({ value: 100 }),
-    });
-    expect(week.gone.n).toBe(4);
-    expect(week.held).toMatchObject({ n: 2, covered: 2, value: 200 });
-    expect(week.held.unrealized).toBeCloseTo(
-      200 - 2 * (486 * 0.247778 + 16 * 1.789756),
-      5,
-    );
+    expect(empty.crafted.n).toBe(0);
+    expect(empty.money.n).toBe(0);
   });
 });

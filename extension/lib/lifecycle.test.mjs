@@ -189,31 +189,68 @@ describe("SPA lifecycle and DOM work", () => {
     document.body.innerHTML =
       '<main><div id="tax"><span>Market tax 5%</span></div><div><div id="item-code-selector-jet" style="z-index:1;border-color:rgb(57,15,16)"></div><div id="item-code-selector-boots5" style="border-color:rgb(43,43,18)"></div></div><div id="offers"></div></main>';
   };
-  /** A feed store with one held legendary boots craft, so the Ledger asks for the boots' fills. */
-  const feedFor = (userId) => ({
-    feed: {
+  /** The worker's history and view for a player with one held legendary boots craft, so the view asks for the boots' sales. */
+  const historyFor = (userId) => ({
+    history: {
       userId,
       username: "Tester",
+      done: true,
+      count: 1,
+      rev: 1,
       at: new Date().toISOString(),
-      feedVersion: 1,
-      covered: {},
-      holes: { crafts: false, sales: false, dismantles: false },
-      rows: {
-        crafts: [
-          {
-            txId: "tx-held-boots-1",
-            id: "held-boots-1",
-            code: "boots5",
-            skills: { dodge: 38 },
-            at: new Date(Date.now() - 3600e3).toISOString(),
-            scraps: 486,
-          },
-        ],
-        sales: [],
-        dismantles: [],
+    },
+  });
+  const ledgerFor = (userId) => ({
+    ledger: {
+      meta: {
+        userId,
+        username: "Tester",
+        done: true,
+        count: 1,
+        rev: 1,
+        oldestAt: new Date().toISOString(),
+        at: new Date().toISOString(),
       },
-      averages: {},
-      averagesAt: new Date().toISOString(),
+      windows: Object.fromEntries(
+        ["today", "week", "month", "all"].map((k) => [
+          k,
+          {
+            crafted: {
+              n: 1,
+              cost: 149,
+              held: 1,
+              heldValue: 0,
+              heldPriced: 0,
+              proceeds: 0,
+              sold: 0,
+              scrapped: 0,
+              realized: 0,
+              estimated: 0,
+              estimatedKnown: 0,
+              costUnknown: 0,
+            },
+            opened: { n: 0 },
+            bought: { n: 0 },
+            looted: { n: 0 },
+            cases: {},
+            tiers: {},
+            wooden: { n: 0, value: 0, cost: 0 },
+            money: {
+              n: 0,
+              sold: 0,
+              scrapped: 0,
+              proceeds: 0,
+              realized: 0,
+              known: 0,
+              unknownCost: 0,
+            },
+          },
+        ]),
+      ),
+      rows: [],
+      rowsTotal: 0,
+      salesWanted: ["boots5"],
+      at: new Date().toISOString(),
     },
   });
   const marketRuntime = (settings, salesImpl) => {
@@ -241,7 +278,8 @@ describe("SPA lifecycle and DOM work", () => {
                 fills: [],
               },
             };
-      if (msg.type === "feed") return feedFor(msg.userId);
+      if (msg.type === "history") return historyFor(msg.userId);
+      if (msg.type === "ledger") return ledgerFor(msg.userId);
       return base(msg);
     });
     return runtime;
@@ -273,7 +311,7 @@ describe("SPA lifecycle and DOM work", () => {
       runtime.sendMessage.mock.calls.filter(([m]) => m.type === "avg"),
     ).toHaveLength(1); // the rows and the board are valued at the game's averages
     expect(
-      runtime.sendMessage.mock.calls.filter(([m]) => m.type === "feed"),
+      runtime.sendMessage.mock.calls.filter(([m]) => m.type === "history"),
     ).toHaveLength(0); // no own-profile link on the page and no id set: nothing to read
     for (let i = 0; i < 50; i++)
       document
@@ -342,8 +380,9 @@ describe("SPA lifecycle and DOM work", () => {
     app = await startLens(runtime);
     await settle(3000);
     expect(
-      runtime.sendMessage.mock.calls.filter(([m]) => m.type === "feed"),
-    ).toHaveLength(1);
+      runtime.sendMessage.mock.calls.filter(([m]) => m.type === "history")
+        .length,
+    ).toBeGreaterThanOrEqual(1);
     expect(bodyText()).toContain("Tester");
     expect(salesCalls(runtime, "jet")).toBe(1);
     expect(salesCalls(runtime, "boots5")).toBe(1);
@@ -453,7 +492,6 @@ describe("SPA lifecycle and DOM work", () => {
     app = await startLens(runtime);
     await settle(3000);
     expect(salesCalls(runtime, "boots5")).toBe(1);
-    expect(bodyText()).toContain("no sales in 7 d"); // its own read worked, empty
     expect(bodyText()).not.toContain("sales read failed"); // jet's failure is not its
   });
   it("keeps the bar in place and a focused tier button focused across native mutations", async () => {

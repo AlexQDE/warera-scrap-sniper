@@ -266,156 +266,91 @@ function skillsOf(item) {
 }
 
 /** How far before the oldest craft a sale or dismantle is still kept: a fate recorded in the same second as its craft must not be cut. */
-/** The newest known transaction ids per feed: the incremental walk stops at the first one it meets. */
-/** @typedef {{ crafts?: Iterable<string>, sales?: Iterable<string>, dismantles?: Iterable<string> }} KnownIds */
-/** The feeds the ledger is built from, by the API's transaction type. */
-export const FEED_TYPES = Object.freeze({
-  crafts: "craftItem",
-  sales: "itemMarket",
-  dismantles: "dismantleItem",
-});
-/** Pages of 100 each feed may walk on a backfill, and on a poll. */
-export const FEED_PAGES = Object.freeze({
-  backfill: { crafts: 5, sales: 25, dismantles: 10 },
-  poll: { crafts: 5, sales: 10, dismantles: 5 },
-});
+/** The transaction types the player's history is built from, read in one walk. */
+export const HISTORY_TYPES = Object.freeze([
+  "craftItem",
+  "itemMarket",
+  "dismantleItem",
+  "openCase",
+  "battleLoot",
+  "trading",
+]);
+export const historyUrl = (userId, cursor) =>
+  withInput("transaction.getPaginatedTransactions", {
+    transactionType: HISTORY_TYPES,
+    userId,
+    limit: 100,
+    ...(cursor ? { cursor } : {}),
+  });
 
 /**
- * The player's own crafts, item-market rows (both sides) and dismantles,
- * each feed walked newest first on its own until it meets a known
- * transaction id, a row older than `cutoff`, the end of the feed, or its
- * page cap. Rows are reduced to what the ledger needs and carry the
- * transaction id (`txId`) so a store can merge polls without doubles. A
- * craft row's `item` is the OUTPUT piece (state 100, with its roll), its
- * `quantity` the scraps it consumed; a market row's `item` is the piece
- * that changed hands, `money` its price, `offerCreatedAt` when it was
- * listed; a dismantle row's `quantity` is the scraps that came back
- * (docs/GAME-FACTS.md §3, §10). `stopped` says why each walk ended:
- * "known", "cutoff", "end" or "cap" (only "cap" leaves the window uncovered).
- * @param {typeof fetch} fetchImpl @param {string} key @param {string} userId
- * @param {{ cutoff: number, known?: KnownIds, pages?: { crafts: number, sales: number, dismantles: number }, now?: number, timeoutMs?: number }} options
+ * One transaction reduced to what the history keeps, in short keys so the
+ * whole profile fits: x the transaction id, y the type, a when, c the
+ * itemCode (the scraps a craft consumed or a dismantle gave, the case that
+ * was opened, the resource traded, the piece sold), q the quantity, m the
+ * money, d +1 when the player bought (buyer) and -1 when the player sold
+ * (seller) on a market row, i / ic / k the piece's id, code and stats, la
+ * when the piece's holder got it (a sale gives the piece a new id, so this
+ * is what ties a sale to the craft, opening or purchase), l when the offer
+ * was listed. null for a row that cannot be used.
+ * @param {any} it @param {string} me
  */
-export async function fetchOwnFeed(
+export function reduceRow(it, me) {
+  const x = typeof it?._id === "string" ? it._id : null;
+  const at = Date.parse(it?.createdAt);
+  if (!x || !Number.isFinite(at) || !HISTORY_TYPES.includes(it.transactionType))
+    return null;
+  /** @type {Record<string, unknown>} */
+  const row = { x, y: it.transactionType, a: it.createdAt };
+  if (typeof it.itemCode === "string") row.c = it.itemCode;
+  if (Number.isFinite(Number(it.quantity))) row.q = Number(it.quantity);
+  if (positive(it.money) != null) row.m = Number(it.money);
+  if (it.transactionType === "itemMarket" || it.transactionType === "trading")
+    row.d = it.buyerId === me ? 1 : it.sellerId === me ? -1 : 0;
+  if (isId(it.item?._id) && typeof it.item?.code === "string") {
+    row.i = it.item._id;
+    row.ic = it.item.code;
+    const k = skillsOf(it.item);
+    if (k) row.k = k;
+    if (typeof it.item.lastAcquisitionAt === "string")
+      row.la = it.item.lastAcquisitionAt;
+  }
+  if (typeof it.offerCreatedAt === "string") row.l = it.offerCreatedAt;
+  return row;
+}
+
+/**
+ * One page of the player's history, newest first, from `cursor` (none: the
+ * newest page). Rows reduced by reduceRow; `next` is the cursor of the page
+ * after, null at the start of the profile.
+ * @param {typeof fetch} fetchImpl @param {string} key @param {string} userId
+ * @param {{ cursor?: string | null, now?: number, timeoutMs?: number }} [options]
+ */
+export async function fetchHistoryPage(
   fetchImpl,
   key,
   userId,
-  {
-    cutoff,
-    known = {},
-    pages = FEED_PAGES.backfill,
-    now = Date.now(),
-    timeoutMs = TIMEOUT_MS,
-  },
+  { cursor = null, now = Date.now(), timeoutMs = TIMEOUT_MS } = {},
 ) {
   const k = cleanKey(key);
   const id = String(userId ?? "");
   if (!isId(id)) throw new ApiError("Invalid player id", "schema");
-  if (!Number.isFinite(cutoff)) throw new ApiError("Invalid cutoff", "schema");
-  /** @param {keyof typeof FEED_TYPES} feed */
-  const walk = async (feed) => {
-    const type = FEED_TYPES[feed];
-    const stopAt = new Set(known[feed] ?? []);
-    const rows = [];
-    const cursors = new Set();
-    const ids = new Set();
-    let cursor;
-    let walked = 0;
-    let stopped = "cap";
-    const cap = Math.max(1, Number(pages[feed]) || 1);
-    while (walked < cap) {
-      const { data } = await call(fetchImpl, k, ownUrl(type, id, cursor), {
-        timeoutMs,
-      });
-      walked++;
-      if (!Array.isArray(data?.items))
-        throw new ApiError("Unexpected transactions schema", "schema");
-      let done = false;
-      for (const it of data.items) {
-        const at = Date.parse(it?.createdAt);
-        if (!Number.isFinite(at) || at > now + 5000) continue;
-        if (typeof it._id === "string" && stopAt.has(it._id)) {
-          stopped = "known";
-          done = true;
-          break;
-        }
-        if (at < cutoff) {
-          stopped = "cutoff";
-          done = true;
-          break;
-        }
-        if (it._id && ids.has(it._id)) continue;
-        if (it._id) ids.add(it._id);
-        rows.push(it);
-      }
-      if (done) break;
-      if (!data.nextCursor || data.items.length === 0) {
-        stopped = "end";
-        break;
-      }
-      if (typeof data.nextCursor !== "string" || cursors.has(data.nextCursor))
-        throw new ApiError("Invalid or repeated transactions cursor", "schema");
-      cursor = data.nextCursor;
-      cursors.add(cursor);
-    }
-    return { rows, pages: walked, stopped, complete: stopped !== "cap" };
-  };
-  const c = await walk("crafts");
-  const s = await walk("sales");
-  const d = await walk("dismantles");
-  const txId = (it) => (typeof it._id === "string" ? it._id : null);
-  const crafts = c.rows.flatMap((it) =>
-    isId(it.item?._id) && typeof it.item?.code === "string" && txId(it)
-      ? [
-          {
-            txId: txId(it),
-            id: it.item._id,
-            code: it.item.code,
-            skills: skillsOf(it.item),
-            at: it.createdAt,
-            scraps: Number(it.quantity) || 0,
-          },
-        ]
-      : [],
-  );
-  const sales = s.rows.flatMap((it) =>
-    positive(it.money) == null || !txId(it)
-      ? []
-      : [
-          {
-            txId: txId(it),
-            itemId: isId(it.item?._id) ? it.item._id : null,
-            code: it.item?.code ?? it.itemCode ?? null,
-            skills: skillsOf(it.item),
-            at: it.createdAt,
-            money: Number(it.money),
-            seller: isId(it.sellerId) ? it.sellerId : null,
-            buyer: isId(it.buyerId) ? it.buyerId : null,
-            listedAt:
-              typeof it.offerCreatedAt === "string" ? it.offerCreatedAt : null,
-          },
-        ],
-  );
-  const dismantles = d.rows.flatMap((it) =>
-    isId(it.item?._id) && txId(it)
-      ? [
-          {
-            txId: txId(it),
-            itemId: it.item._id,
-            code: it.item?.code ?? null,
-            skills: skillsOf(it.item),
-            at: it.createdAt,
-            scraps: Number(it.quantity) || 0,
-          },
-        ]
-      : [],
-  );
+  const { data } = await call(fetchImpl, k, historyUrl(id, cursor), {
+    timeoutMs,
+  });
+  if (!Array.isArray(data?.items))
+    throw new ApiError("Unexpected transactions schema", "schema");
+  if (data.nextCursor != null && typeof data.nextCursor !== "string")
+    throw new ApiError("Invalid transactions cursor", "schema");
+  const rows = [];
+  for (const it of data.items) {
+    if (Date.parse(it?.createdAt) > now + 5000) continue;
+    const r = reduceRow(it, id);
+    if (r) rows.push(r);
+  }
   return {
-    crafts,
-    sales,
-    dismantles,
-    complete: { crafts: c.complete, sales: s.complete, dismantles: d.complete },
-    stopped: { crafts: c.stopped, sales: s.stopped, dismantles: d.stopped },
-    pages: c.pages + s.pages + d.pages,
+    rows,
+    next: data.items.length && data.nextCursor ? data.nextCursor : null,
   };
 }
 
