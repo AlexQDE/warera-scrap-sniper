@@ -1,4 +1,14 @@
-# 3.0.0 release checklist
+# 3.1.0 release checklist
+
+## 3.1.0 on the live page
+
+3.1.0 was checked on the test suite and on a synthetic page (the real extension code, the account's real history, a stand-in for the game's dialogs). Not seen on the live game:
+
+- **Craft window placement:** the panel goes above the row that holds CRAFT and the game's other buttons (the first ancestor of CRAFT with two native buttons that is not the whole dialog), else just before CRAFT. Confirm it sits full width above the buttons and the buttons keep their own look.
+- **Eco / War in a game window:** clicking the switch flips it and the numbers, and does not close or click through the game's dialog.
+- **A fresh craft:** craft one with the window open on the market page; within seconds the piece is first in the list with its stats, `~value` from sales of the same stats (else `≈`) and its result. Its item's sales are read before the market's other items.
+- **~ and ≈:** on a few rows and Ledger lines, `~` only where the label says same or similar stats.
+- **Eco numbers:** the Ledger's "N in battle, not counted" and the craft window's "in battle" rows match pieces you remember wearing.
 
 ## Automated gate
 

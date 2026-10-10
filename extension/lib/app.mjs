@@ -594,10 +594,26 @@ export async function startLens(runtime = chrome.runtime) {
         : (dialogs.clear(), null);
     context.dialog = shown?.kind ?? null;
     if (shown?.root) nextRoots.push(shown.root);
-    // The craft window's tier: its six items' sales are read now, so a fresh craft is priced by its stats at once.
-    if (shown?.tier)
-      for (const code of CRAFT_CODES)
-        if (describeCode(code)?.rarity === shown.tier) requestSales(code);
+    // The craft window's tier: its six items' sales are read now, today's crafts of it first and ahead of the
+    // market's queue, so a fresh craft is priced by its stats at once.
+    if (shown?.tier) {
+      const codes = [
+        ...new Set([
+          ...(state.ledger?.craftsToday ?? [])
+            .filter((p) => p.rarity === shown.tier)
+            .map((p) => p.code),
+          ...CRAFT_CODES.filter((c) => describeCode(c)?.rarity === shown.tier),
+        ]),
+      ];
+      for (const code of codes) requestSales(code);
+      const first = codes
+        .filter((c) => salesPending.has(c))
+        .map((c) => [c, salesPending.get(c)]);
+      const rest = [...salesPending].filter(([c]) => !codes.includes(c));
+      salesPending.clear();
+      for (const [c, forced] of [...first, ...rest])
+        salesPending.set(c, forced);
+    }
     observe(nextRoots);
     freshSignature = signature();
     metrics.scans++;

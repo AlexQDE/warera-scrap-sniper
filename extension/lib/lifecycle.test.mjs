@@ -404,6 +404,76 @@ describe("SPA lifecycle and DOM work", () => {
     expect(ledgerCalls()).toBe(2);
     expect(salesCalls(runtime, "boots5")).toBe(1);
   });
+  it("saves the Eco / War switch from the page and asks for the view again in the new mode", async () => {
+    window.history.replaceState({}, "", "/market/equipments");
+    marketFixture();
+    const runtime = marketRuntime({ panel: "ledger", userId: ME });
+    app = await startLens(runtime);
+    await settle(3000);
+    const before = runtime.sendMessage.mock.calls.length;
+    bar().querySelector('[data-action="ledger-mode"][data-mode="war"]').click();
+    await settle();
+    const after = runtime.sendMessage.mock.calls.slice(before).map(([m]) => m);
+    const saved = after.findIndex(
+      (m) => m.type === "saveSettings" && m.settings?.ledgerMode === "war",
+    );
+    expect(saved).toBeGreaterThanOrEqual(0);
+    expect(after.slice(saved + 1).some((m) => m.type === "ledger")).toBe(true);
+    expect(runtime.info.settings.ledgerMode).toBe("war");
+  });
+  it("reads the craft window's tier first, today's crafts of it before the other slots, ahead of the market's queue", async () => {
+    window.history.replaceState({}, "", "/market/equipments?item=jet");
+    marketFixture();
+    let release = null;
+    const runtime = marketRuntime({ userId: ME }, async (msg) => {
+      // the grid's jet is read first and slowly, so everything else queues behind it
+      if (msg.itemCode === "jet" && !release)
+        await new Promise((r) => (release = r));
+      return {
+        sales: {
+          code: msg.itemCode,
+          at: new Date().toISOString(),
+          complete: true,
+          fills: [],
+        },
+      };
+    });
+    const base = runtime.sendMessage.getMockImplementation();
+    runtime.sendMessage.mockImplementation(async (msg) => {
+      const r = await base(msg);
+      if (msg.type === "ledger")
+        r.ledger.craftsToday = [
+          { code: "gloves5", rarity: "legendary", fate: "held", worn: false },
+        ];
+      return r;
+    });
+    app = await startLens(runtime);
+    await settle(300);
+    // the game's craft window opens on the legendary tier
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    dialog.innerHTML = `<div>CRAFT ITEMS\nMythic\n1.46K\n32\nLegendary\n486\n16\nEpic\n162\n8\nRare\n54\n4\nUncommon\n18\n2\nCommon\n6\n1\nLegendary\n?</div><div><button>CLOSE</button><button>CRAFT RANDOM</button></div>`;
+    document.body.appendChild(dialog);
+    await settle(6000); // the next tick's scan finds the window while the jet is still being read
+    release?.();
+    await settle(3000);
+    const order = runtime.sendMessage.mock.calls
+      .filter(([m]) => m.type === "sales")
+      .map(([m]) => m.itemCode);
+    const legendary = [
+      "tank",
+      "helmet5",
+      "chest5",
+      "gloves5",
+      "pants5",
+      "boots5",
+    ];
+    for (const code of legendary) expect(order).toContain(code);
+    // after the grid's jet: today's craft first, then the tier's other slots
+    expect(order[0]).toBe("jet");
+    expect(order[1]).toBe("gloves5");
+    expect(order.slice(1, 7).sort()).toEqual([...legendary].sort());
+  });
   it("runs one forced read for the grid's new item when its refresh was queued behind another read, not a plain read and then the forced one", async () => {
     window.history.replaceState({}, "", "/market/equipments?item=jet");
     marketFixture();

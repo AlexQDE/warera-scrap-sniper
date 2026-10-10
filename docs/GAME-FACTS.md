@@ -48,6 +48,16 @@ snapshot of 2026-09; identical to the codex tables).
 - Wear: 1% per hit on armour (a dodged hit costs nothing), 1% per hit on the
   weapon including misses. **CODEX** (controlled run of 164 hits,
   2026-09-16).
+- **A dismantle row tells worn gear from a fresh reroll.** The scraps it
+  returns equal the tier's ladder exactly for a piece at 100% and fall below
+  it for any wear; nothing returns more. **MEASURED** on one account's whole
+  history (2026-10-10): 11,419 dismantles, 9,474 at the full ladder, 1,945
+  below it (most at exactly one third, gear worn out), none above; of the
+  crafted pieces dismantled, legendary 264 of 287 and epic 475 of 509 came
+  back short. 3.1.0 marks such a piece `worn`: in **Eco** it leaves the
+  results (cost and result) and is counted apart, in **War** it counts. A
+  piece still held carries no durability in the history, so a held piece
+  that is being worn is priced at what pieces of its stats sell for.
 
 ## 3. Crafting recipes
 
