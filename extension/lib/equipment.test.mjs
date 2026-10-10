@@ -45,7 +45,7 @@ afterEach(() => {
 it("values the row rarity, not a newly selected unrelated grid item", () => {
   equipment.render(state);
   expect(row.dataset.scrapSniper).toBe("hit");
-  expect(row.textContent).toContain("+0.200 g");
+  expect(row.textContent).toContain("+0.20");
   expect(row.textContent).not.toContain("291.600");
   expect(document.getElementById("buy").disabled).toBe(false);
   const annotation = row.querySelector(".ss-verdict");

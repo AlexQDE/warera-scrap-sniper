@@ -3,9 +3,9 @@
 // and crafts of it have gone (today and on the whole history), and what the
 // last one gave. Display only: a click on the game's button is observed,
 // never made, and only asks the worker to read the history again soon.
-import { fmt, signed, escapeHtml as esc } from "./format.mjs";
+import { signed, gold, signedGold, escapeHtml as esc } from "./format.mjs";
 import { setHtml } from "./ui.mjs";
-import { itemLabel } from "./dom.mjs";
+import { slotName } from "./dom.mjs";
 import { snapshotSummary, CASE_LABELS } from "./cases.mjs";
 import { tierBoard } from "./craftboard.mjs";
 import { spanWords } from "./similar.mjs";
@@ -89,36 +89,70 @@ const statsWords = (skills) =>
       )
     : "";
 const cls = (v) => (v == null ? "" : v >= 0 ? "lens-pos" : "lens-neg");
-const money = (v) =>
-  v == null ? "–" : `<b class="${cls(v)}">${signed(v)} g</b>`;
+/** A result in gold, coloured; "–" when it cannot be told. */
+const result = (v) =>
+  v == null
+    ? `<span class="lens-muted">–</span>`
+    : `<b class="${cls(v)}">${signedGold(v)}</b>`;
+const count = (n) => Number(n ?? 0).toLocaleString("en-US");
 
-/** One piece the player just got, and what it is worth or what became of it. */
-export function lastLine(p, word) {
+/** The Eco / War switch: whether gear worn in battle counts in the results. */
+export function modeSwitch(mode) {
+  const button = (m, label, title) =>
+    `<button type="button" data-action="ledger-mode" data-mode="${m}" aria-pressed="${mode === m}" title="${title}">${label}</button>`;
+  return `<span class="lens-mode" role="group" aria-label="Gear worn in battle">${button("eco", "Eco", "Eco: gear worn in battle is left out of your results")}${button("war", "War", "War: gear worn in battle counts (contracts, bounties)")}</span>`;
+}
+
+/**
+ * One piece: its slot and stats, then what it sells for (held: sales of
+ * those stats, ≈ when only the game's average is known), sold for or
+ * scrapped for, and the result against its cost. In eco mode a piece worn
+ * in battle says so and has no result.
+ */
+export function pieceHtml(p, mode = "eco") {
   if (!p) return "";
   const stats = statsWords(p.skills);
+  const name = `<span class="lens-piece">${esc(slotName(p.code))}</span>${stats ? ` <small>${esc(stats)}</small>` : ""}`;
+  if (p.worn && mode !== "war")
+    return `${name} <span class="lens-muted">in battle</span>`;
+  const v = p.fate === "held" ? p.value : null;
+  const rough = /any stats/i.test(v?.label ?? "");
   const worth =
     p.fate === "sold"
-      ? `sold for ${fmt(p.proceeds)} g`
+      ? `sold ${gold(p.proceeds)}`
       : p.fate === "scrapped"
-        ? `scrapped for ${fmt(p.proceeds)} g in scraps`
-        : p.value?.value != null
-          ? `sells ~${fmt(p.value.value)} g <small>${esc(p.value.label)}</small>`
-          : "its value is being read";
-  const back =
-    p.fate === "held" ? (p.value?.value ?? null) : (p.proceeds ?? null);
-  const result = back != null && p.cost != null ? back - p.cost : null;
-  return `<p><small>${word}</small> <b>${esc(itemLabel(p.code))}</b>${stats ? ` · ${esc(stats)}` : ""} → ${worth}${p.cost != null ? ` · cost ${fmt(p.cost)} g${p.approx ? "≈" : ""}` : ""}${result != null ? ` · ${money(result)}` : ""}</p>`;
+        ? `scrap ${gold(p.proceeds)}`
+        : v?.value != null
+          ? `<span title="${esc(v.label)}"${rough ? ' class="lens-muted"' : ""}>${rough ? "≈" : "~"}${gold(v.value)}</span>`
+          : `<span class="lens-muted" title="reading the sales of these stats">…</span>`;
+  const back = p.fate === "held" ? (v?.value ?? null) : (p.proceeds ?? null);
+  const pnl = back != null && p.cost != null ? back - p.cost : null;
+  return `${name} <span class="lens-worth">${worth}</span> ${result(pnl)}`;
 }
 
-/** "N · cost · got · result" for one outcome (observed.outcome). */
-export function outcomeLine(o, unit) {
-  if (!o?.n) return `none`;
-  const got = o.proceeds + o.heldValue;
-  const per = o.estimatedKnown ? o.estimated / o.estimatedKnown : null;
-  return `${o.n} ${unit}${o.n === 1 ? "" : "s"} · cost ${fmt(o.cost)} g · got ${fmt(got)} g${o.held ? ` (${o.held} held, ${o.heldPriced} priced)` : ""} → ${money(o.estimated)}${per != null ? ` <small>${signed(per)} g each</small>` : ""}`;
+/** "+312 g · 4 crafts · 2 in battle" for one outcome (observed.outcome). */
+export function outcomeLine(o, unit, mode = "eco") {
+  if (!o?.n && !o?.worn) return `none`;
+  const n = o.n ?? 0;
+  const what =
+    unit === "opened"
+      ? `${count(n)} opened`
+      : `${count(n)} ${unit}${n === 1 ? "" : "s"}`;
+  return `${result(o.estimatedKnown ? o.estimated : null)} g · ${what}${o.worn && mode !== "war" ? ` · ${count(o.worn)} in battle` : ""}`;
 }
+
+const head = (title, mode) =>
+  `<header class="lens-head"><span class="lens-brand">◈</span><span class="lens-section">${esc(title)}</span><span class="lens-grow"></span>${modeSwitch(mode)}</header>`;
+const line = (label, body, title = "") =>
+  `<p class="lens-line"${title ? ` title="${esc(title)}"` : ""}><small>${label}</small> ${body}</p>`;
+const TAG = {
+  open: ["flip", "OPEN"],
+  sell: ["hit", "SELL"],
+  even: ["miss", "EVEN"],
+};
 
 export function caseHtml({ code, cases, avg, sellFrom, ledger }) {
+  const mode = ledger?.mode ?? "eco";
   const summary = cases?.books
     ? snapshotSummary({
         books: cases.books,
@@ -128,21 +162,23 @@ export function caseHtml({ code, cases, avg, sellFrom, ledger }) {
     : null;
   const row = summary?.rows.find((r) => r.code === code);
   const label = CASE_LABELS[code] ?? code;
+  const [kind, word] = TAG[row?.verdict] ?? TAG.even;
   const now = row
-    ? `<p>Opening is worth <b>~${row.complete ? fmt(row.openValue) : "–"} g</b> a case <small>${esc(row.policy ? `scrap below ${sellFrom}, sell from it` : "at the scrap bids")}</small> · it sells now for <b>${fmt(row.bid)} g</b> (best bid) → <span class="lens-tag" data-kind="${row.verdict === "open" ? "flip" : row.verdict === "sell" ? "hit" : "miss"}">${row.verdict === "open" ? "OPEN" : row.verdict === "sell" ? "SELL" : "EVEN"}</span></p>`
-    : `<p class="lens-muted">Reading the case and scrap books…</p>`;
+    ? `<p class="lens-line" title="Open: what a case gives at the scrap bids${row.policy ? ` (sold from ${esc(sellFrom)} up)` : ""}. Sell: the best bid for the sealed case.">Open <b>~${row.complete ? gold(row.openValue) : "–"}</b> · Sell <b>${gold(row.bid)}</b> <span class="lens-tag" data-kind="${kind}">${word}</span></p>`
+    : `<p class="lens-muted">Reading prices…</p>`;
   const w = ledger?.windows;
   const mine = w
-    ? `<p><small>Your ${esc(label)}s today</small> ${outcomeLine(w.today.cases[code], "opening")}</p><p><small>All your ${esc(label)}s</small> ${outcomeLine(w.all.cases[code], "opening")}</p>`
+    ? `${line("Today", outcomeLine(w.today.cases[code], "opened", mode))}${line("All", outcomeLine(w.all.cases[code], "opened", mode))}`
     : `<p class="lens-muted">Reading your history…</p>`;
   const last =
     ledger?.lastOpened && ledger.lastOpened.via === code
-      ? lastLine(ledger.lastOpened, "Last opened")
+      ? line("Last", pieceHtml(ledger.lastOpened, mode))
       : "";
-  return `<header class="lens-head"><span class="lens-brand">◈ WarEra Plus</span><span class="lens-section">${esc(label)}</span></header>${now}${mine}${last}<p class="lens-muted lens-legend">A case costs what it would have sold for that day; what came out counts at its sale, its scraps, or what a piece of those stats sells for.</p>`;
+  return `${head(label, mode)}${now}${mine}${last}`;
 }
 
 export function craftHtml({ tier, cases, avg, ledger }) {
+  const mode = ledger?.mode ?? "eco";
   const books = cases?.books ?? {};
   const rows = tierBoard({
     scrapAsks: books.scraps?.asks,
@@ -152,24 +188,42 @@ export function craftHtml({ tier, cases, avg, ledger }) {
   });
   const r = rows.find((x) => x.rarity === tier);
   const name = tier.charAt(0).toUpperCase() + tier.slice(1);
-  const now = r
-    ? `<p>A random ${tier} craft costs <b>${r.costRandom.value == null ? "–" : `${fmt(r.costRandom.value)} g`}</b> now <small>${r.scraps} scraps + ${r.steelRandom} steel at the asks</small> · it is worth <b>${r.evRandom == null ? `– (${r.covered}/6 slots priced)` : `~${fmt(r.evRandom)} g`}</b> <small>the six slots' game averages at the game's odds</small>${r.roiRandom != null ? ` → <b class="${cls(r.roiRandom)}">${signed(r.roiRandom * 100, 0)}%</b>` : ""}${r.lossRandom != null ? ` · a roll scrapped at once gives ${fmt(r.scrapsBack)} g back` : ""}</p>`
-    : "";
   const w = ledger?.windows;
+  const today = w?.today.tiers[tier];
+  const crafts = (ledger?.craftsToday ?? []).filter((p) => p.rarity === tier);
+  const shown = crafts.slice(0, 8);
+  const list = shown.length
+    ? `<ul class="lens-list">${shown.map((p) => `<li>${pieceHtml(p, mode)}</li>`).join("")}${crafts.length > shown.length ? `<li class="lens-muted">+${crafts.length - shown.length} more</li>` : ""}</ul>`
+    : "";
   const mine = w
-    ? `<p><small>Your ${tier} crafts today</small> ${outcomeLine(w.today.tiers[tier], "craft")}</p><p><small>All your ${tier} crafts</small> ${outcomeLine(w.all.tiers[tier], "craft")}</p>`
+    ? today
+      ? `${line("Today", outcomeLine(today, "craft", mode))}${list}`
+      : `<p class="lens-muted">No ${esc(tier)} crafts today</p>`
     : `<p class="lens-muted">Reading your history…</p>`;
-  const last =
-    ledger?.lastCrafted && ledger.lastCrafted.rarity === tier
-      ? lastLine(ledger.lastCrafted, "Last craft")
-      : ledger?.lastCrafted
-        ? lastLine(ledger.lastCrafted, "Last craft (other tier)")
-        : "";
-  return `<header class="lens-head"><span class="lens-brand">◈ WarEra Plus</span><span class="lens-section">${esc(name)} craft</span></header>${now}${mine}${last}<p class="lens-muted lens-legend">A craft costs its recipe at that day's scrap and steel prices; a piece counts at its sale, its scraps, or what a piece of those stats sells for.</p>`;
+  const now = r
+    ? line(
+        "Craft now",
+        `${r.costRandom.value == null ? "–" : gold(r.costRandom.value)} → ${r.evRandom == null ? "–" : `~${gold(r.evRandom)}`} g${r.roiRandom != null ? ` <b class="${cls(r.roiRandom)}">${signed(r.roiRandom * 100, 0)}%</b>` : ""}`,
+        `A random craft: ${r.scraps} scraps + ${r.steelRandom} steel at the market asks, against the game's average price of the six slots at the game's odds${r.evRandom == null ? ` (${r.covered}/6 priced)` : ""}${r.lossRandom != null ? `. A bad roll scrapped at once gives ${gold(r.scrapsBack)} g back` : ""}.`,
+      )
+    : "";
+  const all = w?.all.tiers[tier];
+  const total = all
+    ? line(`All ${esc(tier)}`, outcomeLine(all, "craft", mode))
+    : "";
+  return `${head(`${name} craft`, mode)}${mine}${now}${total}`;
 }
 
-export function createDialogs({ onAction = () => {} } = {}) {
+export function createDialogs({ onAction = () => {}, onMode = () => {} } = {}) {
   let current = null;
+  /** The panel's own Eco / War switch: handled here, kept from the game's dialog. */
+  const onPanelClick = (e) => {
+    const button = e.target?.closest?.('[data-action="ledger-mode"]');
+    if (!button) return;
+    e.preventDefault();
+    e.stopPropagation();
+    onMode(button.dataset.mode === "war" ? "war" : "eco");
+  };
   /** The game's own button was clicked: observe only, the click goes on to the game. */
   const onClick = (e) => {
     const button = e.target?.closest?.("button");
@@ -187,7 +241,7 @@ export function createDialogs({ onAction = () => {} } = {}) {
     for (const el of document.querySelectorAll(`.${PANEL_CLASS}`)) el.remove();
     current = null;
   }
-  /** Annotate the open dialog, if any; returns { kind, root } for the observer. */
+  /** Annotate the open dialog, if any; returns { kind, root, tier } for the observer and the sales to read. */
   function render(state) {
     const found = findDialog();
     if (!found) {
@@ -200,8 +254,24 @@ export function createDialogs({ onAction = () => {} } = {}) {
       panel = document.createElement("div");
       panel.className = PANEL_CLASS;
       panel.dataset.lens = "";
-      // a case dialog: before the box that holds both open buttons (full width); a craft dialog: before its button
+      panel.addEventListener("click", onPanelClick);
+      // a case dialog: before the box that holds both open buttons (full width); a craft dialog: before the row
+      // its button shares with the game's other buttons, else before the button itself
       let anchor = found.button;
+      if (found.kind === "craft") {
+        for (
+          let n = found.button.parentElement;
+          n && n !== found.dialog;
+          n = n.parentElement
+        ) {
+          const natives = [...n.querySelectorAll("button")].filter(
+            (b) => !b.closest("[data-lens]"),
+          );
+          if (natives.length < 2) continue;
+          if (!/craft items/i.test(n.textContent ?? "")) anchor = n;
+          break;
+        }
+      }
       if (found.kind === "case") {
         const opens = [...found.dialog.querySelectorAll("button")].filter(
           (btn) =>
@@ -236,7 +306,11 @@ export function createDialogs({ onAction = () => {} } = {}) {
         : craftHtml({ ...ctx, tier: found.tier }),
     );
     current = found;
-    return { kind: found.kind, root: found.dialog };
+    return {
+      kind: found.kind,
+      root: found.dialog,
+      tier: found.kind === "craft" ? found.tier : null,
+    };
   }
   return {
     render,

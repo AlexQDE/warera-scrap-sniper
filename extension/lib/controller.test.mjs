@@ -434,4 +434,73 @@ describe("background controller", () => {
     expect(v.salesWanted).toEqual(["knife"]);
     expect(v.rows.length).toBeGreaterThan(0);
   });
+  it("lists today's crafts with what each sells for, and leaves gear worn in battle out in eco mode", async () => {
+    const tank = (n) => ({
+      _id: oid(100100 + n),
+      code: "tank",
+      skills: { attack: 150 + n, criticalChance: 30 },
+      state: 100,
+    });
+    const at = (minutesAgo) => new Date(NOW - minutesAgo * 60e3).toISOString();
+    const craft = (n, minutesAgo) => ({
+      _id: oid(n),
+      itemCode: "scraps",
+      quantity: 486,
+      sellerId: ME,
+      buyerId: ME,
+      transactionType: "craftItem",
+      item: tank(n),
+      createdAt: at(minutesAgo),
+    });
+    const ref = {
+      rows: [
+        // the first tank was worn in battle and scrapped for a third of its scraps
+        {
+          _id: oid(3),
+          itemCode: "scraps",
+          quantity: 162,
+          sellerId: ME,
+          buyerId: ME,
+          transactionType: "dismantleItem",
+          item: tank(1),
+          createdAt: at(2),
+        },
+        craft(2, 4),
+        craft(1, 6),
+      ],
+    };
+    const { f } = historyApi(ref);
+    const { controller, storage } = setup(f);
+    await controller.handle({ type: "history", userId: ME });
+    storage.data["sales:tank"] = {
+      code: "tank",
+      at: new Date(NOW).toISOString(),
+      complete: true,
+      cacheVersion: CACHE_VERSION,
+      fills: [140, 141, 142].map((price, i) => ({
+        price,
+        at: new Date(NOW - (i + 1) * 3600e3).toISOString(),
+        code: "tank",
+        skills: { attack: 152, criticalChance: 30 },
+      })),
+    };
+    const eco = (await controller.handle({ type: "ledger", userId: ME }))
+      .ledger;
+    expect(eco.mode).toBe("eco");
+    expect(eco.windows.all.tiers.legendary).toMatchObject({ n: 1, worn: 1 });
+    expect(eco.craftsToday.map((p) => [p.code, p.worn, p.fate])).toEqual([
+      ["tank", false, "held"],
+      ["tank", true, "scrapped"],
+    ]);
+    expect(eco.craftsToday[0].value).toMatchObject({ value: 141 });
+    expect(eco.salesWanted[0]).toBe("tank");
+    await controller.handle(
+      { type: "saveSettings", settings: { ledgerMode: "war" } },
+      { trusted: true },
+    );
+    const war = (await controller.handle({ type: "ledger", userId: ME }))
+      .ledger;
+    expect(war.mode).toBe("war");
+    expect(war.windows.all.tiers.legendary).toMatchObject({ n: 2, worn: 1 });
+  });
 });

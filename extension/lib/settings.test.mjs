@@ -43,6 +43,11 @@ describe("preferences", () => {
     ).toMatchObject({ userId: null, craftSteelMode: "random" });
     expect(preferences({ userId: 42 }).userId).toBeNull();
   });
+  it("counts the ledger as eco (gear worn in battle left out) unless war is chosen", () => {
+    expect(preferences({}).ledgerMode).toBe("eco");
+    expect(preferences({ ledgerMode: "war" }).ledgerMode).toBe("war");
+    expect(preferences({ ledgerMode: "x" }).ledgerMode).toBe("eco");
+  });
   it("clamps the thresholds and the interval to whole numbers in range", () => {
     const p = preferences({
       minMarginPct: 999,

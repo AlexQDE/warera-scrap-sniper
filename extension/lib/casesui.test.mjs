@@ -91,11 +91,11 @@ describe("safe case rendering", () => {
 describe("travel rendering", () => {
   const input = { hops: 7, oilAsk: 0.242, sealedBid: 7.55, openValue: 6.12 };
   it("shows oil costs and stamina requirements without assuming a full bar", () => {
-    const { html } = tripLineHtml(input);
+    const { html, title } = tripLineHtml(input);
     expect(html).toContain("70 stamina required, or 14 oil · 3.388 g");
     expect(html).toContain("+4.162 g");
     expect(html).toContain("+2.732 g");
-    expect(html).toContain("balance not read");
+    expect(title).toContain("balance not read");
     expect(html).not.toContain("free");
   });
   it("walks asks separately for the complete return quantity", () => {

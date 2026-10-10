@@ -13,7 +13,7 @@ import { CASE_CODES, WOODEN_CODES, ALL_GEAR_CODES } from "./cases.mjs";
 import { makeSingleFlight } from "./flight.mjs";
 import { preferences } from "./settings.mjs";
 import { CACHE_VERSION, TTL, freshness } from "./quality.mjs";
-import { replayHistory, windowView, localDayOf } from "./observed.mjs";
+import { replayHistory, windowView, localDayOf, memoDay } from "./observed.mjs";
 import { similarValue, WINDOW_HOURS } from "./similar.mjs";
 import { comparableFills } from "./resale.mjs";
 import { positive } from "./quality.mjs";
@@ -595,16 +595,21 @@ export function createController({
    * never receives the whole history: the result by activity for today, 7
    * days, 30 days and everything, per case and per crafted tier; the recent
    * pieces; the last crafted and opened piece; the codes whose sales would
-   * price the held pieces. A held piece is valued at the sales of its own
-   * stats when its item's sales were read, else at the game's average.
+   * price the held pieces; today's crafts, newest first. A held piece is
+   * valued at the sales of its own stats when its item's sales were read,
+   * else at the game's average. In "eco" mode gear worn in battle is left
+   * out of the results; "war" counts it.
    */
   async function ledgerView(
     userId,
-    { steelMode = "random", window = "today" } = {},
+    { steelMode = "random", window = "today", mode = "eco" } = {},
   ) {
     const r = await replayed(userId, steelMode);
     if (!r) return { ledger: null };
     const { meta, history } = r;
+    const countWorn = mode === "war";
+    const day = memoDay(localDayOf);
+    const today = day(iso());
     const heldCount = new Map();
     for (const p of history.pieces)
       if (p.fate === "held")
@@ -613,8 +618,18 @@ export function createController({
       history.pieces.filter((p) => p.source === src && p.at).at(-1) ?? null;
     const lastCrafted = last("crafted");
     const lastOpened = last("opened");
+    const craftsToday = [];
+    for (let i = history.pieces.length - 1; i >= 0; i--) {
+      const p = history.pieces[i];
+      if (p.source !== "crafted" || !p.at) continue;
+      const d = day(p.at);
+      if (d > today) continue; // the server's clock ahead of this one around midnight
+      if (d < today) break;
+      craftsToday.push(p);
+    }
     const codes = [
       ...new Set([
+        ...craftsToday.map((p) => p.code),
         ...[lastCrafted, lastOpened].filter(Boolean).map((p) => p.code),
         ...[...heldCount.entries()].sort((a, b) => b[1] - a[1]).map(([c]) => c),
       ]),
@@ -646,19 +661,19 @@ export function createController({
       return a != null ? { value: a, label: "game avg, any stats" } : null;
     };
     const valueOf = (p) => valueDetail(p)?.value ?? null;
-    const today = localDayOf(iso());
-    const back = (days) =>
-      localDayOf(new Date(now() - days * 86400e3).toISOString());
+    const back = (days) => day(new Date(now() - days * 86400e3).toISOString());
+    const view = (from, to) =>
+      windowView(history, { from, to, valueOf, countWorn, dayOf: day });
     const windows = {
-      today: windowView(history, { from: today, to: today, valueOf }),
-      week: windowView(history, { from: back(6), to: today, valueOf }),
-      month: windowView(history, { from: back(29), to: today, valueOf }),
-      all: windowView(history, { from: "0000", to: "9999", valueOf }),
+      today: view(today, today),
+      week: view(back(6), today),
+      month: view(back(29), today),
+      all: view("0000", "9999"),
     };
     const from =
       { today, week: back(6), month: back(29), all: "0000" }[window] ?? today;
     const inWindow = (iso_) => {
-      const d = iso_ ? localDayOf(iso_) : "";
+      const d = day(iso_);
       return d >= from && d <= today;
     };
     const describe = (p) =>
@@ -676,19 +691,21 @@ export function createController({
         proceeds: p.proceeds,
         goneAt: p.goneAt,
         sellsHours: p.sellsHours,
+        worn: p.worn,
         value: p.fate === "held" ? valueDetail(p) : null,
       };
     const recent = history.pieces
       .filter((p) => inWindow(p.goneAt) || inWindow(p.at))
-      .sort(
-        (x, y) =>
-          Date.parse(y.goneAt ?? y.at ?? "") -
-          Date.parse(x.goneAt ?? x.at ?? ""),
-      );
+      .map((p) => ({ p, t: Date.parse(p.goneAt ?? p.at ?? "") }))
+      .sort((x, y) => y.t - x.t)
+      .map((x) => x.p);
     return {
       ledger: {
         meta: publicMeta(meta),
+        mode: countWorn ? "war" : "eco",
         windows,
+        craftsToday: craftsToday.slice(0, 60).map(describe),
+        craftsTodayTotal: craftsToday.length,
         rows: recent.slice(0, 80).map(describe),
         rowsTotal: recent.length,
         lastCrafted: describe(lastCrafted),
@@ -769,6 +786,7 @@ export function createController({
         const { settings } = await storage.get(["settings"]);
         return ledgerView(msg.userId, {
           steelMode: preferences(settings).craftSteelMode,
+          mode: preferences(settings).ledgerMode,
           window: String(msg.window ?? "today"),
         });
       }

@@ -199,8 +199,8 @@ describe("row annotation", () => {
     equipment.render(state);
     const a = annotation();
     expect(tag()).toBe("SNIPE");
-    expect(a.textContent).toContain("+0.200 g");
-    expect(a.textContent).toContain("ROI +20.0%");
+    expect(a.textContent).toContain("+0.20");
+    expect(a.textContent).toContain("scrap +20%");
     expect(row.dataset.scrapSniper).toBe("hit");
     expect(row.querySelector(".buy").disabled).toBe(false);
     expect(row.querySelector(".buy").textContent).toBe("BUY");
@@ -216,7 +216,7 @@ describe("row annotation", () => {
     expect(annotation().textContent).toContain("sells · no average yet");
     state.avg = { at: iso(), values: { knife: 1.5 }, times: { knife: iso() } };
     equipment.render(state);
-    expect(annotation().textContent).toContain("~1.500 g");
+    expect(annotation().textContent).toContain("≈1.50");
     expect(annotation().textContent).toContain("sells · game avg"); // no gap figure on a number that rests on no stats
     state.salesReading = "knife";
     state.avg = null;
@@ -237,10 +237,8 @@ describe("row annotation", () => {
       { at: iso(1) },
     );
     equipment.render(state);
-    expect(annotation().textContent).toContain("~1.050 g");
-    expect(annotation().textContent).toContain(
-      "sells · +5% · 3 sales same stats",
-    );
+    expect(annotation().textContent).toContain("~1.05");
+    expect(annotation().textContent).toContain("sells +5% · 3 same stats");
     // an armour row prints its one stat as a percentage; the fills carry it as the slot's stat
     mount("boots5");
     lines = ["Item", "38%", "100%", "Seller", "100", "BUY"];
@@ -259,17 +257,15 @@ describe("row annotation", () => {
       },
     };
     equipment.render(state);
-    expect(annotation().textContent).toContain(
-      "sells · +0% · 5 sales same stats",
-    );
-    expect(annotation().textContent).toContain("~100.000 g");
+    expect(annotation().textContent).toContain("sells +0% · 5 same stats");
+    expect(annotation().textContent).toContain("~100");
   });
   it("tags FLIP only when sales of these stats beat the price by the threshold; the average and unmatched sales never do", () => {
     state.book = { at: iso(), bids: [{ price: 0.1, quantity: 2000 }] }; // 6 scraps = 0.6 g against a 1 g price
     state.avg = { at: iso(), values: { knife: 1.5 }, times: { knife: iso() } };
     equipment.render(state);
     expect(tag()).toBe("PASS"); // the game's average alone is no reason
-    expect(annotation().textContent).toContain("~1.500 g");
+    expect(annotation().textContent).toContain("≈1.50");
     const far = (price, i) => fill(price, i, { attack: 40, criticalChance: 5 });
     state.salesByCode = {
       knife: sales([
@@ -282,17 +278,15 @@ describe("row annotation", () => {
     };
     equipment.render(state);
     expect(tag()).toBe("PASS"); // sales of other stats are no reason either
-    expect(annotation().textContent).toContain("5 sales any stats");
+    expect(annotation().textContent).toContain("5 any stats");
     state.salesByCode = {
       knife: sales([fill(1.5, 1), fill(1.5, 2), fill(1.5, 3)]),
     };
     equipment.render(state);
     expect(tag()).toBe("FLIP");
     expect(row.dataset.scrapSniper).toBe("flip");
-    expect(annotation().textContent).toContain("−0.400 g");
-    expect(annotation().textContent).toContain(
-      "sells · +50% · 3 sales same stats",
-    );
+    expect(annotation().textContent).toContain("−0.40");
+    expect(annotation().textContent).toContain("sells +50% · 3 same stats");
     settings.flipPct = 60; // 1.5 is 50% above 1
     equipment.render(state);
     expect(tag()).toBe("PASS");
@@ -400,7 +394,7 @@ describe("row annotation", () => {
       knife: sales([1, 1.1, 0.9].map((p, i) => fill(p, 165 + i))),
     };
     equipment.render(state);
-    expect(annotation().textContent).toContain("3 sales same stats");
+    expect(annotation().textContent).toContain("3 same stats");
     vi.setSystemTime(new Date(NOW + 2 * 3600e3));
     equipment.render(state);
     expect(annotation().textContent).toContain(
@@ -417,8 +411,8 @@ describe("states, pulse and the Market section", () => {
     };
     equipment.render(state);
     expect(equipment.pulse()).toContain("<b>3</b> snipes");
-    expect(equipment.pulse()).toContain("<b>0</b> flips");
-    expect(equipment.pulse()).toContain("3 rows");
+    expect(equipment.pulse()).not.toContain("flip"); // nothing to say about zero
+    expect(equipment.pulse()).not.toContain("rows");
     state.book = { at: iso(), bids: [{ price: 0.1, quantity: 2000 }] };
     state.salesErrors = { knife: "the API answered 503" };
     const r = equipment.render(state);
@@ -446,7 +440,7 @@ describe("states, pulse and the Market section", () => {
     equipment.render(state);
     expect(row.dataset.scrapSniper).toBe("stale");
     expect(tag()).toBe("STALE");
-    expect(equipment.pulse()).toContain("<b>0</b> snipes");
+    expect(equipment.pulse()).toBe("");
   });
   it("removes annotations while the key is missing", () => {
     equipment.render(state);
@@ -487,18 +481,17 @@ describe("states, pulse and the Market section", () => {
     expect(body.querySelectorAll(".lens-floor")).toHaveLength(6);
     expect(
       body.querySelector('.lens-floor[data-rarity="mythic"]').textContent,
-    ).toContain("291.600");
-    expect(body.textContent).toContain(
-      "Reading the recent sales of common knife",
-    );
+    ).toContain("292");
+    expect(body.textContent).toContain("Reading sales of common knife");
     state.salesByCode = {
       knife: sales([1, 1.1, 0.9, 1.2, 1.05].map((p, i) => fill(p, i + 1))),
     };
     equipment.render(state);
     equipment.renderMarket(body, state);
-    expect(body.textContent).toContain("5 sales in 7 d, any stats");
-    expect(body.textContent).toContain("median 1.050 g");
-    expect(body.textContent).toContain("SNIPE:");
+    expect(body.textContent).toContain("5 sales · 7 d");
+    expect(body.textContent).toContain("median 1.05");
+    expect(body.querySelector(".lens-legend")).toBeNull();
+    expect(body.querySelector(".lens-help").title).toContain("SNIPE:");
     state.salesErrors = { knife: "the API answered 503" };
     equipment.renderMarket(body, state);
     expect(body.textContent).toContain("last read failed");
@@ -510,8 +503,6 @@ describe("states, pulse and the Market section", () => {
     mount("jet");
     equipment.render(state);
     equipment.renderMarket(body, state);
-    expect(body.textContent).toContain(
-      "Reading the recent sales of mythic jet",
-    );
+    expect(body.textContent).toContain("Reading sales of mythic jet");
   });
 });

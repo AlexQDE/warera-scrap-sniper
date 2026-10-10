@@ -189,6 +189,9 @@ export function itemLabel(code) {
   const t = targetFromCode(code);
   return t ? `${t.rarity} ${t.slot}` : String(code ?? "");
 }
+/** "helmet" for helmet1, "jet" for jet: the label without its rarity, where the tier is already said. */
+export const slotName = (code) =>
+  itemLabel(code).split(" ").slice(1).join(" ") || String(code ?? "");
 
 /** "392.991", "1,234.5", "1.858K" -> number; anything else -> null. */
 export function parsePrice(text) {

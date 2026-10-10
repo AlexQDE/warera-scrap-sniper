@@ -6,6 +6,7 @@ import {
   windowView,
   dayOf,
   localDayOf,
+  memoDay,
 } from "./observed.mjs";
 
 // Compact rows as the history store keeps them (api.reduceRow), ids shortened.
@@ -395,5 +396,125 @@ describe("outcome and windowView", () => {
     });
     expect(empty.crafted.n).toBe(0);
     expect(empty.money.n).toBe(0);
+  });
+});
+
+describe("gear worn in battle", () => {
+  // A legendary tank crafted, worn down in battle, scrapped for a third of its
+  // scraps; an epic sniper crafted and scrapped fresh (a reroll) for its whole
+  // ladder; a legendary chest crafted and sold.
+  const worn = [
+    {
+      x: "w1",
+      y: "craftItem",
+      a: A(0),
+      c: "scraps",
+      q: 486,
+      i: "tankW",
+      ic: "tank",
+      k: { attack: 150, criticalChance: 30 },
+    },
+    {
+      x: "w2",
+      y: "dismantleItem",
+      a: A(3),
+      c: "scraps",
+      q: 162,
+      i: "tankW",
+      ic: "tank",
+      k: { attack: 150, criticalChance: 30 },
+    },
+    {
+      x: "w3",
+      y: "craftItem",
+      a: A(0.2),
+      c: "scraps",
+      q: 162,
+      i: "snpF",
+      ic: "sniper",
+      k: { attack: 103, criticalChance: 16 },
+    },
+    {
+      x: "w4",
+      y: "dismantleItem",
+      a: A(0.3),
+      c: "scraps",
+      q: 162,
+      i: "snpF",
+      ic: "sniper",
+      k: { attack: 103, criticalChance: 16 },
+    },
+    {
+      x: "w5",
+      y: "craftItem",
+      a: A(0.4),
+      c: "scraps",
+      q: 486,
+      i: "chestS",
+      ic: "chest5",
+      k: { armor: 46 },
+    },
+    {
+      x: "w6",
+      y: "itemMarket",
+      a: A(1),
+      c: "chest5",
+      q: 1,
+      m: 140,
+      d: -1,
+      i: "chestS",
+      ic: "chest5",
+      k: { armor: 46 },
+    },
+  ];
+  const h = replayHistory(worn, { averages });
+  const by = (id) => h.pieces.find((p) => p.id === id);
+  const cost5 = 486 * 0.2 + 16 * 1.5;
+  const cost4 = 162 * 0.2 + 8 * 1.5;
+  it("marks a piece scrapped for fewer scraps than its tier's ladder as worn, a full return as not", () => {
+    expect(by("tankW")).toMatchObject({ fate: "scrapped", worn: true });
+    expect(by("snpF")).toMatchObject({ fate: "scrapped", worn: false });
+    expect(by("chestS")).toMatchObject({ fate: "sold", worn: false });
+  });
+  it("leaves worn pieces out of a result when worn gear is not counted, and says how many", () => {
+    const eco = outcome(h.pieces, () => null, { countWorn: false });
+    expect(eco).toMatchObject({ n: 2, worn: 1, scrapped: 1, sold: 1 });
+    expect(eco.cost).toBeCloseTo(cost4 + cost5, 6);
+    expect(eco.realized).toBeCloseTo(162 * 0.2 - cost4 + (140 - cost5), 6);
+    const war = outcome(h.pieces, () => null);
+    expect(war).toMatchObject({ n: 3, worn: 1, scrapped: 2 });
+    expect(war.realized).toBeCloseTo(eco.realized + (162 * 0.2 - cost5), 6);
+  });
+  it("keeps worn gear out of a window's tiers and money when not counted", () => {
+    const view = (countWorn) =>
+      windowView(h, {
+        from: "2026-10-05",
+        to: "2026-10-05",
+        dayOf,
+        valueOf: () => null,
+        countWorn,
+      });
+    const eco = view(false);
+    expect(eco.tiers.legendary).toMatchObject({ n: 1, worn: 1 });
+    expect(eco.tiers.epic).toMatchObject({ n: 1, worn: 0 });
+    expect(eco.crafted).toMatchObject({ n: 2, worn: 1 });
+    expect(eco.money).toMatchObject({ n: 2, worn: 1 });
+    const war = view(true);
+    expect(war.tiers.legendary).toMatchObject({ n: 2, worn: 1 });
+    expect(war.money).toMatchObject({ n: 3, worn: 1 });
+  });
+});
+
+describe("memoDay", () => {
+  it("names the same day as the function it wraps and reads each time once", () => {
+    let calls = 0;
+    const day = memoDay((iso) => {
+      calls++;
+      return dayOf(iso);
+    });
+    expect(day(A(0))).toBe("2026-10-05");
+    expect(day(A(0))).toBe("2026-10-05");
+    expect(day(null)).toBe("");
+    expect(calls).toBe(1);
   });
 });

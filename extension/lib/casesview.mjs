@@ -1,7 +1,7 @@
 import { snapshotSummary, tripCost } from "./cases.mjs";
 import { freshness, TTL, quote } from "./quality.mjs";
 import { fmt, signed, fmtQty, ago, escapeHtml as esc } from "./format.mjs";
-import { header, notice as noticeHtml } from "./ui.mjs";
+import { header, notice as noticeHtml, helpMark } from "./ui.mjs";
 
 export function verdictTag(verdict) {
   return (
@@ -96,7 +96,7 @@ export function casesStripHtml({
   return (
     head +
     (error ? `<p class="lens-notice" role="status">${esc(error)}</p>` : "") +
-    `<div class="lens-cases">${rows}</div><p class="lens-muted" ${collapsed ? "hidden" : ""}>Expected values, not guaranteed rewards. Wooden model uses floor/round bounds. Battle cases follow the drop policy in settings: rarities below the threshold are scrapped at the observed scrap bids, from the threshold up they are sold at the game's average item price. Depth is a snapshot, not reserved. No additional tax adjustment. Rules pinned 2026-09-16.</p>${cases.avgError ? `<p class="lens-notice">Average prices: ${esc(cases.avgError)}</p>` : ""}`
+    `<div class="lens-cases">${rows}</div><p class="lens-muted" ${collapsed ? "hidden" : ""}>Expected values, not promises ${helpMark("Wooden model uses floor/round bounds. Battle cases follow the drop policy in settings: rarities below the threshold are scrapped at the observed scrap bids, from the threshold up they are sold at the game's average item price. Depth is a snapshot, not reserved. No additional tax adjustment. Rules pinned 2026-09-16.")}</p>${cases.avgError ? `<p class="lens-notice">Average prices: ${esc(cases.avgError)}</p>` : ""}`
   );
 }
 
@@ -122,9 +122,9 @@ export function tripLineHtml({
   const netSealed = cost == null || sealedBid == null ? null : sealedBid - cost;
   const netOpen = cost == null || openValue == null ? null : openValue - cost;
   const safe = fresh && cost != null;
-  const html = `<div class="lens-trip"><strong>${hops} region${hops === 1 ? "" : "s"}</strong><button type="button" data-action="trip-mode" aria-pressed="${roundTrip}">${roundTrip ? "Round trip" : "One way"}</button><span>${sealed.stamina * count} stamina required, or ${oilQty} oil · ${fmt(cost)} g</span><span>Sealed net <b>${signed(netSealed)} g</b> · opened expected net <b>${signed(netOpen)} g</b></span><span class="lens-status" data-status="${safe ? "fresh" : "stale"}">${!fresh ? "Stale prices; no recommendation" : cost == null ? "Insufficient oil ask depth" : netSealed == null ? "Sealed price unavailable" : netSealed > 0 ? "Positive oil-funded snapshot" : "Oil does not cover the sealed return"}</span><small>Stamina option requires enough stamina for each leg; balance not read. Prices ${esc(ago(at))}.</small></div>`;
+  const html = `<div class="lens-trip"><strong>${hops} region${hops === 1 ? "" : "s"}</strong><button type="button" data-action="trip-mode" aria-pressed="${roundTrip}">${roundTrip ? "Round trip" : "One way"}</button><span>${sealed.stamina * count} stamina required, or ${oilQty} oil · ${fmt(cost)} g</span><span>Sealed net <b>${signed(netSealed)} g</b> · opened expected net <b>${signed(netOpen)} g</b></span><span class="lens-status" data-status="${safe ? "fresh" : "stale"}">${!fresh ? "Stale prices; no recommendation" : cost == null ? "Insufficient oil ask depth" : netSealed == null ? "Sealed price unavailable" : netSealed > 0 ? "Positive oil-funded snapshot" : "Oil does not cover the sealed return"}</span><small>prices ${esc(ago(at))}</small></div>`;
   return {
     html,
-    title: `Travel model: 10 stamina or 2 oil per region per leg. ${roundTrip ? "Round trip" : "One way"} depth-adjusted sealed net ${signed(netSealed)}. Expected opened net ${signed(netOpen)} is not guaranteed.`,
+    title: `Travel model: 10 stamina or 2 oil per region per leg; the stamina option needs enough stamina for each leg (balance not read). ${roundTrip ? "Round trip" : "One way"} depth-adjusted sealed net ${signed(netSealed)}. Expected opened net ${signed(netOpen)} is not guaranteed.`,
   };
 }

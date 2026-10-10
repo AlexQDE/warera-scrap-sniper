@@ -61,6 +61,9 @@ export function reaches(from, anchor) {
 }
 export const timeLabel = (at, now = Date.now()) =>
   `<span data-lens-time="${escapeHtml(at)}">${escapeHtml(ago(at, now))}</span>`;
+/** A "?" that carries a section's method in its tooltip, instead of a paragraph. */
+export const helpMark = (title) =>
+  `<span class="lens-help" tabindex="0" role="note" title="${escapeHtml(title)}">?</span>`;
 export function header(
   title,
   {

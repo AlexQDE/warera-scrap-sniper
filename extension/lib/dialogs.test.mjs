@@ -108,6 +108,7 @@ const ledger = {
           proceeds: 1.2,
           estimated: -1.66,
           estimatedKnown: 1,
+          worn: 1,
         }),
       },
     },
@@ -142,7 +143,45 @@ const ledger = {
     proceeds: 1.2,
     approx: false,
   },
+  mode: "eco",
+  craftsToday: [
+    {
+      code: "helmet1",
+      rarity: "common",
+      skills: { criticalDamages: 9 },
+      fate: "held",
+      cost: 2.86,
+      approx: false,
+      worn: false,
+      value: { value: 3.5, label: "4 sales · crit dmg 8–10% · 7 d" },
+    },
+    {
+      code: "knife",
+      rarity: "common",
+      skills: { attack: 30, criticalChance: 3 },
+      fate: "scrapped",
+      cost: 2.9,
+      proceeds: 0.4,
+      approx: false,
+      worn: true,
+    },
+    {
+      code: "tank",
+      rarity: "legendary",
+      skills: { attack: 150, criticalChance: 30 },
+      fate: "held",
+      cost: 120,
+      worn: false,
+      value: { value: 141, label: "3 sales" },
+    },
+  ],
 };
+/** Words a player reads in a panel. */
+const words = (el) =>
+  el.textContent
+    .replace(/[·→~+−\-%]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean).length;
 const book = (bid, ask) => ({
   bid,
   ask,
@@ -189,7 +228,7 @@ describe("reading the game's dialogs", () => {
 });
 
 describe("annotating them", () => {
-  it("puts the case's worth, the player's openings and the last opening above the open buttons", () => {
+  it("puts the case's worth, the player's openings and the last opening above the open buttons, in few words", () => {
     caseDialog();
     const d = createDialogs();
     const r = d.render({
@@ -201,15 +240,14 @@ describe("annotating them", () => {
     expect(r.kind).toBe("case");
     const panel = document.querySelector(`.${PANEL_CLASS}`);
     expect(panel.nextElementSibling.className).toBe("row"); // before the box that holds both open buttons
-    expect(panel.textContent).toContain("Opening is worth");
-    expect(panel.textContent).toContain("3.860 g");
-    expect(panel.textContent).toContain(
-      "10 openings · cost 38.000 g · got 13.500 g (1 held, 1 priced) → −24.500 g",
-    );
-    expect(panel.textContent).toContain("8780 openings");
-    expect(panel.textContent).toContain(
-      "Last opened common knife · atk 37 · crit 4% → sells ~1.430 g",
-    );
+    const text = panel.textContent.replace(/\s+/g, " ");
+    expect(text).toContain("Sell 3.86");
+    expect(text).toContain("Today −24.5 g · 10 opened");
+    expect(text).toContain("All −5,302 g · 8,780 opened");
+    // valued at the game's average, not at sales of its stats: marked rough
+    expect(text).toContain("Last knife atk 37 · crit 4% ≈1.43 −2.44");
+    expect(words(panel)).toBeLessThanOrEqual(40);
+    expect(panel.querySelector('[data-action="ledger-mode"]')).not.toBeNull();
     // a second render reuses the panel; the dialog closing removes it
     d.render({ cases, avg: null, settings: {}, ledger });
     expect(document.querySelectorAll(`.${PANEL_CLASS}`)).toHaveLength(1);
@@ -217,10 +255,10 @@ describe("annotating them", () => {
     expect(d.render({ cases, settings: {}, ledger })).toBeNull();
     d.dispose();
   });
-  it("puts the tier's craft cost and worth, the player's crafts and the last craft above the craft button", () => {
+  it("lists today's crafts of the tier with what each sells for and its profit; worn gear says so and counts nothing", () => {
     craftDialog();
     const d = createDialogs();
-    d.render({
+    const r = d.render({
       cases,
       avg: {
         values: {
@@ -235,15 +273,47 @@ describe("annotating them", () => {
       settings: {},
       ledger,
     });
+    expect(r).toMatchObject({ kind: "craft", tier: "common" });
     const panel = document.querySelector(`.${PANEL_CLASS}`);
     expect(panel.nextElementSibling.textContent).toBe("CRAFT RANDOM");
+    const text = panel.textContent.replace(/\s+/g, " ");
+    expect(text).toContain("Common craft");
+    expect(text).toContain("Today −1.66 g · 1 craft · 1 in battle");
+    // a held helmet: sells ~3.50 against its cost 2.86
+    expect(text).toContain("helmet crit dmg 9% ~3.50 +0.64");
+    // the knife went to battle: no result
+    expect(text).toContain("knife atk 30 · crit 3% in battle");
     // 6 scraps × 0.25 + 1 steel × 1.83 = 3.33; EV 0.3 × 1.2 + 0.7 × 1.4 = 1.34
-    expect(panel.textContent).toContain("A random common craft costs 3.330 g");
-    expect(panel.textContent).toContain("~1.340 g");
-    expect(panel.textContent).toContain("1 craft · cost 2.860 g");
-    expect(panel.textContent).toContain(
-      "Last craft common helmet · crit dmg 9% → scrapped for 1.200 g",
+    expect(text).toContain("Craft now 3.33 → ~1.34 g −60%");
+    expect(words(panel)).toBeLessThanOrEqual(45);
+    const eco = panel.querySelector(
+      '[data-action="ledger-mode"][data-mode="eco"]',
     );
+    expect(eco.getAttribute("aria-pressed")).toBe("true");
+    d.dispose();
+  });
+  it("puts the panel above the craft dialog's button row, not squeezed between its buttons", () => {
+    document.body.innerHTML = `<main></main><div role="dialog"><div>${div(CRAFT_LINES.slice(0, 21))}</div><div class="actions"><button>CLOSE</button><button>CRAFT RANDOM</button></div></div>`;
+    const d = createDialogs();
+    d.render({ cases, avg: null, settings: {}, ledger });
+    const panel = document.querySelector(`.${PANEL_CLASS}`);
+    expect(panel.nextElementSibling.className).toBe("actions");
+    d.dispose();
+  });
+  it("hands a click on the Eco / War switch to the app and keeps it from the game's dialog", () => {
+    craftDialog();
+    const onMode = vi.fn();
+    const d = createDialogs({ onMode });
+    d.render({ cases, avg: null, settings: {}, ledger });
+    const gameClick = vi.fn();
+    document
+      .querySelector('[role="dialog"]')
+      .addEventListener("click", gameClick);
+    document
+      .querySelector('[data-action="ledger-mode"][data-mode="war"]')
+      .click();
+    expect(onMode).toHaveBeenCalledWith("war");
+    expect(gameClick).not.toHaveBeenCalled();
     d.dispose();
   });
   it("observes a click on the game's own button and asks for a read, without stopping the click", () => {
@@ -262,13 +332,13 @@ describe("annotating them", () => {
     open.click();
     expect(onAction).toHaveBeenCalledTimes(1);
   });
-  it("words an empty outcome plainly", () => {
-    expect(outcomeLine(null, "craft")).toBe("none");
+  it("words an outcome as its result and count, an empty one plainly", () => {
+    expect(outcomeLine(null, "opened")).toBe("none");
     expect(
       outcomeLine(
-        o({ n: 1, cost: 2, proceeds: 3, estimated: 1, estimatedKnown: 1 }),
-        "craft",
-      ),
-    ).toContain("1 craft · cost 2.000 g · got 3.000 g → ");
+        o({ n: 2, cost: 2, proceeds: 3, estimated: 1, estimatedKnown: 2 }),
+        "opened",
+      ).replace(/<[^>]+>/g, ""),
+    ).toBe("+1.00 g · 2 opened");
   });
 });

@@ -7,8 +7,8 @@
 import * as dom from "./dom.mjs";
 import { SCRAP_LADDER } from "./ladder.mjs";
 import { quote, freshness, TTL, positive } from "./quality.mjs";
-import { fmt, signed, escapeHtml, ago } from "./format.mjs";
-import { setHtml, timeLabel } from "./ui.mjs";
+import { fmt, signed, gold, signedGold, escapeHtml, ago } from "./format.mjs";
+import { setHtml, helpMark } from "./ui.mjs";
 import { salesStats } from "./sales.mjs";
 import { readStats, codeFor, summarizeOffers, statRanks } from "./offers.mjs";
 import { comparableFills, percentileRank, liquidity } from "./resale.mjs";
@@ -267,18 +267,19 @@ export function createEquipment({
     const scrap =
       r.v.margin == null
         ? `<span class="lens-kv"><b>–</b><small>scrap · ${escapeHtml(why)}</small></span>`
-        : `<span class="lens-kv"><b class="${r.v.margin >= 0 ? "lens-pos" : "lens-neg"}">${signed(r.v.margin)} g</b><small>scrap · ROI ${signed(r.v.marginPct * 100, 1)}%</small></span>`;
+        : `<span class="lens-kv"><b class="${r.v.margin >= 0 ? "lens-pos" : "lens-neg"}">${signedGold(r.v.margin)}</b><small>scrap ${signed(r.v.marginPct * 100, 0)}%</small></span>`;
     const gapPct =
       value && r.price > 0 ? ((value.amount - r.price) / r.price) * 100 : null;
     const basis = value
       ? value.source === "avg"
         ? "game avg"
         : value.matched
-          ? `${value.n} sales ${value.basis === "same" ? "same" : "similar"} stats`
-          : `${value.n} sales any stats`
+          ? `${value.n} ${value.basis === "same" ? "same" : "similar"} stats`
+          : `${value.n} any stats`
       : salesState;
+    const gap = gapPct != null && value?.matched;
     const worth = value
-      ? `<span class="lens-kv"><b class="${gapPct != null && value.matched ? (gapPct >= 0 ? "lens-pos" : "lens-neg") : ""}">~${fmt(value.amount)} g</b><small>sells · ${gapPct != null && value.matched ? `${signed(gapPct, 0)}% · ` : ""}${escapeHtml(basis)}</small></span>`
+      ? `<span class="lens-kv"><b class="${gap ? (gapPct >= 0 ? "lens-pos" : "lens-neg") : "lens-muted"}">${gap ? "~" : "≈"}${gold(value.amount)}</b><small>sells${gap ? ` ${signed(gapPct, 0)}%` : ""} · ${escapeHtml(basis)}</small></span>`
       : `<span class="lens-kv"><b>–</b><small>sells · ${escapeHtml(salesState)}</small></span>`;
     return `<span class="lens-tag" data-kind="${kind}">${TAGS[kind]}</span>${scrap}${worth}<button type="button" data-action="details" aria-expanded="${open}" aria-label="${open ? "Hide" : "Show"} details for this offer">${open ? "▾" : "▸"}</button>${open ? detailsHtml(r, ctx) : ""}`;
   }
@@ -524,11 +525,12 @@ export function createEquipment({
   function pulse() {
     if (!last.scanned) return "";
     const parts = [
-      `<b>${last.hits}</b> snipe${last.hits === 1 ? "" : "s"}`,
-      `<b>${last.flips}</b> flip${last.flips === 1 ? "" : "s"}`,
-      `${last.scanned} rows`,
+      last.hits ? `<b>${last.hits}</b> snipe${last.hits === 1 ? "" : "s"}` : "",
+      last.flips
+        ? `<b>${last.flips}</b> flip${last.flips === 1 ? "" : "s"}`
+        : "",
     ];
-    return parts.join(" · ");
+    return parts.filter(Boolean).join(" · ");
   }
   /** The Market section: scrap floors and the selected item's recent sales. */
   function renderMarket(body, state) {
@@ -538,18 +540,21 @@ export function createEquipment({
       !state.error && freshness(book?.at, s.intervalSec * 1000) === "fresh";
     const floors = dom.RARITIES.map((r) => {
       const q = quote(SCRAP_LADDER[r], book?.bids);
-      return `<div class="lens-floor" data-rarity="${r}"><span>${r}</span><b>${fmt(q.value)}</b><small>${SCRAP_LADDER[r]} scraps</small></div>`;
+      return `<div class="lens-floor" data-rarity="${r}"><span>${r}</span><b>${gold(q.value)}</b><small>${SCRAP_LADDER[r]} scraps</small></div>`;
     }).join("");
     const code = last.code;
     const sales = code ? state.salesByCode?.[code] : null;
     const err = code ? state.salesErrors?.[code] : null;
+    const legend = helpMark(
+      `Floors: what each rarity dismantles into at the scrap bids. SNIPE: the scraps a piece dismantles into sell for more than its price (minimum ROI ${s.minMarginPct}%). FLIP: pieces with these stats sold in the last 7 days for ${s.flipPct}% or more above this price; the game's average never earns it. ~ is a value from sales of the same stats, ≈ from any stats or the game's average. Quotes are snapshots, not reserved liquidity.`,
+    );
     let salesLine;
     if (!code)
-      salesLine = `<p class="lens-muted">Select an item in the grid for its recent sales; every row is valued by the sales of its own stats.</p>`;
+      salesLine = `<p class="lens-fills lens-muted">Pick an item in the grid for its sales ${legend}</p>`;
     else if (err && !sales)
       salesLine = `<p class="lens-notice" role="status">Sales of ${escapeHtml(dom.itemLabel(code))}: ${escapeHtml(err)}</p>`;
     else if (!sales)
-      salesLine = `<p class="lens-muted">Reading the recent sales of ${escapeHtml(dom.itemLabel(code))}…</p>`;
+      salesLine = `<p class="lens-fills lens-muted">Reading sales of ${escapeHtml(dom.itemLabel(code))}… ${legend}</p>`;
     else {
       const st = salesStats(sales.fills, {
         hours: WINDOW_HOURS,
@@ -559,11 +564,11 @@ export function createEquipment({
           book?.bids,
         ).value,
       });
-      salesLine = `<p class="lens-fills"><b>${escapeHtml(dom.itemLabel(code))}</b> · ${st.count} sales in 7 d, any stats${sales.complete ? "" : " (capped)"} · median <b>${fmt(st.median)} g</b> · low ${fmt(st.low)} · high ${fmt(st.high)} · last ${escapeHtml(ago(st.last?.at, now()))}${st.underFloor ? ` · ${st.underFloor} sold under scrap` : ""} · read ${timeLabel(sales.at, now())}${err ? ` · <b>last read failed</b> (${escapeHtml(err)})` : ""}</p>`;
+      salesLine = `<p class="lens-fills"><b>${escapeHtml(dom.itemLabel(code))}</b> · ${st.count}${sales.complete ? "" : "+"} sales · 7 d · median <b>${gold(st.median)}</b> · ${gold(st.low)}–${gold(st.high)} · last ${escapeHtml(ago(st.last?.at, now()))}${st.underFloor ? ` · ${st.underFloor} under scrap` : ""}${err ? ` · <b>last read failed</b> (${escapeHtml(err)})` : ""} <span title="read ${escapeHtml(ago(sales.at, now()))}">${legend}</span></p>`;
     }
     setHtml(
       body,
-      `${state.error ? `<p class="lens-notice" role="status">${escapeHtml(state.error)}${book ? " · showing the last quote" : ""}</p>` : ""}<div class="lens-floors" data-fresh="${fresh}">${floors}</div>${salesLine}<p class="lens-muted lens-legend">SNIPE: the scraps the piece dismantles into sell for more than its price at the observed bids (minimum ROI ${s.minMarginPct}%). FLIP: pieces with these stats sold in the last 7 days for ${s.flipPct}% or more above this price; the game's average never earns it. Quotes are snapshots, not reserved liquidity.</p>`,
+      `${state.error ? `<p class="lens-notice" role="status">${escapeHtml(state.error)}${book ? " · showing the last quote" : ""}</p>` : ""}<div class="lens-floors" data-fresh="${fresh}">${floors}</div>${salesLine}`,
     );
   }
   return { render, renderMarket, pulse, clear, metrics };

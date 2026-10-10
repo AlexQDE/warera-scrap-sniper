@@ -306,7 +306,7 @@ describe("SPA lifecycle and DOM work", () => {
         .querySelector('[data-action="tab"][data-tab="craft"]')
         .getAttribute("aria-pressed"),
     ).toBe("true");
-    expect(bodyText()).toContain("Random EV");
+    expect(bodyText()).toContain("Best slot");
     expect(
       runtime.sendMessage.mock.calls.filter(([m]) => m.type === "avg"),
     ).toHaveLength(1); // the rows and the board are valued at the game's averages
@@ -352,7 +352,7 @@ describe("SPA lifecycle and DOM work", () => {
     expect(
       bar().querySelector('[data-action="tab"][data-tab="market"]'),
     ).toBeNull();
-    expect(bodyText()).toContain("Random EV");
+    expect(bodyText()).toContain("Best slot");
     for (let i = 0; i < 20; i++)
       document
         .getElementById("offers")
@@ -387,6 +387,22 @@ describe("SPA lifecycle and DOM work", () => {
     expect(salesCalls(runtime, "jet")).toBe(1);
     expect(salesCalls(runtime, "boots5")).toBe(1);
     expect(app.metrics.scans).toBeLessThan(10);
+  });
+  it("asks for the ledger again as soon as the sales it wanted are read, not on the next half-minute", async () => {
+    window.history.replaceState({}, "", "/market/equipments");
+    marketFixture();
+    const runtime = marketRuntime({ panel: "ledger", userId: ME });
+    app = await startLens(runtime);
+    await settle(3000);
+    const ledgerCalls = () =>
+      runtime.sendMessage.mock.calls.filter(([m]) => m.type === "ledger")
+        .length;
+    expect(salesCalls(runtime, "boots5")).toBe(1);
+    // the first view, then the view again once the boots' sales are in; no loop after that
+    expect(ledgerCalls()).toBe(2);
+    await settle(10_000);
+    expect(ledgerCalls()).toBe(2);
+    expect(salesCalls(runtime, "boots5")).toBe(1);
   });
   it("runs one forced read for the grid's new item when its refresh was queued behind another read, not a plain read and then the forced one", async () => {
     window.history.replaceState({}, "", "/market/equipments?item=jet");

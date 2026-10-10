@@ -81,25 +81,28 @@ afterEach(() => {
 });
 
 describe("the craft board", () => {
-  it("prices every tier at the asks and values it at the game's averages: random EV, best chosen slot, ROI", () => {
+  it("prices every tier at the asks and values it at the game's averages: random worth, best chosen slot, profit", () => {
     render();
     expect(
       body.querySelectorAll(".lens-board tbody tr.lens-tier"),
     ).toHaveLength(6);
     const epic = body.querySelector('.lens-tier[data-rarity="epic"]');
     // 162 scraps × 0.21 + 8 steel × 1.6 = 46.82 at random; EV 0.3 × 60 + 0.7 × 30 = 39
-    expect(epic.textContent).toContain("46.820");
-    expect(epic.textContent).toContain("39.000");
+    expect(epic.textContent).toContain("46.8");
+    expect(epic.textContent).toContain("39.0");
     expect(epic.textContent).toContain("−17%");
-    expect(epic.textContent).toContain("epic sniper");
+    expect(epic.textContent).toContain("sniper");
     expect(epic.textContent).toContain("+1%"); // 60 against 162 × 0.21 + 16 × 1.6 = 59.62
     const mythic = body.querySelector('.lens-tier[data-rarity="mythic"]');
-    expect(mythic.textContent).toContain("357.380"); // 1458 × 0.21 + 32 × 1.6
-    expect(mythic.textContent).toContain("1/6 slots");
-    expect(mythic.textContent).toContain("mythic jet");
-    expect(text()).toContain("Best now: epic at random, ROI −17%");
-    expect(text()).toContain("scraps 0.210 ask · 0.200 bid");
-    expect(text()).toContain("steel 1.600 ask");
+    expect(mythic.textContent).toContain("357"); // 1458 × 0.21 + 32 × 1.6
+    expect(mythic.textContent).toContain("1/6");
+    expect(mythic.textContent).toContain("jet");
+    expect(text()).toContain("Best now: epic random −17%");
+    expect(text()).toContain("Scraps 0.210");
+    expect(text()).toContain("Steel 1.600");
+    // the method lives in a tooltip, not in a paragraph
+    expect(body.querySelector(".lens-legend")).toBeNull();
+    expect(body.querySelector(".lens-help").title).toContain("random craft");
   });
   it("says no depth when the observed asks do not cover a craft, and waits for the averages", () => {
     state.book = { at: iso(), ...book(0.2, 0.21, 1000) };
@@ -111,10 +114,9 @@ describe("the craft board", () => {
       "do not cover scraps",
     );
     const common = body.querySelector('.lens-tier[data-rarity="common"]');
-    expect(common.textContent).toContain("2.860"); // 6 × 0.21 + 1 × 1.6
-    expect(common.textContent).toContain("0/6 slots");
-    expect(text()).toContain("values: the game's average per item · reading…");
-    expect(text()).toContain("No tier can be valued yet");
+    expect(common.textContent).toContain("2.86"); // 6 × 0.21 + 1 × 1.6
+    expect(common.textContent).toContain("0/6");
+    expect(text()).toContain("Reading item prices…");
   });
   it("opens a tier: its slots at the game's averages, the recipe, the reroll loss, the selected item's fills", () => {
     state.selectedCode = "sniper";
@@ -130,17 +132,14 @@ describe("the craft board", () => {
     const detail = body.querySelector(".lens-tier-detail");
     expect(detail).not.toBeNull();
     expect(detail.querySelectorAll(".lens-chip")).toHaveLength(6);
-    expect(detail.textContent).toContain("epic sniper 60.000 30%");
-    expect(detail.textContent).toContain("epic helmet 30.000 14%");
-    expect(detail.textContent).toContain(
-      "Recipe 162 scraps + 8 steel at random, 16 steel for a chosen slot (59.620 g)",
-    );
+    expect(detail.textContent).toContain("sniper 60.0 30%");
+    expect(detail.textContent).toContain("helmet 30.0 14%");
+    const plain = detail.textContent.replace(/\s+/g, " ");
+    expect(plain).toContain("162 scraps + 8 steel");
+    expect(plain).toContain("chosen slot 16 steel · 59.6 g");
     // 162 scraps back at the 0.2 bid = 32.4; the random craft cost 46.82, so a bad roll costs 14.42
-    expect(detail.textContent).toContain("gives 32.400 g back at the bid");
-    expect(detail.textContent).toContain("really costs 14.420 g");
-    expect(detail.textContent).toContain(
-      "epic sniper: 3 sales in 7 d · median 60.000 g · 55.000–65.000 (selected in the grid)",
-    );
+    expect(plain).toContain("bad roll scrapped: 32.4 g back, −14.4 g");
+    expect(plain).toContain("sniper: 3 sales · median 60.0 · 55.0–65.0");
     expect(
       body
         .querySelector('[data-action="desk-tier"][data-tier="4"]')
@@ -151,12 +150,12 @@ describe("the craft board", () => {
     state.selectedCode = "jet";
     click('[data-action="desk-tier"][data-tier="6"]');
     expect(body.querySelector(".lens-tier-detail").textContent).toContain(
-      "mythic jet: reading its fills…",
+      "jet: reading sales…",
     );
     state.selectedCode = null;
     render();
-    expect(body.querySelector(".lens-tier-detail").textContent).toContain(
-      "select an item of this tier in the grid",
+    expect(body.querySelector(".lens-tier-detail").textContent).not.toContain(
+      "sales",
     );
   });
 });
@@ -337,44 +336,60 @@ describe("the ledger", () => {
     approxBefore: "2026-09-08",
     at: iso(),
   });
-  it("shows the worker's view: money and result by activity, cases and tiers, the recent pieces", () => {
+  it("shows the worker's view: the result, the money, the pieces, by activity and tier, the recent pieces", () => {
     state.craftsUserId = ME;
-    state.ledger = view();
+    state.ledger = { ...view(), mode: "eco" };
+    state.ledger.windows.today.crafted.worn = 3;
     render("ledger");
-    expect(text()).toContain("Johnny_Sins");
-    expect(text()).toContain("23906 transactions");
-    expect(text()).toContain("−41.370 g");
-    expect(text()).toContain(
-      "2 sold, 9 scrapped · 160.200 g in · 1 without a cost on record",
-    );
-    expect(text()).toContain("2 crafted · 10 from cases · 0 bought · 0 looted");
-    const sources = body.querySelector(".lens-sources").textContent;
-    expect(sources).toContain("Crafting");
-    expect(sources).toContain("Cases");
-    expect(sources).toContain("−25.700");
-    expect(sources).toContain("−2.570 a opening");
-    expect(text()).toContain("Case 10 · cost 38.000");
-    expect(text()).toContain("legendary 2");
-    expect(text()).toContain("sells ~161.000 g");
-    expect(text()).toContain("5 sales · atk 159 · crit 32% · 7 d");
-    expect(text()).toContain("after 20 min listed");
-    expect(text()).toContain("case 3.800 g≈");
-    expect(text()).toContain("before your history");
-    expect(text()).toContain("costs before 2026-09-08");
+    const plain = () => text().replace(/\s+/g, " ");
+    expect(plain()).toContain("Johnny_Sins");
+    expect(plain()).toContain("23,906 tx");
+    // result: crafting −7.716 + cases −25.7
+    expect(plain()).toContain("Result −33.4 g");
+    expect(plain()).toContain("3 in battle, not counted");
+    expect(plain()).toContain("Sold & scrapped −41.4 g");
+    expect(plain()).toContain("2 sold · 9 scrapped · 1 without cost");
+    expect(plain()).toContain("Pieces 12");
+    expect(plain()).toContain("2 crafted · 10 cases");
+    expect(plain()).toContain("Crafting −7.72");
+    expect(plain()).toContain("Cases −25.7");
+    expect(plain()).toContain("Legendary 2 −7.72");
+    // the rows: what each cost, where it is now, the result
+    expect(plain()).toContain("craft 149");
+    expect(plain()).toContain("~161");
+    expect(
+      body.querySelector('[title="5 sales · atk 159 · crit 32% · 7 d"]'),
+    ).not.toBeNull();
+    expect(plain()).toContain("sold 129 · 20 min");
+    expect(plain()).toContain("case 3.80≈");
+    expect(plain()).toContain("scrap 1.20");
+    expect(
+      body.querySelector('[title="got before your history starts"]'),
+    ).not.toBeNull();
     expect(
       body.querySelectorAll(".lens-crafts tbody tr").length,
     ).toBeGreaterThanOrEqual(4);
-    // the pulse: today's money and the estimate incl. held
-    expect(desk.pulse(state)).toContain("−41.370 g");
+    // the method lives in a tooltip
+    expect(body.querySelector(".lens-legend")).toBeNull();
+    expect(body.querySelector(".lens-help").title).toContain(
+      "costs before 2026-09-08",
+    );
+    expect(
+      body
+        .querySelector('[data-action="ledger-mode"][data-mode="eco"]')
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
+    // the pulse: today's money
+    expect(desk.pulse(state)).toContain("−41.4 g");
     expect(desk.pulse(state)).toContain("*");
     click('[data-action="desk-window"][data-window="all"]');
     expect(desk.window).toBe("all");
-    expect(text()).toContain("8780");
+    expect(text()).toContain("8,780");
   });
   it("says when the account could not be read, never shows another account's view, and shows the history filling", () => {
     state.craftsUserId = null;
     render("ledger");
-    expect(text()).toContain("account not found on this page");
+    expect(text()).toContain("Account not found on this page");
     expect(desk.pulse(state)).toBe("");
     state.craftsUserId = ME;
     state.ledger = {
@@ -383,14 +398,14 @@ describe("the ledger", () => {
     };
     state.history = { userId: ME, count: 800, done: false };
     render("ledger");
-    expect(text()).toContain("800 transactions so far");
+    expect(text()).toContain("Reading your history · 800 tx");
     expect(desk.pulse(state)).toBe("");
     state.ledger = {
       ...view(),
       meta: { ...view().meta, done: false, count: 800 },
     };
     render("ledger");
-    expect(text()).toContain("filling from the start of your profile");
+    expect(text()).toContain("800 tx, still reading");
     state.historyError = "the API answered 503";
     render("ledger");
     expect(text()).toContain("last read failed");

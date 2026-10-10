@@ -10,7 +10,8 @@
 //          bought:  the money paid           looted: nothing
 //   fate   held, sold (a later market row with the player as seller, at its
 //          money) or scrapped (a later dismantle, the scraps back at that
-//          day's scrap price). A sale gives the piece a new id, so a fate is
+//          day's scrap price; a dismantle that returns fewer scraps than the
+//          tier's ladder means the piece was worn in battle). A sale gives the piece a new id, so a fate is
 //          tied to its piece by the item id, else by the same code and stats
 //          acquired at the time the row says the seller got it (the closest
 //          of identical pieces: they are interchangeable), else by the same
@@ -19,7 +20,7 @@
 //   price  a code's price on a day: the game's daily average when on record,
 //          else the median unit price of the player's own trades that day,
 //          else the nearest day on record, flagged approximate
-import { craftRecipe } from "./ladder.mjs";
+import { craftRecipe, SCRAP_LADDER } from "./ladder.mjs";
 import { describeCode } from "./craftdata.mjs";
 
 /** @typedef {{ x: string, y: string, a: string, c?: string, q?: number, m?: number, d?: number, i?: string, ic?: string, k?: Record<string, number>, la?: string, l?: string }} Row */
@@ -32,7 +33,8 @@ export const ACQUIRED_WITHIN_MS = 5000;
  *   id: string, code: string, rarity: string | null, slot: string | null, tier: number | null,
  *   skills: Record<string, number> | null, source: Source, via: string | null, at: string | null,
  *   cost: number | null, approx: boolean,
- *   fate: "held" | "sold" | "scrapped", proceeds: number | null, goneAt: string | null, sellsHours: number | null
+ *   fate: "held" | "sold" | "scrapped", proceeds: number | null, goneAt: string | null, sellsHours: number | null,
+ *   worn: boolean
  * }} Piece
  */
 
@@ -91,15 +93,13 @@ export function makePricer(averages, rows) {
   };
 }
 
-/** @param {string} a @param {string} b */
-const byTime = (a, b) => Date.parse(a) - Date.parse(b);
-
 /**
  * Every piece the player got, with its cost and its fate; the wooden cases'
  * resource outcomes; the player's resource trades. A fate attaches to the
  * latest acquisition of that item id before it that has none yet; a fate
  * with no acquisition on record becomes a piece of source "unknown" (its
- * proceeds still count, it has no cost).
+ * proceeds still count, it has no cost). A piece scrapped for fewer scraps
+ * than its tier's ladder was worn in battle (`worn`).
  * @param {ReadonlyArray<Row>} rows
  * @param {{ averages?: Averages | null, steelMode?: "random" | "chosen" }} [options]
  */
@@ -108,9 +108,15 @@ export function replayHistory(
   { averages = {}, steelMode = "random" } = {},
 ) {
   const price = makePricer(averages, rows);
-  const sorted = [...rows].sort((a, b) => byTime(a.a, b.a));
+  // Rows are replayed oldest first, so every piece on record was got at or before the row at hand.
+  const sorted = rows
+    .map((r) => ({ r, t: Date.parse(r.a) }))
+    .sort((x, y) => x.t - y.t)
+    .map((x) => x.r);
   /** @type {Piece[]} */
   const pieces = [];
+  /** @type {Map<Piece, { t: number, stats: string }>} when each piece was got and its stats, read once */
+  const keyOf = new Map();
   /** @type {Map<string, Piece[]>} */
   const byItem = new Map();
   /** @type {Map<string, Piece[]>} acquisitions by code, for fates tied by the time the piece was got */
@@ -145,8 +151,13 @@ export function replayHistory(
       proceeds: null,
       goneAt: null,
       sellsHours: null,
+      worn: false,
     });
     pieces.push(piece);
+    keyOf.set(piece, {
+      t: Date.parse(r.a),
+      stats: JSON.stringify(r.k ?? null),
+    });
     byItem.set(r.i, [...(byItem.get(r.i) ?? []), piece]);
     if (source !== "unknown") {
       const list = byCode.get(r.ic) ?? [];
@@ -155,13 +166,11 @@ export function replayHistory(
     }
     return piece;
   };
-  /** @param {Row} r @param {"sold" | "scrapped"} kind @param {number | null} proceeds */
-  const fate = (r, kind, proceeds) => {
+  /** @param {Row} r @param {"sold" | "scrapped"} kind @param {number | null} proceeds @param {boolean} [worn] */
+  const fate = (r, kind, proceeds, worn = false) => {
     if (!r.i) return;
     let owned = (byItem.get(r.i) ?? [])
-      .filter(
-        (p) => p.fate === "held" && p.at != null && byTime(p.at, r.a) <= 0,
-      )
+      .filter((p) => p.fate === "held" && p.at != null)
       .at(-1);
     const got = r.la ? Date.parse(r.la) : NaN;
     if (!owned && Number.isFinite(got) && r.ic) {
@@ -169,12 +178,9 @@ export function replayHistory(
       let best = Infinity;
       for (const p of byCode.get(r.ic) ?? []) {
         if (p.fate !== "held" || p.at == null) continue;
-        const gap = Math.abs(Date.parse(p.at) - got);
-        if (
-          gap <= ACQUIRED_WITHIN_MS &&
-          gap < best &&
-          JSON.stringify(p.skills) === stats
-        ) {
+        const key = keyOf.get(p);
+        const gap = Math.abs((key?.t ?? NaN) - got);
+        if (gap <= ACQUIRED_WITHIN_MS && gap < best && key?.stats === stats) {
           best = gap;
           owned = p;
         }
@@ -186,10 +192,7 @@ export function replayHistory(
       owned = (byCode.get(r.ic) ?? [])
         .filter(
           (p) =>
-            p.fate === "held" &&
-            p.at != null &&
-            byTime(p.at, r.a) <= 0 &&
-            JSON.stringify(p.skills) === stats,
+            p.fate === "held" && p.at != null && keyOf.get(p)?.stats === stats,
         )
         .at(-1);
     }
@@ -208,6 +211,7 @@ export function replayHistory(
       proceeds == null ? null : Math.round(proceeds * 1e6) / 1e6;
     target.goneAt = r.a;
     target.sellsHours = wait != null && wait >= 0 ? wait : null;
+    target.worn = worn;
   };
   for (const r of sorted) {
     const day = dayOf(r.a);
@@ -247,7 +251,16 @@ export function replayHistory(
       else if (r.d === -1) fate(r, "sold", r.m ?? null);
     } else if (r.y === "dismantleItem") {
       const s = price("scraps", day);
-      fate(r, "scrapped", s.value == null ? null : (r.q ?? 0) * s.value);
+      const rarity = describe(r.ic ?? "").rarity;
+      const full = rarity
+        ? SCRAP_LADDER[/** @type {keyof typeof SCRAP_LADDER} */ (rarity)]
+        : null;
+      fate(
+        r,
+        "scrapped",
+        s.value == null ? null : (r.q ?? 0) * s.value,
+        full != null && (r.q ?? 0) < full,
+      );
     } else if (r.y === "trading" && r.c) {
       const t = (trades[r.c] ??= { qty: 0, spent: 0, sold: 0, earned: 0 });
       if (r.d === 1) {
@@ -269,10 +282,14 @@ const sum = (xs) => xs.reduce((/** @type {number} */ s, x) => s + (x ?? 0), 0);
  * The result of one set of pieces: what they cost, what came of them (sold,
  * scrapped, or held at `valueOf`), and the result where both are known.
  * "realized" counts the pieces that are gone, "estimated" adds the held
- * ones at what they sell for.
- * @param {ReadonlyArray<Piece>} pieces @param {(p: Piece) => number | null} valueOf
+ * ones at what they sell for. Gear worn in battle is left out unless
+ * `countWorn` (fighting gear is spent, not traded); `worn` says how many.
+ * @param {ReadonlyArray<Piece>} all @param {(p: Piece) => number | null} valueOf
+ * @param {{ countWorn?: boolean }} [options]
  */
-export function outcome(pieces, valueOf) {
+export function outcome(all, valueOf, { countWorn = true } = {}) {
+  const worn = all.filter((p) => p.worn).length;
+  const pieces = countWorn ? all : all.filter((p) => !p.worn);
   const gone = pieces.filter((p) => p.fate !== "held");
   const held = pieces.filter((p) => p.fate === "held");
   const goneKnown = gone.filter((p) => p.cost != null && p.proceeds != null);
@@ -295,6 +312,7 @@ export function outcome(pieces, valueOf) {
     estimated:
       realized + sum(heldKnown.map((x) => (x.v ?? 0) - (x.p.cost ?? 0))),
     estimatedKnown: goneKnown.length + heldKnown.length,
+    worn,
   };
 }
 
@@ -302,28 +320,28 @@ export function outcome(pieces, valueOf) {
  * The window's view by activity: the pieces got in it (crafted, opened,
  * bought, looted), each set's outcome, per case and per crafted tier; what
  * was sold or scrapped in it whatever its age (the window's money); the
- * wooden cases opened in it.
+ * wooden cases opened in it. Gear worn in battle counts only with
+ * `countWorn`.
  * @param {ReturnType<typeof replayHistory>} history
- * @param {{ from: string, to: string, dayOf?: (iso: string | null) => string, valueOf: (p: Piece) => number | null }} input
+ * @param {{ from: string, to: string, dayOf?: (iso: string | null) => string, valueOf: (p: Piece) => number | null, countWorn?: boolean }} input
  */
 export function windowView(
   history,
-  { from, to, dayOf: day = localDayOf, valueOf },
+  { from, to, dayOf: day = localDayOf, valueOf, countWorn = true },
 ) {
   const inWindow = (/** @type {string | null} */ iso) => {
     const d = iso ? day(iso) : "";
     return d >= from && d <= to;
   };
   const got = history.pieces.filter((p) => inWindow(p.at));
+  /** @param {ReadonlyArray<Piece>} set */
+  const result = (set) => outcome(set, valueOf, { countWorn });
   /** @param {Source} s */
-  const of = (s) =>
-    outcome(
-      got.filter((p) => p.source === s),
-      valueOf,
-    );
-  const gone = history.pieces.filter(
+  const of = (s) => result(got.filter((p) => p.source === s));
+  const goneAll = history.pieces.filter(
     (p) => p.fate !== "held" && inWindow(p.goneAt),
   );
+  const gone = countWorn ? goneAll : goneAll.filter((p) => !p.worn);
   const goneKnown = gone.filter((p) => p.cost != null && p.proceeds != null);
   const wooden = history.wooden.filter((w) => inWindow(w.at));
   /** @type {Record<string, ReturnType<typeof outcome>>} */
@@ -331,18 +349,16 @@ export function windowView(
   for (const code of new Set(
     got.filter((p) => p.source === "opened").map((p) => p.via ?? "?"),
   ))
-    cases[code] = outcome(
+    cases[code] = result(
       got.filter((p) => p.source === "opened" && (p.via ?? "?") === code),
-      valueOf,
     );
   /** @type {Record<string, ReturnType<typeof outcome>>} */
   const tiers = {};
   for (const r of new Set(
     got.filter((p) => p.source === "crafted").map((p) => p.rarity ?? "?"),
   ))
-    tiers[r] = outcome(
+    tiers[r] = result(
       got.filter((p) => p.source === "crafted" && (p.rarity ?? "?") === r),
-      valueOf,
     );
   return {
     crafted: of("crafted"),
@@ -364,6 +380,26 @@ export function windowView(
       realized: sum(goneKnown.map((p) => (p.proceeds ?? 0) - (p.cost ?? 0))),
       known: goneKnown.length,
       unknownCost: gone.filter((p) => p.cost == null).length,
+      worn: goneAll.filter((p) => p.worn).length,
     },
+  };
+}
+
+/**
+ * A day function that reads each time once, for the several windows a view
+ * computes over the same pieces.
+ * @param {(iso: string) => string} [day]
+ */
+export function memoDay(day = localDayOf) {
+  /** @type {Map<string, string>} */
+  const seen = new Map();
+  return (/** @type {string | null} */ iso) => {
+    if (!iso) return "";
+    let d = seen.get(iso);
+    if (d === undefined) {
+      d = day(iso);
+      seen.set(iso, d);
+    }
+    return d;
   };
 }

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "WarEra Plus",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "minimum_chrome_version": "105",
   "description": "Read-only decision support for WarEra: SNIPE and FLIP tags on equipment offers priced by the sales of the same stats, a craft board at live prices, your whole crafting, case and trading history with live estimates in the game's craft and case windows, case and travel values. Your own API key.",
   "icons": {

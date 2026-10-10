@@ -59,5 +59,5 @@ export function headHtml({
             `<button type="button" data-action="tab" data-tab="${t.key}" aria-pressed="${panel === t.key}">${t.label}</button>`,
         )
         .join("");
-  return `<span class="lens-brand">◈ WarEra Plus</span><span class="lens-status" data-status="${esc(status)}">${esc(status)}${at ? ` · ${timeLabel(at, now)}` : ""}</span>${pulse ? `<span class="lens-pulse">${pulse}</span>` : ""}<span class="lens-grow"></span><nav class="lens-tabs">${tabHtml}</nav><button type="button" class="lens-refresh" data-action="refresh" aria-label="Refresh" title="Refresh" ${busy ? "disabled" : ""}>${busy ? "…" : "↻"}</button>`;
+  return `<span class="lens-brand">◈ WarEra Plus</span><span class="lens-status" data-status="${esc(status)}" title="prices ${esc(status)}">●${at ? ` ${timeLabel(at, now)}` : ` ${esc(status)}`}</span>${pulse ? `<span class="lens-pulse">${pulse}</span>` : ""}<span class="lens-grow"></span><nav class="lens-tabs">${tabHtml}</nav><button type="button" class="lens-refresh" data-action="refresh" aria-label="Refresh" title="Refresh" ${busy ? "disabled" : ""}>${busy ? "…" : "↻"}</button>`;
 }

@@ -35,6 +35,8 @@ export const DEFAULTS = Object.freeze({
   userId: /** @type {string | null} */ (null),
   /** How the player crafts: "random" lets the game pick the slot at the base steel fee, "chosen" doubles the steel. */
   craftSteelMode: /** @type {"random" | "chosen"} */ ("random"),
+  /** "eco" leaves gear worn in battle out of the ledger's results; "war" counts it (contracts, bounties). */
+  ledgerMode: /** @type {"eco" | "war"} */ ("eco"),
   schemaVersion: 4,
 });
 /** @param {unknown} value @param {number} min @param {number} max @param {number} fallback */
@@ -73,5 +75,6 @@ export function preferences(input = {}) {
       ? String(input.userId).trim()
       : null,
     craftSteelMode: input.craftSteelMode === "chosen" ? "chosen" : "random",
+    ledgerMode: input.ledgerMode === "war" ? "war" : "eco",
   };
 }

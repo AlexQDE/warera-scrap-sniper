@@ -9,6 +9,7 @@ import { casesStripHtml, tripLineHtml } from "./casesview.mjs";
 import { mountBar, headHtml, BAR_ID } from "./panel.mjs";
 import { panel, setHtml, notice, clock } from "./ui.mjs";
 import { createScheduler } from "./scheduler.mjs";
+import { CRAFT_CODES, describeCode } from "./craftdata.mjs";
 
 const ON_EQUIPMENTS = /^\/market\/equipments\/?$/;
 
@@ -203,6 +204,13 @@ export async function startLens(runtime = chrome.runtime) {
       }
     }
     sched.schedule();
+    // The ledger prices its pieces with these sales: view it again now rather than on the next half-minute.
+    if (
+      kind === "sales" &&
+      r?.sales &&
+      state.ledger?.salesWanted?.includes(code)
+    )
+      void askLedger(true);
     if (kind === "sales" && !document.hidden) {
       // The reads kept while this one ran go first, each with its force flag; the grid's item is asked for
       // afterwards only when nothing is being read or waiting for it, so one refresh makes one read.
@@ -270,31 +278,61 @@ export async function startLens(runtime = chrome.runtime) {
     if (r)
       state.errors.history =
         r.error && r.error !== "superseded" ? r.message : null;
-    const window = desk.window;
-    const wanted =
-      state.settings.panel === "ledger" || !!context.dialog || context.craft;
-    if (
-      wanted &&
-      state.history &&
-      (state.history.rev !== ledgerAsked.rev ||
-        window !== ledgerAsked.window ||
-        Date.now() - ledgerAsked.at > 30_000)
-    ) {
-      const v = await send({ type: "ledger", userId, window });
-      if (v?.ledger && v.ledger.meta?.userId === state.craftsUserId) {
-        state.ledger = v.ledger;
-        ledgerAsked.rev = v.ledger.meta.rev;
-        ledgerAsked.window = window;
-        ledgerAsked.at = Date.now();
-        for (const code of v.ledger.salesWanted ?? []) requestSales(code);
-      }
-    }
+    await askLedger();
     historyBusy = false;
     sched.schedule();
     if (historyAgain) {
       historyAgain = false;
       void syncHistory(true);
     }
+  }
+  let ledgerBusy = false;
+  let ledgerAgain = false;
+  /**
+   * The worker's view of the history, asked when the history moved, the
+   * window changed, the view is half a minute old, or `force` (the sales it
+   * wanted were just read, the mode changed).
+   */
+  async function askLedger(force = false) {
+    const userId = state.craftsUserId;
+    if (!userId || !state.history || state.setup || disposed) return;
+    const window = desk.window;
+    const wanted =
+      state.settings.panel === "ledger" || !!context.dialog || context.craft;
+    if (
+      !wanted ||
+      (!force &&
+        state.history.rev === ledgerAsked.rev &&
+        window === ledgerAsked.window &&
+        Date.now() - ledgerAsked.at <= 30_000)
+    )
+      return;
+    if (ledgerBusy) {
+      ledgerAgain = true;
+      return;
+    }
+    ledgerBusy = true;
+    const v = await send({ type: "ledger", userId, window });
+    ledgerBusy = false;
+    if (v?.ledger && v.ledger.meta?.userId === state.craftsUserId) {
+      state.ledger = v.ledger;
+      ledgerAsked.rev = v.ledger.meta.rev;
+      ledgerAsked.window = window;
+      ledgerAsked.at = Date.now();
+      for (const code of v.ledger.salesWanted ?? []) requestSales(code);
+    }
+    sched.schedule();
+    if (ledgerAgain) {
+      ledgerAgain = false;
+      void askLedger(true);
+    }
+  }
+  /** Eco leaves gear worn in battle out of the results, War counts it: saved, then the view is asked again. */
+  async function setMode(mode) {
+    if (state.settings.ledgerMode === mode && state.ledger?.mode === mode)
+      return;
+    await save({ ledgerMode: mode });
+    await askLedger(true);
   }
   /** A click on the game's own craft or open button: the result is read a moment later, twice, and polled fast for a while. */
   const dialogs = createDialogs({
@@ -303,6 +341,7 @@ export async function startLens(runtime = chrome.runtime) {
       setTimeout(() => void syncHistory(true), 2500);
       setTimeout(() => void syncHistory(true), 7000);
     },
+    onMode: (mode) => void setMode(mode),
   });
   /** The bar's own controls: the tabs, refresh, and the desk's buttons. */
   function onBarClick(e) {
@@ -320,11 +359,12 @@ export async function startLens(runtime = chrome.runtime) {
       if (salesWanted) void read("sales", true, salesWanted);
       if (state.craftsUserId) void syncHistory(true);
       sched.schedule();
-    } else if (name === "settings" || name === "reload") action(name);
+    } else if (name === "ledger-mode")
+      void setMode(t.dataset.mode === "war" ? "war" : "eco");
+    else if (name === "settings" || name === "reload") action(name);
     else if (desk.onClick(e)) {
-      ledgerAsked.at = 0;
       sched.schedule();
-      void syncHistory();
+      void askLedger(true);
     }
   }
   const observer = new MutationObserver((muts) => {
@@ -554,6 +594,10 @@ export async function startLens(runtime = chrome.runtime) {
         : (dialogs.clear(), null);
     context.dialog = shown?.kind ?? null;
     if (shown?.root) nextRoots.push(shown.root);
+    // The craft window's tier: its six items' sales are read now, so a fresh craft is priced by its stats at once.
+    if (shown?.tier)
+      for (const code of CRAFT_CODES)
+        if (describeCode(code)?.rarity === shown.tier) requestSales(code);
     observe(nextRoots);
     freshSignature = signature();
     metrics.scans++;

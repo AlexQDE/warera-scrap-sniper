@@ -25,6 +25,21 @@ export const fmt = (v, d = 3) =>
 /** @param {number | null | undefined} v @param {number} [d] */
 export const signed = (v, d = 3) =>
   v == null ? "–" : `${v < 0 ? "−" : "+"}${fmt(Math.abs(v), d)}`;
+/**
+ * A gold amount as a player reads it: whole gold from 100 up, one decimal
+ * from 10, two below (unit prices of resources keep `fmt`'s three).
+ * @param {unknown} v
+ */
+export const gold = (v) => {
+  if (v == null || !Number.isFinite(Number(v))) return "–";
+  const a = Math.abs(Number(v));
+  return fmt(Number(v), a >= 100 ? 0 : a >= 10 ? 1 : 2);
+};
+/** A gold result with its sign. @param {number | null | undefined} v */
+export const signedGold = (v) =>
+  v == null || !Number.isFinite(v)
+    ? "–"
+    : `${v < 0 ? "−" : "+"}${gold(Math.abs(v))}`;
 /** @param {unknown} n */
 export function fmtQty(n) {
   if (n == null || !Number.isFinite(Number(n))) return "–";
