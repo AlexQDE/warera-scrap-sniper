@@ -243,6 +243,17 @@ describe("rarityFromBorder", () => {
     expect(rarityFromBorder("rgba(155, 40, 44, 0.9)")).toBe("mythic");
   });
 
+  it("reads every v0.27 frame colour (dev, 2026-10-17), and the v0.26 ones still", () => {
+    expect(rarityFromBorder("rgb(88, 27, 29)")).toBe("mythic");
+    expect(rarityFromBorder("rgb(53, 54, 16)")).toBe("legendary");
+    expect(rarityFromBorder("rgb(59, 35, 95)")).toBe("epic");
+    expect(rarityFromBorder("rgb(23, 48, 101)")).toBe("rare");
+    expect(rarityFromBorder("rgb(10, 61, 40)")).toBe("uncommon");
+    expect(rarityFromBorder("rgb(26, 56, 62)")).toBe("common");
+    expect(rarityFromBorder("rgb(28, 46, 49)")).toBe("common"); // v0.26 gray850
+    expect(rarityFromBorder("rgb(43, 43, 18)")).toBe("legendary"); // v0.26 yellow850
+  });
+
   it("refuses a colour that is not near any tile border", () => {
     expect(rarityFromBorder("rgb(208, 221, 225)")).toBeNull(); // the avatar/flag tile
     expect(rarityFromBorder("rgba(0, 0, 0, 0)")).toBeNull();

@@ -343,3 +343,70 @@ Separately, the author's local 1.5.2 (labelled stat reading in
 unmerged in the private repository; its row reader reads **labelled** numbers
 only, which is the right answer to the checklist's open question about the
 live row layout.
+
+## 11. v0.27 on the dev server (read 2026-10-17)
+
+The game's next version, read on dev.warera.io (client 0.27.0-beta, build
+`JWLllTElOSrQkss76XV1d`) against live 0.26.2-beta. Dev is a test world: its
+prices are not live prices. Nothing was listed, bid or hired to read this.
+
+- **The equipment market is an auction house.** `/market/equipments`
+  leads to `/market/auctions`; the client calls no `itemOffer.*` and the
+  server answers 404 "No procedure found" for them. `itemAuction.*` replaces
+  them: `getAuctions {itemCode?, minSkills?, sort, limit: 12, cursor?}`
+  (sorts endingSoon, newest, lowestPrice, lowestMaxPrice, mostBids),
+  `getMyAuctions {view: selling | bidding | ended}`, `getMyItemsValue
+{itemIds}`, `getById {auctionId}`, `createAuctions`, `placeBid`,
+  `cancelAuction`. With an API key `getAuctions`, `getMyAuctions`,
+  `getMyItemsValue` answer 403 "API tokens cannot access this endpoint" (a
+  keyed 403 is read as a rejected key by `api.mjs`: never ask them with the
+  key); `getById` answers without a key.
+- **An auction**: `estimatedValue`, `startPrice` (0 allowed), `maxPrice`
+  (100-160% of the estimate; a bid at it wins at once), `price` (current),
+  `bids [{user, amount, at}]`, `leader {amount, escrow, taxRate, taxCountry}`,
+  `durationHours` (6, 12, 24, 48, 72, 120 or 168; 24 by default), `endsAt`,
+  `status` (active, sold, unsold, cancelled). Bids are typed before tax; the
+  bidder's country adds its market tax and the bid plus the tax is held until
+  the bidder is outbid (refunded at once) or wins; the seller receives the
+  whole winning bid. A bid in the last minute resets the countdown to one
+  minute. Up to five weapons or equipment at 100% durability, one auction
+  each, the same start price and length.
+- **The estimate** is the item's average price (`gameStat.getEquipmentAvgByCode`)
+  times 1 + 0.05 × the mean of where each stat sits in its range (§4, 0 at the
+  bottom, 1 at the top), to three decimals: 72 of 72 active auctions, and the
+  form's "From 82.404 to 131.846" for an epic sniper 123/16 at an 80.87
+  average (`pricing.estimatedValue`). Two legendary/mythic pants carried an
+  estimate while the public average answered 0.
+- **The card** prints the stats, the item's name, the countdown (separate
+  text nodes "5h", "35m", "28s"), "Starting price" (or "Current bid" once bid
+  on) and "Max price", both before tax, the seller, the bid count, and two
+  buttons: Buy now with the max price plus the buyer's tax, Bid with the next
+  minimum bid plus the tax (about 5% over a current bid). Amounts are split
+  into nodes ("277", ".", "927"). The item frame has no border: the rarity is
+  the item code's, or for a skin the tier its stat falls in. The notice:
+  "Bids are shown before tax: when you bid, your country … adds its 10%
+  market tax." The item grid is in a "Select an item" window (the tiles keep
+  `item-code-selector-<code>`; frames mythic 88,27,29 · legendary 53,54,16 ·
+  epic 59,35,95 · rare 23,48,101 · uncommon 10,61,40 · common 26,56,62);
+  `?item=` and the stat inputs (`attack`, `criticalChance`, …) are as before.
+- **The form** ("Start an auction", opened by SELL AN ITEM) has
+  `input[name=startPrice]` and `input[name=maxPrice]`, disabled until a piece
+  is picked in the same "Items 0/5" picker as before (rows `translateY(4 +
+99·i)`). With one piece the max is in gold and the form prints the range;
+  with several it is a percentage of each piece's estimate.
+- **A sale** is an `itemMarket` transaction as before: `money` before tax, a
+  new `item._id`, the seller's `lastAcquisitionAt`, `offerCreatedAt` = the
+  auction's start (so listed-to-sold now mirrors the auction length).
+- **Workers become NPC employees** (`employee.*`, all session-only; hire with
+  Energy, train once a day per employee with a hand of cards, hidden traits,
+  happiness, events) and players become managers (`manager.*`,
+  `managerOffer.*`, `/market/jobs`). Nothing here reads them.
+- **Tools and toolboxes.** 36 tools (`sickle|pickaxe|skillet|hammer|flask|
+caliper` 1-6, `isTradable: false`, a production stat) come out of the
+  `toolbox` case (legendary, not tradable). Opening one writes an `openCase`
+  row with `itemCode: "toolbox"` and the tool as `item`; tools dismantle into
+  scraps on the gear ladder (a common one 6). `itemTrading.getItemTrading
+{itemCode: "toolbox"}` answers 404 "Itemtradings not found."
+- **Wooden cases can drop cases** (client config `caseDrops: case1 1-10,
+toolbox 1-10, case2 1`; the chance is not in the client): an `openCase` row
+  with the case's code, a quantity and no item (toolbox ×7, ×8 seen).

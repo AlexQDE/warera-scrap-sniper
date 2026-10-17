@@ -23,6 +23,18 @@ import { modeSwitch, valueHtml, chosenMark } from "./dialogs.mjs";
 const pct = (v, d = 0) => (v == null ? "–" : `${signed(v * 100, d)}%`);
 const count = (n) => Number(n ?? 0).toLocaleString("en-US");
 const cap = (s) => String(s).charAt(0).toUpperCase() + String(s).slice(1);
+/** Why `n` wooden cases sit outside the result: toolboxes have no market price, any other drop no price yet. */
+const unpricedWooden = (n, toolboxes) =>
+  `${count(n)} wooden case${n === 1 ? "" : "s"} left out of the result: ${[
+    toolboxes
+      ? `${count(toolboxes)} gave toolboxes, which have no market price`
+      : "",
+    n - toolboxes
+      ? `${count(n - toolboxes)} gave a drop without a price yet`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("; ")}`;
 
 const CRAFT_HELP =
   "Cost: the tier's scraps and steel walked through the market asks, for a random craft (a sniper craft, the slot chosen, doubles the steel). Worth: the game's average price of each slot at the game's odds (30% weapon, 14% each armour slot). Profit: worth against cost. Expected values, not promises.";
@@ -280,9 +292,15 @@ export function createCraftDesk({ settings, now = Date.now }) {
           ([t, o]) =>
             `<span class="lens-chip" data-rarity="${esc(t)}">${esc(cap(t))} <small>${count(o.n)}</small>${o.chosen ? ` <small class="lens-pick" title="${esc(`${count(o.chosen)} of ${count(o.n)} sniper crafts (slot chosen): twice the steel`)}">◎${count(o.chosen)}</small>` : ""} ${money(o.estimatedKnown ? o.estimated : null)}</span>`,
         ),
-      ...(w.wooden.n
+      ...(w.wooden.n || w.woodenUnpriced
         ? [
-            `<span class="lens-chip">Wooden <small>${count(w.wooden.n)}</small> ${money(w.wooden.value - w.wooden.cost)}</span>`,
+            `<span class="lens-chip"${w.woodenUnpriced ? ` title="${esc(unpricedWooden(w.woodenUnpriced, w.woodenToolboxes ?? 0))}"` : ""}>Wooden <small>${count(w.wooden.n + (w.woodenUnpriced ?? 0))}</small> ${w.wooden.n ? money(w.wooden.value - w.wooden.cost) : "–"}${w.woodenUnpriced ? ` <small>${count(w.woodenUnpriced)} unpriced</small>` : ""}</span>`,
+          ]
+        : []),
+      // v0.27: tools from toolboxes, for the employees; not tradable, so outside every result
+      ...(w.tools?.n || w.tools?.scrapped
+        ? [
+            `<span class="lens-chip" title="Tools from toolboxes, for your employees: not tradable and without a market price, so no result counts them. ♻ what the scrapped ones gave.">Toolbox <small>${count(w.tools.n)}</small>${w.tools.scrapped ? ` <small>♻ ${gold(w.tools.proceeds)}</small>` : ""}</span>`,
           ]
         : []),
     ].join("");

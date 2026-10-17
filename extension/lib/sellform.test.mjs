@@ -1,11 +1,47 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, it, expect, vi } from "vitest";
 import {
   findSellForm,
   readSellForm,
   renderSellHint,
   sellHintHtml,
+  findAuctionForm,
+  readAuctionForm,
+  auctionHintHtml,
+  renderAuctionHint,
 } from "./sellform.mjs";
+
+// v0.27's Start an auction form as read on dev 2026-10-17 (fixtures/v027-auctions.json), one epic sniper picked
+const FIXTURE = JSON.parse(
+  readFileSync(
+    resolve(
+      dirname(fileURLToPath(import.meta.url)),
+      "../../fixtures/v027-auctions.json",
+    ),
+    "utf8",
+  ),
+);
+function build(t) {
+  if (typeof t === "string") return document.createTextNode(t);
+  const [tag, attrs, ...kids] = t;
+  const el =
+    tag === "svg"
+      ? document.createElementNS("http://www.w3.org/2000/svg", "svg")
+      : document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k !== "_s") el.setAttribute(k, v);
+    else if (v.bi)
+      el.setAttribute(
+        "style",
+        "background-image: linear-gradient(45deg, red, black)",
+      );
+  }
+  for (const kid of kids) el.appendChild(build(kid));
+  return el;
+}
 
 // The sell form as read live on 2026-10-10 with one mythic jet picked: the
 // picked tile, the item's name and rarity, the game's "Market average", the
@@ -169,5 +205,108 @@ describe("the sell form", () => {
     div.innerHTML = near;
     expect(div.textContent.replace(/\s+/g, " ")).toContain("175 for all");
     expect(div.querySelector("[data-sell-use]").dataset.sellUse).toBe("175");
+  });
+});
+
+describe("the Start an auction form (v0.27)", () => {
+  const open = () => {
+    document.body.innerHTML = "<main></main>";
+    document.body.appendChild(build(FIXTURE.form));
+    return findAuctionForm();
+  };
+  const s = {
+    start: 32.4,
+    max: 90,
+    est: 82.404,
+    lo: 82.404,
+    hi: 131.846,
+    why: "what these stats sell for",
+    clamped: false,
+    sold: { value: 90, n: 3, level: "same", hours: 24, label: "3 same · 24 h" },
+  };
+  it("reads the picked piece and the range the game prints for its max price", () => {
+    const form = open();
+    expect(form).not.toBeNull();
+    expect(findSellForm()).toBeNull(); // not the v0.26 sell form
+    const read = readAuctionForm(form);
+    expect(read.start.name).toBe("startPrice");
+    expect(read.max.name).toBe("maxPrice");
+    expect(read.items).toEqual([
+      {
+        code: "sniper",
+        stats: [123, 16],
+        skills: { attack: 123, criticalChance: 16 },
+      },
+    ]);
+    expect(read.range).toEqual({ lo: 82.404, hi: 131.846 });
+  });
+  it("reads the range off its sentence: a decimal printed in pieces is one number, a slider's numbers are none", () => {
+    // the form's text nodes in page order: the start slider ("0", "0", "131", ".", "846"), then the sentence
+    // "From 82.404 to 131.846", then the max price again
+    const nodes = (form) => {
+      const out = [];
+      const walk = document.createTreeWalker(form, 4);
+      while (walk.nextNode()) out.push(walk.currentNode);
+      return out;
+    };
+    // a 9.525 estimate: the slider ends at 15.24, printed "15" "." "24" (24 is 1.6 times 15), and the
+    // sentence's 15.24 printed "15" ".24"
+    let form = open();
+    nodes(form).find((n) => n.nodeValue === "131").nodeValue = "15";
+    nodes(form).find((n) => n.nodeValue === "846").nodeValue = "24";
+    for (const n of nodes(form)) {
+      if (n.nodeValue === "82.404") n.nodeValue = "9.525";
+      else if (n.nodeValue === "131.846") {
+        const decimals = document.createElement("span");
+        decimals.textContent = ".24";
+        n.replaceWith("15", decimals);
+      }
+    }
+    expect(readAuctionForm(form).range).toEqual({ lo: 9.525, hi: 15.24 });
+    // the start slider at 50 of a max of 80: two numbers side by side, 1.6 apart, before the sentence
+    form = open();
+    const [, current, whole, dot, decimals] = nodes(form).filter((n) =>
+      /^(0|131|\.|846)$/.test(n.nodeValue),
+    );
+    current.nodeValue = "50";
+    whole.nodeValue = "80";
+    dot.nodeValue = "";
+    decimals.nodeValue = "";
+    expect(readAuctionForm(form).range).toEqual({ lo: 82.404, hi: 131.846 });
+  });
+  it("puts one line under the max price, and Use writes both prices without starting the auction", () => {
+    const form = open();
+    const read = readAuctionForm(form);
+    const typed = vi.fn();
+    read.start.addEventListener("input", (e) => typed("start", e.target.value));
+    read.max.addEventListener("input", (e) => typed("max", e.target.value));
+    const started = vi.fn();
+    form.querySelector("form").addEventListener("submit", started);
+    form
+      .querySelector('button[type="submit"]')
+      .addEventListener("click", started);
+    renderAuctionHint(read, auctionHintHtml({ count: 1, s }));
+    renderAuctionHint(read, auctionHintHtml({ count: 1, s })); // a second scan keeps one line
+    const hints = form.querySelectorAll(".ss-auction");
+    expect(hints).toHaveLength(1);
+    expect(hints[0].previousElementSibling.tagName).toBe("LABEL");
+    const text = hints[0].textContent.replace(/\s+/g, " ");
+    expect(text).toContain("start 32.4");
+    expect(text).toContain("max 90");
+    expect(text).toContain("sold 90.0 · 3 same · 24 h");
+    hints[0].querySelector("[data-auction-use]").click();
+    expect(read.start.value).toBe("32.4");
+    expect(read.max.value).toBe("90");
+    expect(typed).toHaveBeenCalledWith("start", "32.4");
+    expect(typed).toHaveBeenCalledWith("max", "90");
+    expect(started).not.toHaveBeenCalled();
+  });
+  it("asks for one piece when several are picked, and waits for the sales", () => {
+    const div = document.createElement("div");
+    div.innerHTML = auctionHintHtml({ count: 2, s: null });
+    expect(div.textContent).toContain("pick one piece");
+    expect(div.querySelector("[data-auction-use]")).toBeNull();
+    div.innerHTML = auctionHintHtml({ count: 1, s: null });
+    expect(div.textContent).toContain("reading the sales");
   });
 });

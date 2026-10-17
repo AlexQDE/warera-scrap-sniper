@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { suggestPrice, ageMinutes } from "./pricing.mjs";
+import {
+  suggestPrice,
+  ageMinutes,
+  estimatedValue,
+  suggestAuction,
+} from "./pricing.mjs";
 
 const NOW = Date.parse("2026-10-10T20:00:00Z");
 const hoursAgo = (h) => new Date(NOW - h * 3600e3).toISOString();
@@ -9,6 +14,85 @@ const boots = (price, dodge, h) => ({
   skills: { dodge },
 });
 const ask = (price, dodge, ageMin) => ({ price, skills: { dodge }, ageMin });
+
+// v0.27 (dev 2026-10-17): an auction's estimated value, read on 72 of 72 live auctions, and the form's own
+// "From 82.404 to 131.846" for an epic sniper at 123 attack / 16% crit on an 80.87 average.
+describe("the auction estimate, and a start and max price", () => {
+  it("matches the game's estimate: the average times 1 + 5% of where the stats sit in their ranges", () => {
+    expect(estimatedValue("chest3", { armor: 13 }, 17.64)).toBe(18.081);
+    expect(
+      estimatedValue("rifle", { attack: 89, criticalChance: 13 }, 15.63),
+    ).toBe(16.196);
+    expect(
+      estimatedValue("jet", { attack: 246, criticalChance: 41 }, 448.98),
+    ).toBe(452.532);
+    expect(
+      estimatedValue("sniper", { attack: 123, criticalChance: 16 }, 80.87),
+    ).toBe(82.404);
+    expect(
+      estimatedValue("jet", { attack: 246, criticalChance: 41 }, 0),
+    ).toBeNull();
+    expect(estimatedValue("sickle3", { production: 15 }, 10)).toBeNull();
+  });
+  const skills = { attack: 123, criticalChance: 16 };
+  const sold = (prices) =>
+    prices.map((price, i) => ({ price, at: hoursAgo(i + 1), skills }));
+  const auction = (over) =>
+    suggestAuction({
+      code: "sniper",
+      skills,
+      fills: [],
+      avg: 80.87,
+      scrap: 32.4,
+      now: NOW,
+      ...over,
+    });
+  it("asks the max what pieces of these stats sell for, inside 100-160% of the estimate, and starts at the scrap value", () => {
+    expect(auction({ fills: sold([90, 91, 89]) })).toMatchObject({
+      start: 32.4,
+      max: 90,
+      est: 82.404,
+      lo: 82.404,
+      hi: 131.846,
+      clamped: false,
+      why: "what these stats sell for",
+    });
+    expect(auction({ fills: sold([200, 201, 199]) })).toMatchObject({
+      max: 131.846,
+      clamped: true,
+    });
+    expect(auction({ fills: sold([50, 51, 49]) })).toMatchObject({
+      max: 82.404,
+      clamped: true,
+    });
+    expect(auction({ scrap: null })).toMatchObject({
+      start: 0,
+      max: 82.404,
+      why: "the game's estimate",
+    });
+    // the range the form prints is the game's own and wins over the computed one
+    expect(auction({ range: { lo: 82.5, hi: 132 } })).toMatchObject({
+      lo: 82.5,
+      hi: 132,
+      max: 82.5,
+    });
+    // a start never above the max
+    expect(auction({ scrap: 500 }).start).toBe(82.404);
+  });
+  it("takes the form's 100% as the estimate while the average is missing", () => {
+    expect(
+      auction({ avg: null, range: { lo: 82.404, hi: 131.846 } }),
+    ).toMatchObject({
+      est: 82.404,
+      max: 82.404,
+      start: 32.4,
+      clamped: false,
+      why: "the game's estimate",
+    });
+    // without the form's range there is nothing to go by
+    expect(auction({ avg: null })).toMatchObject({ est: null, max: null });
+  });
+});
 
 describe("reading a listing's age", () => {
   it("reads the row's age token in minutes", () => {

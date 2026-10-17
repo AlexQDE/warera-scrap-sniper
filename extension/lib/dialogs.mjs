@@ -51,6 +51,21 @@ export function caseFromOdds(lines) {
   return null;
 }
 
+const CASE_IMAGES = ["case1", "case2", "woodenCase", "toolbox"];
+/**
+ * The case a dialog shows by its image (cases have no skins: the image is
+ * named by the code), one of case1, case2, woodenCase, toolbox; null when the
+ * dialog shows none of them.
+ * @param {Element} dialog
+ */
+export function caseFromImage(dialog) {
+  for (const img of dialog.querySelectorAll("img")) {
+    const alt = img.getAttribute("alt") ?? "";
+    if (CASE_IMAGES.includes(alt) && !img.closest("[data-lens]")) return alt;
+  }
+  return null;
+}
+
 /**
  * The tier a "craft items" dialog has selected: the dialog lists the six
  * tiers as tiles (a name and two numbers each), then the selected tier's
@@ -72,12 +87,21 @@ export function findDialog(root = document) {
     const label = (b) => linesOf(b)[0] ?? "";
     const lines = nativeLines(dialog);
     const open = buttons.find((b) => /^open\b/i.test(label(b)));
-    if (
-      open &&
-      (/total cases opened/i.test(lines.join(" ")) || caseFromOdds(lines))
-    ) {
-      const code = caseFromOdds(lines);
-      if (code) return { kind: "case", dialog, code, button: open };
+    if (open) {
+      const text = lines.join(" ");
+      const shown = caseFromImage(dialog);
+      // v0.27's toolbox opens into a tool for an employee (OPEN buttons and odds too), and the wooden case is not
+      // one of the two cases priced here: neither gets the case panel
+      const other =
+        (shown != null && shown !== "case1" && shown !== "case2") ||
+        /random tool/i.test(text);
+      if (
+        !other &&
+        (shown || /total cases opened/i.test(text) || caseFromOdds(lines))
+      ) {
+        const code = shown ?? caseFromOdds(lines);
+        if (code) return { kind: "case", dialog, code, button: open };
+      }
     }
     const craft = buttons.find((b) => /^craft\b/i.test(label(b)));
     if (craft && /^craft items$/i.test(lines[0] ?? "")) {

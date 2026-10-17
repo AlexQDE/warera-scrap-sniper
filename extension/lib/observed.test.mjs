@@ -401,6 +401,102 @@ describe("outcome and windowView", () => {
   });
 });
 
+// v0.27 (dev, 2026-10-17): a toolbox opens into a tool for an employee (not tradable, no market price), tools
+// dismantle into scraps, and a wooden case sometimes drops cases: an openCase row with the case's code, a
+// quantity and no item (toolbox x7, x8 seen on dev).
+describe("tools, toolboxes and wooden-case case drops (v0.27)", () => {
+  const v027 = [
+    {
+      x: "tb",
+      y: "openCase",
+      a: A(0),
+      c: "toolbox",
+      q: 1,
+      i: "tool1",
+      ic: "flask2",
+      k: { production: 12 },
+    },
+    {
+      x: "td",
+      y: "dismantleItem",
+      a: A(1),
+      c: "scraps",
+      q: 6,
+      i: "tool1",
+      ic: "flask2",
+      k: { production: 12 },
+    },
+    { x: "w1", y: "openCase", a: A(2), c: "toolbox", q: 8 },
+    { x: "w2", y: "openCase", a: A(3), c: "case1", q: 3 },
+  ];
+  const h = replayHistory(v027, { averages });
+  it("keeps toolbox openings and their tools out of the gear results", () => {
+    expect(h.pieces).toHaveLength(0);
+    expect(h.tools).toEqual([
+      {
+        id: "tool1",
+        code: "flask2",
+        skills: { production: 12 },
+        at: A(0),
+        via: "toolbox",
+        fate: "scrapped",
+        proceeds: 1.2,
+        goneAt: A(1),
+      },
+    ]);
+  });
+  it("counts a wooden case that dropped toolboxes without pricing it, and one that dropped cases at the case price", () => {
+    expect(h.wooden).toEqual([
+      {
+        at: A(2),
+        code: "toolbox",
+        q: 8,
+        value: null,
+        cost: 6,
+        approx: false,
+        drop: "case",
+      },
+      {
+        at: A(3),
+        code: "case1",
+        q: 3,
+        value: 3 * 3.8,
+        cost: 6,
+        approx: false,
+        drop: "case",
+      },
+    ]);
+    const v = windowView(h, {
+      from: "2026-10-05",
+      to: "2026-10-05",
+      dayOf,
+      valueOf: () => null,
+    });
+    expect(v.wooden).toEqual({ n: 1, value: 3 * 3.8, cost: 6 });
+    expect(v.woodenUnpriced).toBe(1);
+    expect(v.woodenToolboxes).toBe(1);
+    expect(v.tools).toEqual({ n: 1, scrapped: 1, proceeds: 1.2 });
+    expect(v.opened.n).toBe(0);
+    expect(Object.keys(v.cases)).toEqual([]);
+  });
+  it("tells a drop that has no price yet from a toolbox", () => {
+    // bread has no daily price in the history: unpriced, and no toolbox
+    const bread = replayHistory(
+      [{ x: "w9", y: "openCase", a: A(2), c: "bread", q: 10 }],
+      { averages },
+    );
+    const v = windowView(bread, {
+      from: "2026-10-05",
+      to: "2026-10-05",
+      dayOf,
+      valueOf: () => null,
+    });
+    expect(v.wooden.n).toBe(0);
+    expect(v.woodenUnpriced).toBe(1);
+    expect(v.woodenToolboxes).toBe(0);
+  });
+});
+
 describe("gear worn in battle", () => {
   // A legendary tank crafted, worn down in battle, scrapped for a third of its
   // scraps; an epic sniper crafted and scrapped fresh (a reroll) for its whole

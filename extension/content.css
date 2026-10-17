@@ -461,6 +461,11 @@
   outline: 1px dashed #dab878;
   outline-offset: -1px;
 }
+/* v0.27 auction card: the next bid pays (the game's own BID button is yellow) */
+[data-scrap-sniper="bid"] {
+  outline: 1px solid #c9b24a;
+  outline-offset: -1px;
+}
 .ss-verdict[data-lens] {
   position: static;
   flex: 0 1 auto;
@@ -527,6 +532,10 @@
 }
 [data-lens] .lens-tag[data-kind="near"] {
   color: var(--lens-warn);
+}
+[data-lens] .lens-tag[data-kind="bid"] {
+  color: #e2cc63;
+  border-color: #8f7d2c;
 }
 [data-lens] .lens-tag[data-kind="stale"],
 [data-lens] .lens-tag[data-kind="loading"] {

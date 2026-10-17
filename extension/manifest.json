@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "WarEra Plus",
-  "version": "3.6.0",
+  "version": "3.7.0",
   "minimum_chrome_version": "105",
   "description": "Unofficial WarEra companion: SNIPE and FLIP tags on offers, craft and case values, and a ledger of your own crafting and trading.",
   "homepage_url": "https://github.com/AlexQDE/warera-plus",

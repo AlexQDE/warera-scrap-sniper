@@ -4,7 +4,12 @@
 // into the game's input. Nothing is listed: PUT ON SALE stays the player's.
 import { gold, escapeHtml as esc } from "./format.mjs";
 import { setHtml } from "./ui.mjs";
-import { slotFromAlt, isItemImageAlt, slotName } from "./dom.mjs";
+import {
+  slotFromAlt,
+  isItemImageAlt,
+  slotName,
+  auctionTokens,
+} from "./dom.mjs";
 import { tileTokens, tileStats, tileCode } from "./picker.mjs";
 import { rowSkills } from "./similar.mjs";
 
@@ -38,10 +43,12 @@ function tileOf(img, stop) {
  * its "Market average", its "Suggested price" and the range around it.
  * @param {Element} form
  */
-export function readSellForm(form) {
-  const input = /** @type {HTMLInputElement | null} */ (
-    form.querySelector('input[name="price"]')
-  );
+/**
+ * The pieces picked in a form: each tile that prints its stats, as its code, stats and skills (a tile without
+ * stats, such as the auction form's summary image, is not a piece).
+ * @param {Element} form
+ */
+function pickedItems(form) {
   const items = [];
   for (const img of form.querySelectorAll("img")) {
     const alt = img.getAttribute("alt");
@@ -56,6 +63,14 @@ export function readSellForm(form) {
       skills: rowSkills(code, read.stats),
     });
   }
+  return items;
+}
+
+export function readSellForm(form) {
+  const input = /** @type {HTMLInputElement | null} */ (
+    form.querySelector('input[name="price"]')
+  );
+  const items = pickedItems(form);
   const tokens = tileTokens(form);
   const after = (/** @type {RegExp} */ re) => {
     const i = tokens.findIndex((t) => re.test(t));
@@ -137,6 +152,128 @@ export function sellHintHtml(picks) {
         .join(" · ")
     : `${priced.length} pieces, the lowest of their prices`;
   return `<div><span class="lens-brand">◈</span> <b>${priceText(lo)}</b> <small>${one ? esc(one.why) : "for all"}</small> ${use}</div>${basis ? `<small>${basis}</small>` : ""}`;
+}
+
+/** Write `value` into the game's input the way typing would: the prototype's setter, then an input event. */
+function typeInto(/** @type {HTMLInputElement} */ input, value) {
+  const setter = Object.getOwnPropertyDescriptor(
+    Object.getPrototypeOf(input),
+    "value",
+  )?.set;
+  setter?.call(input, value);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+/**
+ * v0.27's Start an auction form: a dialog with the start price and the max
+ * price inputs, found by their names (the labels are translated). Nothing is
+ * listed from here: START AUCTION stays the player's.
+ */
+export function findAuctionForm(root = document) {
+  return (
+    [...root.querySelectorAll('[role="dialog"]')].find(
+      (d) =>
+        !!d.querySelector('input[name="startPrice"]') &&
+        !!d.querySelector('input[name="maxPrice"]'),
+    ) ?? null
+  );
+}
+
+/**
+ * The picked pieces, the two inputs, and the range the game prints for the
+ * max price of one piece ("From 82.404 to 131.846": two amounts with one
+ * word between them, the second 1.6 times the first; null when the form does
+ * not print it, as with several pieces, where the max is a percentage). The
+ * page prints decimals in pieces ("131", ".", "846"), read as one number;
+ * the start slider's numbers stand side by side and are no range.
+ * @param {Element} form
+ */
+export function readAuctionForm(form) {
+  const start = /** @type {HTMLInputElement} */ (
+    form.querySelector('input[name="startPrice"]')
+  );
+  const max = /** @type {HTMLInputElement} */ (
+    form.querySelector('input[name="maxPrice"]')
+  );
+  const tokens = auctionTokens(form);
+  let range = null;
+  for (let i = 0; i + 2 < tokens.length && !range; i++) {
+    if (
+      !NUMBER.test(tokens[i]) ||
+      NUMBER.test(tokens[i + 1]) ||
+      !NUMBER.test(tokens[i + 2])
+    )
+      continue;
+    const lo = num(tokens[i]);
+    const hi = num(tokens[i + 2]);
+    if (lo > 0 && Math.abs(hi / lo - 1.6) <= 0.002) range = { lo, hi };
+  }
+  return { form, start, max, items: pickedItems(form), range };
+}
+
+/**
+ * Our line under the max price: a start and a max for one piece (from
+ * pricing.suggestAuction) and Use; with several pieces picked, a note.
+ * @param {{ count: number, noKey?: boolean, s: ReturnType<typeof import("./pricing.mjs").suggestAuction> | null }} input
+ */
+export function auctionHintHtml({ count, noKey = false, s }) {
+  if (count > 1)
+    return `<span class="lens-brand">◈</span> <span class="lens-muted">pick one piece for a start and max price</span>`;
+  if (!s || s.max == null)
+    return `<span class="lens-brand">◈</span> <span class="lens-muted">${s ? "no estimate for this piece yet" : "reading the sales of these stats…"}</span>`;
+  const use = `<button type="button" data-auction-use data-start="${priceText(s.start)}" data-max="${priceText(s.max)}" title="write both prices into the form; nothing is listed until you press START AUCTION">use</button>`;
+  const basis = [
+    s.sold.value != null
+      ? `sold ${gold(s.sold.value)} · ${esc(s.sold.label)}`
+      : noKey
+        ? `<span class="lens-muted">sales need your API key</span>`
+        : "",
+    s.est != null ? `estimate ${gold(s.est)}` : "",
+    s.clamped ? `<span class="lens-muted">kept in the game's range</span>` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const startTitle =
+    "what its scraps fetch at the bids: a lone bidder never takes it for less than dismantling gives";
+  return `<div><span class="lens-brand">◈</span> <span title="${startTitle}">start <b>${priceText(s.start)}</b></span> · max <b>${priceText(s.max)}</b> <small>${esc(s.why)}</small> ${use}</div>${basis ? `<small>${basis}</small>` : ""}`;
+}
+
+/**
+ * Show `html` under the form's max price (one element, reused), and wire Use to write both prices into the
+ * game's inputs the way typing would.
+ * @param {ReturnType<typeof readAuctionForm>} read @param {string} html
+ */
+export function renderAuctionHint(read, html) {
+  const after = read.max?.closest("label") ?? read.max?.parentElement;
+  if (!after) return;
+  let el = /** @type {HTMLElement | null} */ (
+    read.form.querySelector(".ss-auction")
+  );
+  if (!el) {
+    el = document.createElement("div");
+    el.className = "ss-sell ss-auction";
+    el.dataset.lens = "";
+    el.addEventListener("click", (e) => {
+      const b = /** @type {HTMLElement | null} */ (
+        /** @type {Element} */ (e.target).closest("[data-auction-use]")
+      );
+      if (!b) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const form = /** @type {Element} */ (el?.closest('[role="dialog"]'));
+      const start = /** @type {HTMLInputElement | null} */ (
+        form?.querySelector('input[name="startPrice"]')
+      );
+      const max = /** @type {HTMLInputElement | null} */ (
+        form?.querySelector('input[name="maxPrice"]')
+      );
+      if (start) typeInto(start, b.dataset.start ?? "");
+      if (max) typeInto(max, b.dataset.max ?? "");
+    });
+  }
+  if (after.nextElementSibling !== el)
+    after.insertAdjacentElement("afterend", el);
+  setHtml(el, html);
 }
 
 /**

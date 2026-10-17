@@ -42,9 +42,11 @@ export function scrapTable({ bid, ask, state = 100 }) {
 }
 
 const side = (orders, best) => {
-  const rows = Array.isArray(orders)
-    ? orders.filter((o) => Number.isFinite(Number(o?.price)))
-    : [];
+  const all = Array.isArray(orders) ? orders : [];
+  // an order at a price or quantity of 0 or less trades nothing (dev 2026-10-17 bought bread at 0, 999,999 of it)
+  const rows = all.filter(
+    (o) => Number(o?.price) > 0 && Number(o?.quantity) > 0,
+  );
   if (!rows.length)
     return {
       price: null,
@@ -70,7 +72,8 @@ const side = (orders, best) => {
     at,
     orders: rows.length,
     depthQty: rows.reduce((s, o) => s + (Number(o.quantity) || 0), 0),
-    capped: rows.length >= 100,
+    // the API's cap counts the rows it sent, those that trade nothing too
+    capped: all.length >= 100,
   };
 };
 

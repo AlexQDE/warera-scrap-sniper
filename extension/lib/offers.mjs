@@ -77,6 +77,43 @@ export function readStats(lines) {
 }
 
 /**
+ * The numbers a v0.27 auction card prints before the item's name, from its
+ * tokens (dom.auctionTokens): a weapon `151`, `33%`, `100%` (attack, crit,
+ * durability), an armour piece `23%`, `100%`. The last percentage of that
+ * leading run is the durability and every number before it a stat; nothing
+ * after the run is read (the card's amounts follow). Same shape as readStats.
+ * @param {ReadonlyArray<string> | null | undefined} tokens
+ * @returns {{ readable: boolean, durability: number | null, stat: number | null, stats: number[], reason: string | null }}
+ */
+export function readStatBlock(tokens) {
+  /** @type {Array<{ value: number, pct: boolean }>} */
+  const run = [];
+  for (const t of tokens ?? []) {
+    const m = /^(\d{1,6})(%?)$/.exec(String(t ?? "").trim());
+    if (!m) break;
+    run.push({ value: Number(m[1]), pct: m[2] === "%" });
+  }
+  let at = -1;
+  for (let i = run.length - 1; i >= 0; i--)
+    if (run[i].pct && run[i].value <= 100) {
+      at = i;
+      break;
+    }
+  const durability = at >= 0 ? run[at].value : null;
+  const stats = (at >= 0 ? run.slice(0, at) : run).map((n) => n.value);
+  const stat = stats.length ? stats[0] : null;
+  const reason =
+    durability == null && stat == null
+      ? "no durability or stat"
+      : durability == null
+        ? "no durability"
+        : stat == null
+          ? "no stat value"
+          : null;
+  return { readable: reason == null, durability, stat, stats, reason };
+}
+
+/**
  * @typedef {{ stats?: { readable: boolean } | null, price?: number | null, rarity?: string | null, code?: string | null }} OfferLike
  */
 

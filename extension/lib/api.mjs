@@ -154,10 +154,25 @@ async function request(fetchImpl, key, url, signal, batch = false) {
       : new ApiError("this needs your API key", "needs-key", {
           status: res.status,
         });
-  if (!res.ok)
-    throw new ApiError(`the API answered ${res.status}`, "http", {
-      status: res.status,
-    });
+  if (!res.ok) {
+    // tRPC names the reason in the body; "No procedure found on path …" means the game removed the procedure
+    let reason = "";
+    try {
+      const body = await res.json();
+      reason = String(body?.error?.message ?? body?.error?.json?.message ?? "");
+    } catch {
+      /* no JSON body: the status says it all */
+    }
+    const gone = res.status === 404 && /no procedure found/i.test(reason);
+    const proc = /\/trpc\/([^?]+)/.exec(String(url))?.[1] ?? "this";
+    throw new ApiError(
+      gone
+        ? `the game no longer serves ${decodeURIComponent(proc)} (a WarEra update?); asked again in an hour`
+        : `the API answered ${res.status}${reason ? `: ${reason.slice(0, 160)}` : ""}`,
+      "http",
+      { status: res.status, gone },
+    );
+  }
   // a keyless call expects the keyless bucket: only a key's answer is verified
   if (key && limit != null && limit <= KEYLESS_LIMIT)
     throw new ApiError(
@@ -394,7 +409,16 @@ export async function fetchInputAverages(
   const k = cleanKey(key);
   const averages = {};
   for (const code of codes) {
-    const { data } = await call(fetchImpl, k, tradingUrl(code), { timeoutMs });
+    let data;
+    try {
+      ({ data } = await call(fetchImpl, k, tradingUrl(code), { timeoutMs }));
+    } catch (e) {
+      // a code the game keeps no price history for answers 404 ("Itemtradings not found.", the non-tradable
+      // toolbox on dev 2026-10-17): left out, the other codes are still read
+      if (e instanceof ApiError && e.code === "http" && e.status === 404)
+        continue;
+      throw e;
+    }
     if (!Array.isArray(data?.values))
       throw new ApiError("Unexpected item trading schema", "schema");
     const table = {};
@@ -513,10 +537,16 @@ async function callBatch(
   return { data, errors, limit, remaining };
 }
 
+/** An order that trades something: a price and a quantity above 0 (dev 2026-10-17 bought bread at 0, 999,999 of it). */
+const trades = (o) => Number(o?.price) > 0 && Number(o?.quantity) > 0;
+/** A number the API sent as a number or a numeric string; null for anything else (null, "", "abc"). */
+const numeric = (v) =>
+  (typeof v === "number" || (typeof v === "string" && v.trim() !== "")) &&
+  Number.isFinite(Number(v))
+    ? Number(v)
+    : null;
 const bestOf = (orders, better) => {
-  const rows = (Array.isArray(orders) ? orders : []).filter((o) =>
-    Number.isFinite(Number(o?.price)),
-  );
+  const rows = (Array.isArray(orders) ? orders : []).filter(trades);
   if (!rows.length) return { price: null, qty: 0 };
   const best = rows.reduce(
     (p, o) => (better(Number(o.price), Number(p.price)) ? o : p),
@@ -535,14 +565,13 @@ export function parseBook(d, cap = BOOK_DEPTH) {
   const levels = (rows, direction) => {
     const aggregated = new Map();
     for (const row of rows) {
-      const price = positive(row?.price);
-      const quantity = Number(row?.quantity);
-      if (
-        price == null ||
-        positive(row?.quantity) == null ||
-        !Number.isSafeInteger(quantity) ||
-        quantity <= 0
-      )
+      const price = numeric(row?.price);
+      const quantity = numeric(row?.quantity);
+      // a price or quantity that is no number is a changed API; one at 0 or less trades nothing and is left out
+      if (price == null || quantity == null)
+        throw new ApiError("Invalid order price or quantity", "schema");
+      if (!trades(row)) continue;
+      if (!Number.isSafeInteger(quantity))
         throw new ApiError("Invalid order price or quantity", "schema");
       aggregated.set(price, (aggregated.get(price) ?? 0) + quantity);
     }

@@ -1,6 +1,6 @@
 {
   "name": "warera-plus",
-  "version": "3.6.0",
+  "version": "3.7.0",
   "description": "WarEra Plus: an unofficial, read-only companion for the WarEra browser game (SNIPE and FLIP tags on equipment offers, craft and case values at live prices, a ledger of the player's own crafting, case and trading history).",
   "type": "module",
   "private": true,
@@ -12,7 +12,8 @@
     "format": "prettier --write extension scripts README.md CHANGELOG.md docs package.json tsconfig.json eslint.config.mjs vitest.config.js .github/workflows/ci.yml",
     "format:check": "prettier --check extension scripts README.md CHANGELOG.md docs package.json tsconfig.json eslint.config.mjs vitest.config.js .github/workflows/ci.yml",
     "check": "npm run lint && npm run typecheck && npm run validate && npm test && npm run format:check",
-    "package": "node scripts/package.mjs"
+    "package": "node scripts/package.mjs",
+    "build:dev": "node scripts/build-dev.mjs"
   },
   "engines": {
     "node": ">=24"

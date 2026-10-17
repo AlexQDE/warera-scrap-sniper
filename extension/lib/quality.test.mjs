@@ -50,10 +50,42 @@ describe("quote quality and safe decisions", () => {
     ]);
     expect(b.bidCapped).toBe(true);
     expect(b.ask).toBeNull();
-    for (const price of [0, -1, NaN, null, ""])
+    // an order that trades nothing (a price or quantity of 0 or less: dev's bread bought at 0, 999,999 of it)
+    // is left out, and the rest of the book stays
+    expect(
+      parseBook({
+        buyOrders: [
+          { price: 0, quantity: 999999 },
+          { price: 1.2, quantity: 5 },
+          { price: -1, quantity: 3 },
+        ],
+        sellOrders: [
+          { price: 1.5, quantity: 0 },
+          { price: 1.6, quantity: 2 },
+        ],
+      }),
+    ).toMatchObject({
+      bid: 1.2,
+      bidQty: 5,
+      ask: 1.6,
+      askQty: 2,
+      bids: [{ price: 1.2, quantity: 5 }],
+      asks: [{ price: 1.6, quantity: 2 }],
+    });
+    expect(
+      parseBook({
+        buyOrders: [{ price: 0, quantity: 999999 }],
+        sellOrders: [],
+      }),
+    ).toMatchObject({ bid: null, bids: [] });
+    // what is not a number is a changed API: the book fails
+    for (const price of [NaN, null, "", "abc"])
       expect(() =>
         parseBook({ buyOrders: [{ price, quantity: 3 }], sellOrders: [] }),
       ).toThrow();
+    expect(() =>
+      parseBook({ buyOrders: [{ price: 1, quantity: 1.5 }], sellOrders: [] }),
+    ).toThrow();
     expect(() => parseBook({ buyOrders: [] })).toThrow();
   });
   it("makes missing, future and expired quotes non-actionable", () => {

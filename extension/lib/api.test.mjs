@@ -6,6 +6,7 @@ import {
   fetchBook,
   fetchSales,
   fetchHistoryPage,
+  fetchInputAverages,
   salesUrl,
   holdUntil,
 } from "./api.mjs";
@@ -133,12 +134,70 @@ describe("fetchBook", () => {
     expect(err.message).toContain("boom");
   });
 
+  it("marks a procedure the game removed as gone, with the reason it gives", async () => {
+    const { fetchImpl } = fake({
+      status: 404,
+      body: {
+        error: {
+          message: 'No procedure found on path "tradingOrder.getTopOrders"',
+          code: -32004,
+        },
+      },
+    });
+    const err = await fetchBook(fetchImpl, "k").catch((e) => e);
+    expect(err).toMatchObject({ code: "http", status: 404, gone: true });
+    expect(err.message).toContain(
+      "the game no longer serves tradingOrder.getTopOrders",
+    );
+    const other = fake({
+      status: 404,
+      body: { error: { message: "Itemtradings not found." } },
+    });
+    await expect(fetchBook(other.fetchImpl, "k")).rejects.toMatchObject({
+      code: "http",
+      status: 404,
+      gone: false,
+    });
+  });
+
   it("surfaces other HTTP failures with their status", async () => {
     const { fetchImpl } = fake({ status: 503, body: {} });
     await expect(fetchBook(fetchImpl, "k")).rejects.toMatchObject({
       code: "http",
       status: 503,
     });
+  });
+});
+
+describe("fetchInputAverages", () => {
+  // dev 2026-10-17: itemTrading.getItemTrading answers 404 "Itemtradings not found." for a code it keeps no
+  // history for (the non-tradable toolbox a wooden case drops since v0.27)
+  it("skips a code the game keeps no price history for, and reads the rest", async () => {
+    const fetchImpl = async (url) => {
+      const code = JSON.parse(new URL(url).searchParams.get("input")).itemCode;
+      if (code === "toolbox")
+        return {
+          ok: false,
+          status: 404,
+          headers: new Headers({ "ratelimit-limit": "500" }),
+          json: async () => ({ error: { message: "Itemtradings not found." } }),
+        };
+      return {
+        ok: true,
+        status: 200,
+        headers: new Headers({ "ratelimit-limit": "500" }),
+        json: async () => ({
+          result: {
+            data: { values: [{ valueAt: "2026-10-17", avgValue: 0.25 }] },
+          },
+        }),
+      };
+    };
+    const { averages } = await fetchInputAverages(fetchImpl, "k", [
+      "scraps",
+      "toolbox",
+    ]);
+    expect(averages).toEqual({ scraps: { "2026-10-17": 0.25 } });
   });
 });
 
@@ -442,6 +501,25 @@ describe("fetchBooks", () => {
     });
     expect(r.source).toBe("getTopOrdersPerItemCode");
     expect(r.limit).toBe(500);
+  });
+
+  it("reads every book when one holds an order that trades nothing (dev 2026-10-17: bread bought at 0, 999,999 of it)", async () => {
+    const bread = top("bread", 0.31, 0.33);
+    bread.buyOrders.push({ ...bread.buyOrders[0], price: 0, quantity: 999999 });
+    const { fetchImpl } = fake({
+      body: {
+        result: {
+          data: { woodenCase: top("woodenCase", 7.5, 7.647), bread },
+        },
+      },
+    });
+    const r = await fetchBooks(fetchImpl, "", ["woodenCase", "bread"]);
+    expect(r.books.woodenCase).toMatchObject({ bid: 7.5, ask: 7.647 });
+    expect(r.books.bread).toMatchObject({
+      bid: 0.31,
+      bidQty: 40,
+      bids: [{ price: 0.31, quantity: 40 }],
+    });
   });
 
   it("falls back to the documented getTopOrders, batched, when the multi-code procedure is gone", async () => {

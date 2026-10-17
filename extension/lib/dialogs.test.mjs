@@ -247,6 +247,31 @@ describe("reading the game's dialogs", () => {
       '<div role="dialog"><div>Something else</div><button>OK</button></div>';
     expect(findDialog()).toBeNull();
   });
+  // v0.27 (dev 2026-10-17): a toolbox opens into a tool for an employee; its window has OPEN buttons and odds
+  // too, and must never be priced as a case
+  const withImage = (alt, lines = CASE_LINES.slice(0, 10)) => {
+    document.body.innerHTML = `<main></main><div role="dialog"><img alt="${alt}"><div>${div(lines)}</div><div class="row"><button>OPEN 10</button><button>OPEN</button></div></div>`;
+  };
+  it("never prices a toolbox as a case, whatever its odds say", () => {
+    withImage("toolbox");
+    expect(findDialog()).toBeNull();
+    withImage("woodenCase");
+    expect(findDialog()).toBeNull();
+    caseDialog();
+    document
+      .querySelector('[role="dialog"] > div')
+      .insertAdjacentHTML(
+        "afterbegin",
+        "<div>Open it to get a random tool for one of your employees</div>",
+      );
+    expect(findDialog()).toBeNull();
+  });
+  it("takes the case from its image before its odds", () => {
+    withImage("case2");
+    expect(findDialog()).toMatchObject({ kind: "case", code: "case2" });
+    withImage("case1", ["OPEN CASE", "8780 Total cases opened"]);
+    expect(findDialog()).toMatchObject({ kind: "case", code: "case1" });
+  });
 });
 
 describe("annotating them", () => {

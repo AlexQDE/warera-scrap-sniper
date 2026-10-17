@@ -26,6 +26,7 @@
 //          the same slot too long for a random craft, else random
 import { craftRecipe, SCRAP_LADDER } from "./ladder.mjs";
 import { describeCode } from "./craftdata.mjs";
+import { isToolCode, CASE_DROP_CODES } from "./items.mjs";
 
 /** @typedef {{ x: string, y: string, a: string, c?: string, q?: number, m?: number, d?: number, i?: string, ic?: string, k?: Record<string, number>, la?: string, l?: string, p?: "c" | "r" }} Row */
 /** How close a piece's "acquired at" must be to an acquisition's time to be that piece. */
@@ -320,6 +321,12 @@ export function replayHistory(
   const wooden = [];
   /** @type {Record<string, { qty: number, spent: number, sold: number, earned: number }>} */
   const trades = {};
+  /**
+   * Tools (v0.27): what a toolbox gives an employee. Not tradable and without a market price, they stay out of
+   * the pieces (and so out of every result and the picker); a dismantle of one closes it here.
+   * @type {Array<{ id: string, code: string, skills: Record<string, number> | null, at: string | null, via: string | null, fate: "held" | "scrapped", proceeds: number | null, goneAt: string | null }>}
+   */
+  const tools = [];
   /** @param {string} code */
   const describe = (code) => {
     const item = describeCode(code);
@@ -437,11 +444,23 @@ export function replayHistory(
         piece.streak = mode.streak;
       }
     } else if (r.y === "openCase") {
-      if (r.i) {
+      if (r.i && r.ic && (r.c === "toolbox" || isToolCode(r.ic)))
+        tools.push({
+          id: r.i,
+          code: r.ic,
+          skills: r.k ?? null,
+          at: r.a,
+          via: r.c ?? null,
+          fate: "held",
+          proceeds: null,
+          goneAt: null,
+        });
+      else if (r.i) {
         const p = price(r.c ?? "", day);
         acquire(r, "opened", p.value, p.approx, r.c ?? null);
       } else if (r.c) {
-        // a wooden case gives resources, no piece: valued at that resource's price, cost the wooden case's
+        // a wooden case gives resources, no piece: valued at that resource's price, cost the wooden case's;
+        // since v0.27 sometimes cases instead (case1, case2 at their price; a toolbox has none)
         const v = price(r.c, day);
         const c = price("woodenCase", day);
         wooden.push({
@@ -451,10 +470,34 @@ export function replayHistory(
           value: v.value == null ? null : (r.q ?? 0) * v.value,
           cost: c.value,
           approx: v.approx || c.approx,
+          ...(CASE_DROP_CODES.includes(r.c) ? { drop: "case" } : {}),
         });
       }
-    } else if (r.y === "battleLoot") acquire(r, "looted", 0, false, null);
-    else if (r.y === "itemMarket") {
+    } else if (r.y === "battleLoot") {
+      if (!isToolCode(r.ic)) acquire(r, "looted", 0, false, null);
+    } else if (r.y === "dismantleItem" && isToolCode(r.ic)) {
+      const s = price("scraps", day);
+      const proceeds =
+        s.value == null ? null : Math.round((r.q ?? 0) * s.value * 1e6) / 1e6;
+      const tool = tools
+        .filter((t) => t.id === r.i && t.fate === "held")
+        .at(-1);
+      if (tool) {
+        tool.fate = "scrapped";
+        tool.proceeds = proceeds;
+        tool.goneAt = r.a;
+      } else if (r.i && r.ic)
+        tools.push({
+          id: r.i,
+          code: r.ic,
+          skills: r.k ?? null,
+          at: null,
+          via: null,
+          fate: "scrapped",
+          proceeds,
+          goneAt: r.a,
+        });
+    } else if (r.y === "itemMarket") {
       if (r.d === 1) acquire(r, "bought", r.m ?? null, false, null);
       else if (r.d === -1) fate(r, "sold", r.m ?? null);
     } else if (r.y === "dismantleItem") {
@@ -480,7 +523,7 @@ export function replayHistory(
       }
     }
   }
-  return { pieces, wooden, trades };
+  return { pieces, wooden, trades, tools };
 }
 
 /** @param {ReadonlyArray<number | null | undefined>} xs */
@@ -553,7 +596,14 @@ export function windowView(
   );
   const gone = countWorn ? goneAll : goneAll.filter((p) => !p.worn);
   const goneKnown = gone.filter((p) => p.cost != null && p.proceeds != null);
-  const wooden = history.wooden.filter((w) => inWindow(w.at));
+  // a wooden case is counted where what it gave has a price; one that dropped toolboxes (no market price) or
+  // a drop without that day's price yet apart
+  const woodenAll = history.wooden.filter((w) => inWindow(w.at));
+  const wooden = woodenAll.filter((w) => w.value != null);
+  const tools = history.tools ?? [];
+  const toolsGone = tools.filter(
+    (t) => t.fate === "scrapped" && inWindow(t.goneAt),
+  );
   /** @type {Record<string, ReturnType<typeof outcome>>} */
   const cases = {};
   for (const code of new Set(
@@ -581,6 +631,15 @@ export function windowView(
       n: wooden.length,
       value: sum(wooden.map((w) => w.value)),
       cost: sum(wooden.map((w) => w.cost)),
+    },
+    woodenUnpriced: woodenAll.length - wooden.length,
+    woodenToolboxes: woodenAll.filter(
+      (w) => w.value == null && w.code === "toolbox",
+    ).length,
+    tools: {
+      n: tools.filter((t) => inWindow(t.at)).length,
+      scrapped: toolsGone.length,
+      proceeds: sum(toolsGone.map((t) => t.proceeds)),
     },
     money: {
       n: gone.length,

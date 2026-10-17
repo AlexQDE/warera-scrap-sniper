@@ -2,6 +2,19 @@
 
 Go through the newest release's section and the manual gate on the live game, with your own account, before publishing. Then [CHROME-WEB-STORE.md](CHROME-WEB-STORE.md).
 
+## 3.7.0 on the dev page (v0.27) and the live page (v0.26)
+
+3.7.0 was checked on the test suite, with the auction cards and the Start an auction form built from what the dev page showed on 2026-10-17 (`fixtures/v027-auctions.json`). It has not run on the dev page. `npm run build:dev`, load `dist/dev` unpacked (it only runs on dev.warera.io and asks apidev.warera.io; give it your dev API key), reload the game.
+
+- **Live first (v0.26).** The equipment market looks and tags exactly as 3.6.0: SNIPE / FLIP / sells on every row, the bar, the sell form's price, the picker. Nothing reads "offers not read".
+- **The auction page.** `/market/auctions` (and `/market/equipments`, which leads there) has the bar. Every card carries a line; open Details on one: buy now and the max before tax match the card, the tax is your country's ("the page's notice"), the next bid before tax is the BID amount ÷ (1 + tax). A card with bids reads its current bid as the start.
+- **Tags.** With scrap bids high enough a card's buy now is under its scraps: SNIPE and "buy now". A card whose BID amount is under its scraps but buy now is not: BID and "bid ≤ x", in its last 10 minutes only (sort by Ending soon; with more time left the card has no BID and Details keep "bid at most x"); the x, typed into the game's bid dialog plus your tax, stays under the scraps by the SNIPE margin. Change your country's tax (or test with a 0% country): the lines follow; a card whose numbers do not fit the notice reads "tax check failed" and has no tag.
+- **Skins.** A skinned piece (vampireCountessGloves) is priced as the tier its stat falls in (precision 60: mythic, scrap 292 at 0.2).
+- **Start an auction.** Pick one piece: the line under the max price says start and max; **use** fills both inputs and the game shows no error; nothing is listed until START AUCTION. Pick a second piece: "pick one piece". Close the form: the line goes with it.
+- **The Ledger.** Open a toolbox (and, when one drops, a wooden case with toolboxes): the Ledger shows a Toolbox chip, the wooden chip counts the unpriced drop apart, the history keeps reading (no "History read failed").
+- **The case window.** Open a toolbox: no case panel. A normal case still shows its panel.
+- **Grid.** Open "+" (Select an item), pick an item, close it: rows keep their rarity.
+
 ## 3.6.0 on the live page
 
 3.6.0 was checked on the test suite (unit, worker and jsdom page tests) and in headless Chromium on the synthetic market (`node scripts/jitter.mjs`, `node scripts/store-assets.mjs`). Not seen on the live game. Reload the extension itself first, then the game.

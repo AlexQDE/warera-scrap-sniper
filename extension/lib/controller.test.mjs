@@ -241,6 +241,29 @@ describe("background controller", () => {
     await controller.handle({ type: "book" });
     expect(f).toHaveBeenCalledTimes(3);
   });
+  it("parks a read whose procedure the game removed for an hour, instead of every minute", async () => {
+    const gone = vi.fn(async () => ({
+      ok: false,
+      status: 404,
+      headers: new Headers({ "ratelimit-limit": "500" }),
+      json: async () => ({
+        error: {
+          message: 'No procedure found on path "tradingOrder.getTopOrders"',
+        },
+      }),
+    }));
+    const { controller, advance } = setup(gone);
+    const first = await controller.handle({ type: "book" });
+    expect(first.error).toBe("http");
+    expect(first.message).toContain("no longer serves");
+    advance(59 * 60_000);
+    const again = await controller.handle({ type: "book", force: true });
+    expect(again.message).toContain("retry in");
+    expect(gone).toHaveBeenCalledTimes(1);
+    advance(2 * 60_000);
+    await controller.handle({ type: "book", force: true });
+    expect(gone).toHaveBeenCalledTimes(2);
+  });
   it("retains failed average items and their timestamps without declaring a successful refresh", async () => {
     const at = new Date(NOW - 700000).toISOString();
     const f = vi.fn(async (url) => {
@@ -458,6 +481,52 @@ describe("background controller", () => {
     await controller.cleanup();
     expect(storage.data[`hist:${ME}:meta`].count).toBe(1050);
     expect(storage.data["feed:old"]).toBeUndefined();
+  });
+  it("keeps the cases a wooden case dropped out of the resource prices it reads (a toolbox has none: 404)", async () => {
+    const at = (m) => new Date(NOW - m * 60e3).toISOString();
+    const ref = {
+      rows: [
+        {
+          _id: oid(1),
+          itemCode: "toolbox",
+          quantity: 8,
+          transactionType: "openCase",
+          createdAt: at(1),
+        },
+        {
+          _id: oid(2),
+          itemCode: "iron",
+          quantity: 40,
+          transactionType: "openCase",
+          createdAt: at(2),
+        },
+      ],
+    };
+    const { f } = historyApi(ref);
+    const asked = [];
+    const fetchImpl = vi.fn(async (url) => {
+      const u = new URL(url);
+      if (u.pathname.endsWith("itemTrading.getItemTrading")) {
+        const code = JSON.parse(u.searchParams.get("input")).itemCode;
+        asked.push(code);
+        if (code === "toolbox")
+          return {
+            ok: false,
+            status: 404,
+            headers: new Headers({ "ratelimit-limit": "500" }),
+            json: async () => ({
+              error: { message: "Itemtradings not found.", code: -32004 },
+            }),
+          };
+      }
+      return f(url);
+    });
+    const { controller, storage } = setup(fetchImpl);
+    const r = await controller.handle({ type: "history", userId: ME });
+    expect(r.error).toBeUndefined();
+    expect(asked).toContain("iron");
+    expect(asked).not.toContain("toolbox");
+    expect(storage.data[`hist:${ME}:meta`].resources).toEqual(["iron"]);
   });
   it("polls from the top and stops at the first row it holds, every minute, every 15 seconds while a dialog is open", async () => {
     const ref = {

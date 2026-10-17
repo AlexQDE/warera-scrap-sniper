@@ -84,6 +84,32 @@ describe("summarizeBook", () => {
     expect(s.askAt).toBe("2026-09-03T15:16:46.768Z");
   });
 
+  it("leaves out an order that trades nothing (a price or quantity of 0 or less)", () => {
+    const s = summarizeBook({
+      buyOrders: [
+        order("buy", 0, 999999, "2026-10-17T00:00:00.000Z"),
+        order("buy", 0.2, 5, "2026-10-17T01:00:00.000Z"),
+      ],
+      sellOrders: [
+        order("sell", 0, 3, "2026-10-17T00:00:00.000Z"),
+        order("sell", 0.25, 0, "2026-10-17T00:30:00.000Z"),
+        order("sell", 0.25, 1, "2026-10-17T02:00:00.000Z"),
+      ],
+    });
+    expect(s).toMatchObject({
+      bid: 0.2,
+      bidQty: 5,
+      bidAt: "2026-10-17T01:00:00.000Z",
+      bidOrders: 1,
+      bidDepthQty: 5,
+      ask: 0.25,
+      askQty: 1,
+      askAt: "2026-10-17T02:00:00.000Z",
+      askOrders: 1,
+    });
+    near(s.spread, 0.05);
+  });
+
   it("counts orders and total depth per side and flags a side at the 100-row cap", () => {
     const s = summarizeBook(book);
     expect(s.bidOrders).toBe(3);
